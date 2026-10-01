@@ -116,6 +116,16 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.put("/api/settings/assistant", json={"name": "1"}).status_code, 400)
         self.assertEqual(self.client.put("/api/settings/assistant", json={"name": "Bông", "aliases": ["x" * 40]}).status_code, 400)
 
+    def test_split_after_endpoint(self):
+        mid = self.create()
+        self.add_segments(mid, [(0, "1", 3.0), (0, "1", 3.0), (0, "1", 3.0), (0, "1", 2.5)])
+        self.assertEqual(self.client.post(f"/api/meetings/{mid}/segments/1/split-after").status_code, 400)
+        r = self.client.post(f"/api/meetings/{mid}/segments/3/split-after")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual((r.json()["moved"], r.json()["speaker"]["label"]), (2, "Người nói 2"))
+        self.assertEqual([s["speaker_key"] for s in db.get_segments(mid)], [1, 1, 2, 2])
+        self.assertEqual(self.client.post(f"/api/meetings/{mid}/segments/99/split-after").status_code, 404)
+
     def test_reanalyze_endpoint(self):
         mid = self.create()
         self.add_segments(mid, [(0, "1", 3.0), (1, "2", 3.0)])

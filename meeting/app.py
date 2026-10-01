@@ -23,11 +23,11 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 import numpy as np  # noqa: E402
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
-from fastapi.responses import FileResponse  # noqa: E402
+from fastapi.responses import FileResponse, Response  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
-from meeting import artifacts, db, live, llm, mcp, voice  # noqa: E402
+from meeting import artifacts, db, live, llm, mcp, tts, voice  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("meeting.app")
@@ -42,6 +42,8 @@ async def lifespan(_app: FastAPI):
     await asyncio.to_thread(db.init)
     await asyncio.to_thread(mcp.seed_mock_data)
     voice.ensure_model_async()
+    if tts.model_present():
+        asyncio.get_running_loop().run_in_executor(None, tts.preload)   # nạp giọng đọc ở nền
     log.info("meeting.app: Server khởi động hoàn tất")
     yield
     for s in list(live.SESSIONS.values()):
@@ -54,7 +56,7 @@ async def lifespan(_app: FastAPI):
             log.warning("meeting.app: đóng session %s lỗi: %s", s.id, e)
 
 
-app = FastAPI(title="Meeting Assistant AI", version="3.0.0", lifespan=lifespan)
+app = FastAPI(title="Meeting Assistant AI", version="3.2.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.mount("/static", StaticFiles(directory=str(HERE.parent / "static")), name="static")
 
@@ -448,6 +450,29 @@ async def save_speaker_voice(mid: int, sid: int):
     return res
 
 
+class TtsReq(BaseModel):
+    text: str = Field(..., min_length=1, max_length=2000)
+    speed: Optional[float] = Field(None, ge=0.6, le=1.6)
+
+
+@app.get("/api/tts/status")
+async def tts_status():
+    """Giọng đọc tiếng Việt chạy trên máy (Piper) đã sẵn sàng chưa."""
+    return tts.status()
+
+
+@app.post("/api/tts")
+async def tts_speak(req: TtsReq):
+    """Đọc văn bản thành WAV ngay trên máy chủ (không gửi nội dung ra dịch vụ ngoài)."""
+    try:
+        wav = await asyncio.to_thread(tts.synthesize, req.text, req.speed)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    return Response(content=wav, media_type="audio/wav", headers={"Cache-Control": "no-store"})
+
+
 @app.post("/api/meetings/{mid}/stage")
 async def control_stage(mid: int, req: StageReq):
     """Điều khiển màn hình trình bày: show / next / prev / goto / topic / back."""
@@ -493,6 +518,20 @@ async def reassign_meeting_segment(mid: int, seq: int, req: ReassignReq):
         res = await s.reassign_segment(seq, req.target_sid)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    await _finish_op(s)
+    return res
+
+
+@app.post("/api/meetings/{mid}/segments/{seq}/split-after")
+async def split_speaker_after(mid: int, seq: int):
+    """Từ câu này trở đi là người khác: tách thành người nói mới (sửa lỗi hai giọng giống nhau bị gộp)."""
+    s = await _session_or_404(mid)
+    try:
+        res = await s.split_speaker_from(seq)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     await _finish_op(s)
     return res
 
@@ -602,9 +641,15 @@ async def ask_assistant(mid: int, payload: Dict[str, Any]):
         if ls is not None:
             await ls.emit({"type": "ai_insights", "items": items, "source": "request"})
 
+    async def _on_progress(text: str, kind: str = "progress"):
+        if ls is not None:
+            await ls.emit({"type": "ai_progress", "text": text, "kind": kind})
+
     try:
         res = await llm.think_and_act(meeting_id=mid, prompt=prompt, segments=segs, trigger="chat_message",
-                                      on_thinking=_on_thinking, on_tool=_on_tool, on_insights=_on_insights)
+                                      on_thinking=_on_thinking, on_tool=_on_tool, on_insights=_on_insights,
+                                      on_progress=_on_progress, meeting=ls.meeting if ls is not None else None,
+                                      stage_art=ls._stage_summary() if ls is not None else None)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Trợ lý AI lỗi: {e}")
     if ls is not None:

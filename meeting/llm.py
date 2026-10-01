@@ -6,14 +6,15 @@ Xử lý khi trợ lý được gọi tên (Wake-Word / Mention):
    - Phân tích yêu cầu và ngữ cảnh cuộc họp.
    - Gọi Mock MCP Server để tra cứu dữ liệu (Nhân sự, Jira tickets, System specs).
    - Truyền stream thinking log xuống client để người dùng theo dõi quá trình suy nghĩ.
-3. Sinh Artifacts đa phương thức (Báo cáo, Diagram Mermaid, Web Sandbox tương tác).
-4. Phản hồi trò chuyện bằng lời/văn bản.
+3. Sinh sản phẩm trực quan: dashboard số liệu, báo cáo nhanh, slide, sơ đồ Mermaid, trang web, biên bản.
+4. Phản hồi bằng lời có nội dung thật; trong lúc chờ báo tiến độ ("em tìm thấy...").
 """
 import asyncio
 import json
 import logging
 import os
 import re
+import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from meeting import artifacts, db, mcp
@@ -227,200 +228,404 @@ def _extract_json(text: str) -> Dict[str, Any]:
 
 
 # ==============================================================================
-# THINKING & TOOL EXECUTION PROMPT
+# TRỢ LÝ TRONG CUỘC HỌP: TRA CỨU DỮ LIỆU -> TRẢ LỜI CỤ THỂ -> TẠO SẢN PHẨM TRỰC QUAN
 # ==============================================================================
-ORCHESTRATOR_SYSTEM = """Bạn là {{NAME}} - Trợ lý Cuộc họp AI Đa phương thức (Meeting Copilot) của UrBox.
-Người trong cuộc họp gọi bạn bằng tên "{{NAME}}".
-Bạn có khả năng suy nghĩ đa bước (Thinking), kết nối Mock Database MCP để tra cứu thông tin
-nội bộ doanh nghiệp (nhân viên, tickets Jira, kiến trúc hệ thống), và sinh ra các sản phẩm
-cụ thể: Biên bản họp (minutes), Sơ đồ (diagram), hoặc Thiết kế Web tương tác (web_design).
+AGENT_TOOLS = {
+    "query_jira_issues": "query_jira_issues(issue_key?, assignee?, status?): ticket Jira, tiến độ, người phụ trách, hạn chót",
+    "query_employee_directory": "query_employee_directory(query, department?): nhân sự, kỹ năng, phòng ban, email",
+    "query_system_architecture": "query_system_architecture(system_name): hệ thống, API, cơ sở dữ liệu",
+    "query_meeting_history": "query_meeting_history(keyword): quyết định ở các cuộc họp trước",
+}
+ARTIFACT_KINDS = ("dashboard", "report", "slides", "web_design", "diagram", "minutes")
+KIND_NAMES = {"dashboard": "dashboard", "report": "báo cáo nhanh", "slides": "bộ slide", "web_design": "trang web",
+              "diagram": "sơ đồ", "minutes": "biên bản"}
+MAX_TOOL_ROUNDS = 2
 
-Các công cụ MCP sẵn có:
-1. `query_employee_directory`: Tra cứu thông tin nhân sự (kỹ năng, phòng ban, email).
-2. `query_jira_issues`: Tra cứu tickets, backlog, tiến độ, blocker.
-3. `query_system_architecture`: Tra cứu specs, DB schemas, API endpoints.
-4. `query_meeting_history`: Tra cứu quyết định cuộc họp cũ.
-5. `update_jira_issue_status`: Cập nhật trạng thái ticket khi có quyết định.
+AGENT_SYSTEM = """Bạn là {{NAME}}, trợ lý AI ngồi cùng cuộc họp của UrBox (mọi người gọi bạn là "{{NAME}}").
+Bạn xưng "em", gọi người hỏi là "anh" hoặc "chị" (không rõ thì "anh chị").
+Mục tiêu: giúp cuộc họp hiệu quả hơn - trả lời nhanh, báo cáo đúng số liệu, dựng ngay sản phẩm trực quan để mọi người cùng xem.
 
-Khi nhận câu lệnh, bạn hãy thực hiện theo chu trình:
-1. <thinking>: Phân tích câu lệnh, xác định xem có cần tra cứu dữ liệu MCP nào không.
-2. Nếu cần tra cứu dữ liệu, hãy gọi tool dưới dạng:
-   TOOL_CALL: {"tool": "tên_tool", "arguments": {...}}
-3. Sau khi có dữ liệu hoặc nếu không cần tool:
-   - Quyết định output: 'slides' (bộ slide trình bày) | 'web_design' | 'diagram' | 'minutes' | chỉ trả lời.
-   - Trả về JSON chuẩn cấu trúc:
-     {
-       "thought": "Tóm tắt suy nghĩ logic",
-       "insights": [{"kind": "risk|todo|improve|good", "text": "Nhận xét cụ thể 1 câu"}],
-       "artifact_needed": "slides" | "web_design" | "diagram" | "minutes" | null,
-       "artifact_prompt": "Mô tả chi tiết để generator sinh artifact",
-       "chat_response": "Câu trả lời bằng giọng văn đàm thoại tiếng Việt tự nhiên, lễ phép, chuyên nghiệp"
-     }
-Bạn đang đóng vai một người trợ lý có khuôn mặt, nói chuyện trực tiếp với mọi người: chat_response ngắn gọn
-(tối đa 3 câu), đọc lên được thành tiếng, không dùng bảng hay ký hiệu markdown phức tạp.
-"""
+Công cụ tra cứu dữ liệu nội bộ:
+{{TOOLS}}
+
+Cách làm việc:
+1. Cần dữ liệu thì CHỈ trả về các dòng gọi công cụ (tối đa 3 dòng), hệ thống sẽ gửi lại kết quả:
+   TOOL_CALL: {"tool": "query_jira_issues", "arguments": {}}
+2. Đủ dữ liệu (hoặc không cần tra cứu) thì trả về MỘT JSON duy nhất:
+{"thought": "suy luận ngắn",
+ "insights": [{"kind": "risk|todo|improve|good|info", "text": "điều em phát hiện, 1 câu cụ thể"}],
+ "artifact_needed": "dashboard" | "report" | "slides" | "web_design" | "diagram" | "minutes" | null,
+ "artifact_prompt": "mô tả chi tiết cho bộ tạo sản phẩm: dùng dữ liệu nào, biểu đồ/bố cục nào",
+ "report_markdown": "nội dung chi tiết để HIỂN THỊ trên màn hình (markdown: gạch đầu dòng, bảng)",
+ "chat_response": "1-3 câu nói thành tiếng"}
+
+Chọn sản phẩm (artifact_needed):
+- "dashboard": vẽ chart, biểu đồ, báo cáo số liệu, thống kê, KPI, dashboard kiểu Power BI.
+- "report": báo cáo nhanh, tổng hợp, review, liệt kê bằng chữ.
+- "slides": slide, bài trình bày. "web_design": trang web, giao diện, landing page, prototype.
+- "diagram": sơ đồ, luồng xử lý, kiến trúc. "minutes": biên bản cuộc họp.
+- null: câu hỏi ngắn trả lời được ngay trong 1-3 câu.
+
+Quy tắc:
+- chat_response phải nói ra thông tin thật (con số, tên người, hạn chót, kết luận). Cấm câu chung chung như "em đã xử lý xong".
+- Có sản phẩm thì chat_response nêu 1-2 điểm chính trong đó. Hỏi thông tin/liệt kê thì điền report_markdown đầy đủ.
+- insights: tối đa 3 điều đáng chú ý em thấy khi phân tích (rủi ro, việc chưa có người nhận, điểm cần cải thiện, điểm tốt).
+- Chỉ dùng số liệu trong transcript, dữ liệu tra cứu, hoặc mục "Thống kê cuộc họp" (số liệu thật). Thiếu dữ liệu thì nói rõ.
+- Ngày dd/mm/yyyy, tiền dạng 1.000.000đ, không dùng gạch dài. Không lặp lại nguyên văn câu hỏi."""
+
+_GENERIC_REPLY = re.compile(r"(tiếp nhận|xử lý xong|hoàn thành)\s+(yêu cầu|xong)|đã xử lý xong", re.I)
+_TOOL_LINE = re.compile(r"^\s*TOOL_CALL\s*:.*$", re.M)
+_FINAL_KEYS = ("chat_response", "artifact_needed", "report_markdown", "insights")
+_KIND_HINTS = [
+    ("dashboard", r"dashboard|power\s*bi|chart|chạt|biểu\s*đồ|đồ\s*thị|kpi|thống\s*kê|số\s*liệu"),
+    ("slides", r"slide|trình\s*chiếu|thuyết\s*trình|bài\s*trình\s*bày|deck"),
+    ("web_design", r"trang\s*web|website|landing|giao\s*diện|\bweb\b|html|prototype"),
+    ("diagram", r"sơ\s*đồ|diagram|flowchart|luồng"),
+    ("minutes", r"biên\s*bản|minutes"),
+    ("report", r"báo\s*cáo|report|tổng\s*hợp|review|liệt\s*kê"),
+]
+PROGRESS_START = {
+    "dashboard": "Em đang dựng dashboard, khoảng nửa phút là có ạ.",
+    "report": "Em đang viết báo cáo nhanh.",
+    "slides": "Em đang soạn bộ slide.",
+    "web_design": "Em đang dựng trang web, mất khoảng một phút ạ.",
+    "diagram": "Em đang vẽ sơ đồ.",
+    "minutes": "Em đang lập biên bản cuộc họp.",
+}
+
+
+def guess_kind(text: str) -> Optional[str]:
+    """Đoán loại sản phẩm người dùng muốn từ câu lệnh (dự phòng khi LLM không chỉ rõ)."""
+    low = (text or "").lower()
+    for kind, pat in _KIND_HINTS:
+        if re.search(pat, low):
+            return kind
+    return None
+
+
+def ack_phrase(command: str) -> str:
+    """Câu đáp ngay khi được gọi, trước khi bắt đầu xử lý (không cần LLM)."""
+    kind = guess_kind(command)
+    if kind in ("dashboard", "slides", "web_design", "diagram"):
+        return f"Dạ, em dựng {KIND_NAMES[kind]} ngay, anh chị chờ em chút nhé."
+    if kind in ("report", "minutes"):
+        return "Dạ, để em tổng hợp ngay."
+    return "Dạ, để em xem."
+
+
+def iter_json_objects(text: str) -> List[Any]:
+    """Mọi object JSON hợp lệ ở mức ngoài cùng trong văn bản (bỏ qua chữ thường, khối ``` và JSON hỏng)."""
+    clean = re.sub(r"```(?:json)?", "", text or "")
+    dec, out, i = json.JSONDecoder(), [], 0
+    while True:
+        i = clean.find("{", i)
+        if i < 0:
+            return out
+        try:
+            obj, end = dec.raw_decode(clean, i)
+            out.append(obj)
+            i = end
+        except ValueError:
+            i += 1
+
+
+def _salvage_field(raw: str, key: str) -> str:
+    """Lấy một trường chuỗi từ JSON bị cắt dở (vượt giới hạn token)."""
+    m = re.search(r'"%s"\s*:\s*"((?:[^"\\]|\\.)*)' % key, raw or "", re.S)
+    if not m:
+        return ""
+    try:
+        return json.loads('"' + m.group(1).rstrip("\\") + '"')
+    except ValueError:
+        return m.group(1)
+
+
+def parse_agent_output(raw: str) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]], str]:
+    """-> (lệnh gọi công cụ, JSON kết quả cuối, phần chữ thường còn lại)."""
+    objs = [o for o in iter_json_objects(raw) if isinstance(o, dict)]
+    finals = [o for o in objs if any(k in o for k in _FINAL_KEYS)]
+    calls = [o for o in objs if "tool" in o and not any(k in o for k in _FINAL_KEYS)]
+    if not finals and re.search(r'"(chat_response|report_markdown)"', raw or ""):
+        salvaged = {k: _salvage_field(raw, k) for k in ("chat_response", "report_markdown", "artifact_needed")}
+        if salvaged["chat_response"] or salvaged["report_markdown"]:
+            finals = [{k: v for k, v in salvaged.items() if v}]
+    text = raw or ""
+    if objs or calls:
+        text = _TOOL_LINE.sub("", re.sub(r"```(?:json)?[\s\S]*?```", "", text))
+        text = re.sub(r"\{[\s\S]*\}", "", text)
+    text = re.sub(r"</?thinking>", "", text).strip()
+    return calls, (finals[-1] if finals else None), text
+
+
+def _fmt_day(iso: str) -> str:
+    m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(iso or ""))
+    return f"{m.group(3)}/{m.group(2)}/{m.group(1)}" if m else str(iso or "")
+
+
+_DONE_STATUS = ("done", "closed", "resolved", "hoàn thành", "xong")
+_STATUS_VI = {"to do": "chưa làm", "todo": "chưa làm", "open": "đang mở", "in progress": "đang làm",
+              "in review": "chờ review", "review": "chờ review", "blocked": "bị chặn", "done": "đã xong",
+              "closed": "đã đóng", "resolved": "đã xử lý", "testing": "đang kiểm thử", "qa": "đang kiểm thử"}
+
+
+def status_vi(status: str) -> str:
+    return _STATUS_VI.get(str(status or "").strip().lower(), str(status or "không rõ"))
+
+
+def jira_overview(issues: List[Dict[str, Any]], today: Optional[str] = None) -> Dict[str, Any]:
+    """Số liệu tổng hợp từ danh sách ticket (dùng cho lời nói và dashboard, không qua LLM)."""
+    today = today or time.strftime("%Y-%m-%d")
+    by_status: Dict[str, int] = {}
+    by_assignee: Dict[str, int] = {}
+    points: Dict[str, float] = {}
+    overdue, high_open = [], []
+    for it in issues:
+        st = str(it.get("status") or "Không rõ")
+        by_status[st] = by_status.get(st, 0) + 1
+        who = str(it.get("assignee") or "Chưa giao")
+        by_assignee[who] = by_assignee.get(who, 0) + 1
+        try:
+            points[who] = points.get(who, 0.0) + float(it.get("story_points") or 0)
+        except (TypeError, ValueError):
+            pass
+        done = st.lower() in _DONE_STATUS
+        due = str(it.get("due_date") or "")
+        if not done and due and due[:10] < today:
+            overdue.append({"key": it.get("key"), "due": _fmt_day(due), "assignee": who})
+        if not done and str(it.get("priority") or "").lower() in ("high", "highest", "critical", "cao"):
+            high_open.append(it.get("key"))
+    return {"total": len(issues), "by_status": by_status, "by_assignee": by_assignee,
+            "story_points_by_assignee": points, "overdue": overdue, "high_priority_open": high_open}
+
+
+def summarize_tool_result(tool: str, result: Any) -> str:
+    """Câu nói ngắn về điều vừa tìm thấy ("em tìm thấy..."), tính trực tiếp từ dữ liệu."""
+    if not isinstance(result, dict):
+        return ""
+    if result.get("error"):
+        return f"Em chưa tra được {TOOL_LABELS.get(tool, tool)}: {result['error']}."
+    if tool == "query_jira_issues":
+        issues = result.get("issues") or []
+        if not issues:
+            return "Em chưa thấy ticket Jira nào khớp."
+        ov = jira_overview(issues)
+        parts = ", ".join(f"{n} {status_vi(st)}" for st, n in sorted(ov["by_status"].items(), key=lambda kv: -kv[1])[:3])
+        text = f"Em tìm thấy {ov['total']} ticket: {parts}."
+        if ov["overdue"]:
+            o = ov["overdue"][0]
+            more = f" và {len(ov['overdue']) - 1} ticket khác" if len(ov["overdue"]) > 1 else ""
+            text += f" {o['key']} của {o['assignee']} đã quá hạn từ {o['due']}{more}."
+        elif ov["high_priority_open"]:
+            text += f" Có {len(ov['high_priority_open'])} ticket ưu tiên cao chưa xong."
+        return text
+    if tool == "query_employee_directory":
+        emps = result.get("employees") or []
+        if not emps:
+            return "Em chưa thấy nhân sự nào khớp."
+        names = ", ".join(str(e.get("name")) for e in emps[:3])
+        return f"Em thấy {len(emps)} nhân sự liên quan: {names}{' ...' if len(emps) > 3 else ''}."
+    if tool == "query_system_architecture":
+        systems = result.get("matched_systems") or []
+        return f"Em đã lấy tài liệu {len(systems)} hệ thống: " + ", ".join(str(s.get("name")) for s in systems[:3]) + "." \
+            if systems else "Em chưa thấy tài liệu hệ thống phù hợp."
+    if tool == "query_meeting_history":
+        ms = result.get("meetings") or []
+        if not ms:
+            return "Em chưa thấy cuộc họp trước nào nhắc tới nội dung này."
+        m = ms[0]
+        return f"Em tìm thấy {len(ms)} cuộc họp trước liên quan, gần nhất là \"{m.get('title')}\" ngày {_fmt_day(m.get('date'))}."
+    return ""
+
+
+def _context_lines(segments: List[Dict[str, Any]], n: int = 40) -> str:
+    lines = [f"{s.get('speaker_label', 'Không rõ')}: {s.get('text', '')}" for s in segments[-n:]]
+    return "\n".join(lines) if lines else "(Chưa có nội dung)"
+
+
+def _data_text(tool_results: List[Dict[str, Any]], limit: int = 9000) -> str:
+    if not tool_results:
+        return ""
+    data = []
+    for r in tool_results:
+        item = {"tool": r["tool"], "arguments": r["args"], "result": r["result"]}
+        issues = (r["result"] or {}).get("issues") if isinstance(r["result"], dict) else None
+        if issues:
+            item["tong_hop"] = jira_overview(issues)
+        data.append(item)
+    return json.dumps(data, ensure_ascii=False)[:limit]
+
+
+def _agent_prompt(prompt: str, context_text: str, facts: Dict[str, Any], tool_results: List[Dict[str, Any]],
+                  stage_art: Optional[Dict[str, Any]], final_only: bool) -> str:
+    parts = [f"## Thống kê cuộc họp (số liệu thật, tính tự động):\n{json.dumps(facts, ensure_ascii=False)}",
+             f"## Nội dung cuộc họp gần nhất:\n{context_text}"]
+    if stage_art:
+        parts.append(f"## Đang chiếu trên màn hình: {KIND_NAMES.get(stage_art.get('kind'), stage_art.get('kind'))} "
+                     f"\"{stage_art.get('title', '')}\"")
+    parts.append("## Dữ liệu đã tra cứu:\n" + (_data_text(tool_results) or "(chưa tra cứu)"))
+    parts.append(f"## Yêu cầu:\n\"{prompt}\"")
+    if final_only:
+        parts.append("Không gọi thêm công cụ. Trả về JSON cuối cùng ngay.")
+    elif tool_results:
+        parts.append("Đã có kết quả tra cứu ở trên. Cần thêm dữ liệu thì gọi công cụ, đủ rồi thì trả về JSON cuối cùng.")
+    return "\n\n".join(parts)
+
+
+def _first_sentences(md: str, n: int = 2) -> str:
+    plain = re.sub(r"[#*_`|>]+", " ", md or "")
+    plain = re.sub(r"\s+", " ", plain).strip()
+    sents = re.split(r"(?<=[.!?])\s+", plain)
+    return " ".join(sents[:n])[:300]
+
+
+def _final_reply(chat: str, kind: Optional[str], art: Optional[Dict[str, Any]], err: str, report_md: str) -> str:
+    chat = (chat or "").strip()
+    generic = not chat or (len(chat) < 90 and bool(_GENERIC_REPLY.search(chat)))
+    if err:
+        return (f"{'' if generic else chat + ' '}Em chưa tạo được {KIND_NAMES.get(kind, 'sản phẩm')}: {err}").strip()
+    if art and generic:
+        extra = ""
+        if art.get("kind") == "dashboard":
+            try:
+                d = json.loads(art.get("content") or "{}")
+                extra = f" gồm {len(d.get('kpis') or [])} chỉ số và {len(d.get('charts') or [])} biểu đồ"
+            except ValueError:
+                pass
+        return f"Em đã làm xong {KIND_NAMES.get(art.get('kind'), 'sản phẩm')} \"{art.get('title', '')}\"{extra}, đang hiện trên màn hình."
+    if generic and report_md:
+        return _first_sentences(report_md) or "Em đã tổng hợp xong, nội dung đang hiện trên màn hình."
+    if generic:
+        return "Em chưa tìm được thông tin phù hợp cho yêu cầu này. Anh chị nói rõ hơn cần số liệu hay sản phẩm gì giúp em nhé."
+    return chat
+
+
+EARLY_KINDS = ("dashboard", "slides", "web_design", "diagram")   # sản phẩm lâu: dựng sớm, song song với lời đáp
+
+
+def _artifact_job(kind: str, meeting_id: int, art_prompt: str, context_text: str, data_text: str,
+                  facts: Dict[str, Any], segments: List[Dict[str, Any]], meeting: Optional[Dict[str, Any]]):
+    if kind == "dashboard":
+        return artifacts.generate_dashboard(meeting_id, art_prompt, context_text, data_text, facts)
+    if kind == "report":
+        return artifacts.generate_report(meeting_id, art_prompt, context_text, data_text, facts)
+    if kind == "slides":
+        return artifacts.generate_slides(meeting_id, art_prompt, context_text, data_text)
+    if kind == "web_design":
+        return artifacts.generate_web_sandbox(meeting_id, art_prompt, context_text, data_text)
+    if kind == "diagram":
+        return artifacts.generate_diagram(meeting_id, art_prompt, context_text)
+    return artifacts.generate_meeting_minutes(meeting_id, segments, (meeting or {}).get("title") or "Biên bản cuộc họp",
+                                              meeting=meeting)
+
+
+async def _with_reminder(coro, progress: Callable[..., Any], after: float = 20.0):
+    """Chạy coro; quá `after` giây chưa xong thì báo một câu cho người dùng biết vẫn đang làm."""
+    task = asyncio.ensure_future(coro)
+    try:
+        return await asyncio.wait_for(asyncio.shield(task), timeout=after)
+    except asyncio.TimeoutError:
+        await progress("Sắp xong rồi ạ, em đang hoàn thiện nốt.", "status")
+        return await task
 
 
 async def think_and_act(meeting_id: int, prompt: str, segments: List[Dict[str, Any]],
                         trigger: str = "voice_wake_word",
                         on_thinking: Optional[Callable[[str], Any]] = None,
                         on_tool: Optional[Callable[[Dict[str, Any]], Any]] = None,
-                        on_insights: Optional[Callable[[List[Dict[str, str]]], Any]] = None) -> Dict[str, Any]:
-    """Quy trình Thinking & ReAct hoàn chỉnh của AI khi được kích hoạt."""
-    t0 = asyncio.get_event_loop().time()
+                        on_insights: Optional[Callable[[List[Dict[str, str]]], Any]] = None,
+                        on_progress: Optional[Callable[[str, str], Any]] = None,
+                        meeting: Optional[Dict[str, Any]] = None,
+                        stage_art: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Trợ lý xử lý một yêu cầu: tra cứu (nếu cần) -> câu trả lời có nội dung thật -> sản phẩm trực quan.
 
-    # Chuẩn bị tóm tắt ngữ cảnh cuộc họp gần nhất
-    recent_lines = [f"{s.get('speaker_label', 'Unknown')}: {s.get('text', '')}" for s in segments[-25:]]
-    context_text = "\n".join(recent_lines) if recent_lines else "(Chưa có nội dung)"
+    Trong lúc chờ, báo tiến độ bằng lời qua on_progress ("em tìm thấy 6 ticket, 1 cái quá hạn...")."""
+    from meeting.artifacts import _call_llm
+    context_text = _context_lines(segments)
+    facts = artifacts.meeting_facts(segments, meeting)
+    thinking_trace: List[str] = []
+    tool_results: List[Dict[str, Any]] = []
 
-    thinking_trace = []
-
-    async def _emit_thought(text: str):
+    async def _thought(text: str):
         thinking_trace.append(text)
         if on_thinking:
             await on_thinking(text)
 
-    await _emit_thought(f"Để mình xem yêu cầu: \"{prompt}\"")
+    async def _progress(text: str, kind: str = "progress"):
+        """kind: progress = điều tìm thấy (đọc to, giữ lại); status = đang làm gì (bỏ khi đã có kết quả)."""
+        thinking_trace.append(text)
+        if on_progress:
+            await on_progress(text, kind)
 
-    # Bước 1: Quyết định xem có cần gọi tool MCP không
-    tool_check_prompt = f"""
-Ngữ cảnh cuộc họp gần nhất:
-{context_text}
+    system = (AGENT_SYSTEM.replace("{{NAME}}", assistant_config()["name"])
+              .replace("{{TOOLS}}", "\n".join(f"- {d}" for d in AGENT_TOOLS.values())))
+    plan: Dict[str, Any] = {}
+    plain = ""
+    early_kind = guess_kind(prompt) if guess_kind(prompt) in EARLY_KINDS else None
+    early_job = None
+    for rnd in range(MAX_TOOL_ROUNDS + 1):
+        last = rnd == MAX_TOOL_ROUNDS
+        raw = await _call_llm(system, _agent_prompt(prompt, context_text, facts, tool_results, stage_art, last),
+                              max_tokens=3000)
+        calls, final, text = parse_agent_output(raw)
+        if final is not None:
+            plan = final
+            break
+        calls = [c for c in calls if c.get("tool") in AGENT_TOOLS][:3]
+        if not calls or last:
+            plain = text
+            break
+        for c in calls:
+            tool = c["tool"]
+            args = c.get("arguments") if isinstance(c.get("arguments"), dict) else (c.get("args") or {})
+            await _thought(f"Em đang tra cứu {TOOL_LABELS.get(tool, tool)}...")
+            if on_tool:
+                await on_tool({"tool": tool, "args": args})
+            res = await asyncio.to_thread(mcp.call_tool, tool, args)
+            tool_results.append({"tool": tool, "args": args, "result": res})
+            finding = summarize_tool_result(tool, res)
+            if finding:
+                await _progress(finding)
+        if early_kind and early_job is None:
+            await _progress(PROGRESS_START[early_kind], "status")
+            early_job = asyncio.ensure_future(_artifact_job(early_kind, meeting_id, prompt, context_text,
+                                                            _data_text(tool_results), facts, segments, meeting))
 
-Câu lệnh người dùng:
-"{prompt}"
-
-Công cụ MCP có sẵn:
-- query_employee_directory(query: str, department?: str)
-- query_jira_issues(issue_key?: str, assignee?: str, status?: str)
-- query_system_architecture(system_name: str)
-- query_meeting_history(keyword: str)
-
-Nếu câu lệnh cần tra cứu dữ liệu trên, hãy trả về DUY NHẤT một JSON dạng:
-{{"needs_tool": true, "tool": "tên_tool", "arguments": {{...}}}}
-Nếu không cần tool, trả về:
-{{"needs_tool": false}}
-"""
-    mcp_data = {}
-    tool_calls_record = []
-
-    try:
-        from meeting.artifacts import _call_llm
-        check_raw = await _call_llm(
-            "Bạn là bộ điều phối tool MCP. Trả về DUY NHẤT định dạng JSON.",
-            tool_check_prompt,
-            max_tokens=600
-        )
-        tool_decision = _extract_json(check_raw)
-        if tool_decision.get("needs_tool"):
-                tool_name = tool_decision.get("tool")
-                tool_args = tool_decision.get("arguments", {})
-                await _emit_thought(f"Mình đang tra cứu {TOOL_LABELS.get(tool_name, tool_name)}...")
-                if on_tool:
-                    await on_tool({"tool": tool_name, "args": tool_args})
-
-                res = mcp.call_tool(tool_name, tool_args)
-                mcp_data = {tool_name: res}
-                tool_calls_record.append({"tool": tool_name, "args": tool_args, "result": res})
-                await _emit_thought("Đã có dữ liệu, mình đang đối chiếu với nội dung cuộc họp.")
-    except Exception as e:
-        log.warning("meeting.llm tool check error: %s", e)
-
-    # Bước 2: Tổng hợp và quyết định hành động sinh Artifacts
-    orchestrate_prompt = f"""
-## Ngữ cảnh cuộc họp:
-{context_text}
-
-## Dữ liệu từ Database MCP (nếu có):
-{json.dumps(mcp_data, ensure_ascii=False, indent=2)}
-
-## Câu lệnh người dùng:
-"{prompt}"
-
-Hãy suy nghĩ và trả về JSON:
-{{
-  "thought": "Suy nghĩ logic",
-  "insights": [{{"kind": "risk|todo|improve|good", "text": "Tối đa 3 nhận xét cụ thể bạn thấy khi phân tích (tên người, số liệu, hạn chót)"}}],
-  "artifact_needed": "slides" | "web_design" | "diagram" | "minutes" | null,
-  "artifact_prompt": "Mô tả cụ thể yêu cầu cho sản phẩm cần tạo",
-  "chat_response": "Lời đáp ngắn (tối đa 3 câu) để đọc thành tiếng, tiếng Việt tự nhiên"
-}}
-"""
-    await _emit_thought("Mình đang tổng hợp...")
-
-    plan_raw = await _call_llm(ORCHESTRATOR_SYSTEM.replace("{{NAME}}", assistant_config()["name"]),
-                               orchestrate_prompt, max_tokens=1500)
-    plan = _extract_json(plan_raw)
-    insights = artifacts.normalize_insights(plan.get("insights"))
+    insights = artifacts.normalize_insights(plan.get("insights"))[:3]
     if insights and on_insights:
         await on_insights(insights)
 
-    artifact_kind = plan.get("artifact_needed")
-    if not artifact_kind or artifact_kind == "null":
-        p_lower = prompt.lower()
-        if any(k in p_lower for k in ["slide", "trình chiếu", "thuyết trình", "bài trình bày", "deck"]):
-            artifact_kind = "slides"
-        elif any(k in p_lower for k in ["thiết kế", "web", "dashboard", "landing page", "giao diện", "html"]):
-            artifact_kind = "web_design"
-        elif any(k in p_lower for k in ["vẽ sơ đồ", "sơ đồ", "diagram", "flowchart", "sequence"]):
-            artifact_kind = "diagram"
-        elif any(k in p_lower for k in ["biên bản", "minutes", "tóm tắt cuộc họp"]):
-            artifact_kind = "minutes"
+    kind = plan.get("artifact_needed")
+    kind = kind if kind in ARTIFACT_KINDS else None
+    if kind is None and not plan:
+        kind = guess_kind(prompt)       # LLM không trả về JSON: đoán theo câu lệnh để vẫn có kết quả hiển thị
+    report_md = str(plan.get("report_markdown") or "").strip()
+    chat = str(plan.get("chat_response") or plain or "").strip()
+    if kind is None and report_md and (len(report_md) > 280 or re.search(r"^\s*([-*]|\d+\.|\|)", report_md, re.M)):
+        kind = "report"                 # nội dung dài/có danh sách: chiếu lên màn hình thay vì chỉ đọc
+    art_prompt = str(plan.get("artifact_prompt") or prompt)
+    data_text = _data_text(tool_results)
+    art, err = None, ""
+    if early_job is not None and kind != early_kind:
+        early_job.cancel()              # kế hoạch chọn loại khác: bỏ bản dựng sớm
+        early_job = None
+    if kind:
+        try:
+            if kind == "report" and report_md:
+                art = artifacts.save_report(meeting_id, report_md, prompt)
+            elif early_job is not None:
+                art = await _with_reminder(early_job, _progress, after=12.0)
+            else:
+                await _progress(PROGRESS_START[kind], "status")
+                art = await _with_reminder(_artifact_job(kind, meeting_id, art_prompt, context_text, data_text,
+                                                         facts, segments, meeting), _progress)
+        except Exception as e:
+            log.warning("meeting.llm: tạo %s lỗi: %s", kind, e)
+            err = str(e)
+    chat = _final_reply(chat, kind, art, err, report_md)
+    if art is not None and art.get("kind") == "report":
+        report_md = ""                  # đã chiếu dưới dạng báo cáo, không lặp lại trong khung chat
 
-    chat_resp = plan.get("chat_response")
-    if not chat_resp:
-        if artifact_kind == "slides":
-            chat_resp = "Mình đã soạn xong bộ slide, đang đưa lên màn hình trình bày."
-        elif artifact_kind == "web_design":
-            chat_resp = "Dạ em đã tra cứu thông tin và tạo bản thiết kế Web Dashboard theo yêu cầu của anh trong Sandbox rồi ạ!"
-        elif artifact_kind == "diagram":
-            chat_resp = "Dạ em đã vẽ sơ đồ luồng hệ thống trên Canvas rồi ạ!"
-        elif artifact_kind == "minutes":
-            chat_resp = "Dạ em đã hoàn thiện biên bản cuộc họp và bảng Action Items rồi ạ!"
-        else:
-            chat_resp = "Em đã tiếp nhận yêu cầu và xử lý xong ạ!"
-
-    art_prompt = plan.get("artifact_prompt") or prompt
-
-    generated_artifact = None
-
-    # Bước 3: Sinh Artifact tương ứng
-    if artifact_kind == "slides":
-        await _emit_thought("Mình đang soạn bộ slide...")
-        data_text = json.dumps(mcp_data, ensure_ascii=False)[:6000] if mcp_data else ""
-        generated_artifact = await artifacts.generate_slides(meeting_id, art_prompt, context_text, data_text)
-        await _emit_thought("Bộ slide đã sẵn sàng.")
-
-    elif artifact_kind == "web_design":
-        await _emit_thought("🎨 Đang sinh mã nguồn Web Sandbox (HTML5 + Tailwind CSS)...")
-        generated_artifact = await artifacts.generate_web_sandbox(meeting_id, art_prompt, context_text)
-        await _emit_thought(f"✨ Giao diện Web đã sẵn sàng trong Sandbox (ID: {generated_artifact['id']})!")
-
-    elif artifact_kind == "diagram":
-        await _emit_thought("📊 Đang vẽ sơ đồ Mermaid.js...")
-        generated_artifact = await artifacts.generate_diagram(meeting_id, art_prompt, context_text)
-        await _emit_thought(f"✨ Sơ đồ trực quan đã hoàn thành (ID: {generated_artifact['id']})!")
-
-    elif artifact_kind == "minutes":
-        await _emit_thought("📝 Đang lập biên bản cuộc họp và bảng Action Items...")
-        generated_artifact = await artifacts.generate_meeting_minutes(meeting_id, segments, "Biên bản cuộc họp")
-        await _emit_thought(f"✨ Biên bản cuộc họp đã được lập xong (ID: {generated_artifact['id']})!")
-
-    # Lưu interaction vào DB
-    full_thinking = "\n".join(thinking_trace)
-    db.record_interaction(
-        meeting_id=meeting_id,
-        prompt=prompt,
-        trigger=trigger,
-        thinking=full_thinking,
-        tool_calls=tool_calls_record,
-        response={"chat_response": chat_resp, "artifact": generated_artifact}
-    )
-
-    return {
-        "chat_response": chat_resp,
-        "thinking": full_thinking,
-        "tool_calls": tool_calls_record,
-        "insights": insights,
-        "artifact": generated_artifact
-    }
+    db.record_interaction(meeting_id=meeting_id, prompt=prompt, trigger=trigger, thinking="\n".join(thinking_trace),
+                          tool_calls=tool_results, response={"chat_response": chat, "artifact": art})
+    return {"chat_response": chat, "report": report_md, "thinking": "\n".join(thinking_trace),
+            "tool_calls": tool_results, "insights": insights, "artifact": art}

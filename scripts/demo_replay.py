@@ -5,8 +5,8 @@
 - DB in-memory (không đụng MongoDB thật), không cần mic, không gọi Soniox.
 - Vector giọng là dữ liệu tổng hợp (không phải giọng người thật).
 - Mặc định tắt LLM để không tốn phí; thêm --with-llm để AI tự đoán tên người nói từ hội thoại.
-- Có sẵn một bộ slide mẫu trên màn hình trình bày: gõ "chuyển slide", "quay lại", "nhắc bài" vào ô lệnh
-  (các lệnh này chạy không cần LLM), hoặc để kịch bản tự gọi "Jarvis ơi, chuyển slide".
+- Có sẵn một bộ slide mẫu và một dashboard mẫu (dữ liệu Jira giả lập): gõ "chuyển slide", "quay lại", "nhắc bài"
+  vào ô lệnh (các lệnh này chạy không cần LLM), hoặc để kịch bản tự gọi "Jarvis ơi, chuyển slide".
 Mở http://127.0.0.1:8090 rồi vào cuộc họp "Demo: Review Sprint 39" để xem transcript chạy trực tiếp.
 """
 import argparse
@@ -39,7 +39,7 @@ import numpy as np  # noqa: E402
 import uvicorn  # noqa: E402
 
 from meeting import app as appmod  # noqa: E402
-from meeting import db, live  # noqa: E402
+from meeting import artifacts, db, live, llm, mcp  # noqa: E402
 
 D = 192
 SCRIPT = [
@@ -75,6 +75,42 @@ def demo_deck():
          "bullets": ["Hương: xong bản mobile trước thứ sáu", "Tuấn: chạy thử staging cuối tuần",
                      "Marketing: gửi số liệu đổi voucher", "Cả nhóm: review lại vào thứ hai"], "notes": ""},
     ]}
+
+
+def demo_dashboard():
+    """Dashboard mẫu tính trực tiếp từ dữ liệu Jira giả lập (không gọi LLM)."""
+    issues = mcp.call_tool("query_jira_issues", {}).get("issues") or []
+    ov = llm.jira_overview(issues)
+    by_status = sorted(ov["by_status"].items(), key=lambda kv: -kv[1])
+    by_person = sorted(ov["by_assignee"].items(), key=lambda kv: -kv[1])
+    points = ov["story_points_by_assignee"]
+    return artifacts.normalize_dashboard({
+        "title": "Tiến độ Sprint 39",
+        "subtitle": "Ticket Jira của hệ thống demo (dữ liệu giả lập)",
+        "kpis": [{"label": "Tổng ticket", "value": str(ov["total"]), "unit": "ticket"},
+                 {"label": "Đang làm", "value": str(ov["by_status"].get("In Progress", 0)), "unit": "ticket"},
+                 {"label": "Quá hạn", "value": str(len(ov["overdue"])), "unit": "ticket",
+                  "delta": ", ".join(o["key"] for o in ov["overdue"]) or "Không có", "trend": "up" if ov["overdue"] else "flat"},
+                 {"label": "Ưu tiên cao chưa xong", "value": str(len(ov["high_priority_open"])), "unit": "ticket"}],
+        "charts": [
+            {"type": "hbar", "title": "Ticket theo trạng thái", "unit": "ticket",
+             "labels": [llm.status_vi(k) for k, _ in by_status], "series": [{"name": "Ticket", "data": [v for _, v in by_status]}]},
+            {"type": "bar", "title": "Ticket theo người phụ trách", "unit": "ticket",
+             "labels": [k for k, _ in by_person], "series": [{"name": "Ticket", "data": [v for _, v in by_person]}]},
+            {"type": "donut", "title": "Story point theo người", "unit": "điểm",
+             "labels": list(points), "series": [{"name": "Story point", "data": list(points.values())}]},
+            {"type": "line", "title": "Ticket hoàn thành theo ngày", "unit": "ticket", "sample": True,
+             "note": "Số liệu minh họa để xem thử dạng biểu đồ đường.",
+             "labels": ["24/09", "25/09", "26/09", "29/09", "30/09", "01/10"],
+             "series": [{"name": "Kế hoạch", "data": [1, 2, 3, 4, 5, 6]}, {"name": "Thực tế", "data": [1, 1, 2, 2, 3, 4]}]},
+            {"type": "table", "title": "Ticket cần chú ý", "columns": ["Ticket", "Người phụ trách", "Trạng thái", "Hạn"],
+             "rows": [[i.get("key"), i.get("assignee"), llm.status_vi(i.get("status")), llm._fmt_day(i.get("due_date"))]
+                      for i in issues if str(i.get("status", "")).lower() != "done"][:8]},
+        ],
+        "highlights": [f"{o['key']} của {o['assignee']} đã quá hạn từ {o['due']}." for o in ov["overdue"][:2]]
+        or ["Không có ticket quá hạn."],
+        "source": "Nguồn: Jira giả lập (Mock MCP)",
+    })
 
 
 def unit(x):
@@ -122,6 +158,7 @@ async def replay():
                                 expected_attendees=["Hương", "Lê Văn Tuấn"],
                                 agenda=["Tiến độ Mega Sale 10.10", "Migrate Postgres 18"])
         s = await live.get_session(mid)
+        db.save_artifact(mid, "dashboard", "Dashboard: Tiến độ Sprint 39", json.dumps(demo_dashboard(), ensure_ascii=False))
         deck_id = db.save_artifact(mid, "slides", "Slide: Review Sprint 39", json.dumps(demo_deck(), ensure_ascii=False))
         await s.stage_action("show", artifact_id=deck_id)
         print(f"\n>>> Demo sẵn sàng: http://{args.host}:{args.port}/#/m/{mid}\n", flush=True)

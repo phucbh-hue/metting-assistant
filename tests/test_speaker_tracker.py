@@ -1,6 +1,8 @@
 """Test bộ theo dõi người nói (voice.MeetingSpeakers) - phân vai, đổi tên, gộp, khôi phục."""
 import unittest
 
+import numpy as np
+
 from tests.helpers import VoiceBank, label, labels_of, script_add
 from meeting import voice
 
@@ -96,6 +98,51 @@ class SonioxErrorRecoveryTests(unittest.TestCase):
         # Khách mời nói lại (Soniox vẫn gắn "2"): giọng khớp hẳn khách mời -> trả về đúng người
         back = script_add(sp, bank, [(1, "2", 5.0)], start_key=90, t0=200)
         self.assertEqual(label(sp, back[0]), "Người nói 2")
+
+    @staticmethod
+    def _similar_bank(r: float, seed: int = 42) -> VoiceBank:
+        """Hai giọng gần nhau (ví dụ cùng phát qua loa): tâm giọng giống ~0.7-0.8 dù là hai người."""
+        bank = VoiceBank(seed=seed, n=2, channel=0.7)
+        rng = np.random.default_rng(seed + 100)
+        bank.base[1] = voice.unit(r * bank.base[0] + np.sqrt(1 - r * r) * voice.unit(rng.standard_normal(voice.DIM)))
+        return bank
+
+    def test_similar_voices_under_one_label_split_once(self):
+        """Lỗi thật (#31, #32): người dẫn podcast và khách mời giống giọng, Soniox gắn chung nhãn. Từng câu vẫn gần
+        cụm của mình hơn hẳn cụm kia -> tách một lần, không tách-gộp lặp lại."""
+        bank = self._similar_bank(0.65)
+        sp = voice.MeetingSpeakers()
+        a = script_add(sp, bank, [(0, "1", v) for v in (4.0, 5.0, 3.5, 6.0, 4.5, 5.0)])
+        b = script_add(sp, bank, [(1, "1", v) for v in (4.0, 5.5, 3.0, 6.0, 4.0, 5.0, 4.5)], start_key=50, t0=60)
+        self.assertEqual(sp.pop_splits(), [(1, 2)])
+        self.assertEqual(sp.pop_merges(), [])
+        self.assertEqual(set(labels_of(sp, a)), {"Người nói 1"})
+        self.assertEqual(set(labels_of(sp, b)), {"Người nói 2"})
+
+    def test_nearly_identical_voices_are_not_split(self):
+        bank = self._similar_bank(0.9)
+        sp = voice.MeetingSpeakers()
+        script_add(sp, bank, [(i % 2, "1", 4.0 + (i % 3)) for i in range(14)])
+        self.assertEqual(sp.pop_splits(), [])
+        self.assertEqual(len(sp.visible_profiles()), 1)
+
+    def test_user_split_from_segment(self):
+        """Người dùng: "từ câu này trở đi là người khác" (hai giọng giống hệt nhau, máy không tự tách được)."""
+        bank = VoiceBank(seed=46, n=1)
+        sp = voice.MeetingSpeakers()
+        keys = script_add(sp, bank, [(0, "1", 4.0)] * 8)
+        self.assertEqual(sp.split_from(keys[0]), (None, []))            # câu đầu tiên: cả hồ sơ là một người
+        q, moved = sp.split_from(keys[4])
+        self.assertEqual(moved, keys[4:])
+        self.assertEqual(labels_of(sp, keys), ["Người nói 1"] * 4 + ["Người nói 2"] * 4)
+        # Câu mới cùng nhãn Soniox theo người mới; giọng trùng khớp nhưng không tự gộp lại
+        more = script_add(sp, bank, [(0, "1", 0.6), (0, "1", 4.0), (0, "1", 5.0)], start_key=20, t0=200)
+        self.assertEqual(set(labels_of(sp, more)), {"Người nói 2"})
+        self.assertEqual(sp.pop_merges(), [])
+        # Trạng thái "không tự gộp" được lưu lại qua export/load
+        sp2 = voice.MeetingSpeakers()
+        sp2.load_state(sp.export_profiles(), [])
+        self.assertEqual(sp2.profile(q.sid).apart, [1])
 
     def test_same_speaker_is_not_split(self):
         """Một người nói lâu, nhiều câu ngắn dài khác nhau: không được tự tách thành 2 người."""

@@ -18,6 +18,7 @@ build/
 
 # ONNX models (too large for git)
 models/*.onnx
+models/tts/
 
 # Audio test files
 *.wav

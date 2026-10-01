@@ -807,6 +807,19 @@ class MeetingSession:
         await self._sync_speakers()
         return {"success": True, "seq": seq, "speaker": dst.to_dict(with_vector=False)}
 
+    async def split_speaker_from(self, seq: int) -> Dict[str, Any]:
+        """Từ câu `seq` trở đi, các câu của người nói này thuộc về một người nói mới."""
+        if self._by_seq.get(seq) is None:
+            raise KeyError(f"Không tìm thấy câu {seq}")
+        async with self._lock:
+            q, moved = self.speakers.split_from(seq)
+            if q is None:
+                raise ValueError("Đây là câu đầu tiên của người nói này nên không cần tách. Hãy đổi tên hoặc đổi người nói của câu.")
+            await self._apply_relabels(moved)
+            await self._sync_speakers()
+        log.info("meeting.live: người dùng tách %d câu từ câu %d thành người nói %d", len(moved), seq, q.sid)
+        return {"success": True, "speaker": q.to_dict(with_vector=False), "moved": len(moved)}
+
     async def reanalyze(self) -> Dict[str, Any]:
         """Chạy lại nhận diện người nói cho toàn bộ cuộc họp bằng thuật toán hiện tại.
 
@@ -922,11 +935,12 @@ class MeetingSession:
             if intent and await self._handle_stage_intent(intent):
                 return
             if self.stage["artifact_id"] is not None and llm.is_edit_command(command):
+                await self._progress("Dạ, em sửa ngay.", kind="ack")
                 await self._edit_on_stage(command)
                 return
         except Exception as e:
             log.warning("meeting.live: xử lý lệnh trình chiếu lỗi: %s", e)
-            await self.emit({"type": "ai_error", "text": f"Mình chưa làm được: {e}"})
+            await self.emit({"type": "ai_error", "text": f"Em chưa làm được: {e}"})
             return
 
         async def _insights(items: List[Dict[str, str]]):
@@ -938,9 +952,12 @@ class MeetingSession:
         async def _tool(tool_info: Dict[str, Any]):
             await self.emit({"type": "ai_tool_call", "tool": tool_info.get("tool"), "args": tool_info.get("args")})
 
+        await self._progress(llm.ack_phrase(command), kind="ack")
         try:
             res = await llm.think_and_act(meeting_id=self.id, prompt=prompt, segments=self.segments,
-                                          on_thinking=_thinking, on_tool=_tool, on_insights=_insights)
+                                          on_thinking=_thinking, on_tool=_tool, on_insights=_insights,
+                                          on_progress=self._progress, meeting=self.meeting,
+                                          stage_art=self._stage_summary())
             await self.emit({"type": "ai_response", "response": res})
             if res.get("artifact"):
                 await self.stage_action("show", artifact_id=res["artifact"]["id"])
@@ -1020,6 +1037,14 @@ class MeetingSession:
         await self.emit({"type": "stage_state", "stage": self.stage_public()})
         return self.stage_public()
 
+    async def _progress(self, text: str, kind: str = "progress"):
+        """Trợ lý báo tiến độ bằng lời trong lúc xử lý (không kết thúc lượt trả lời)."""
+        await self.emit({"type": "ai_progress", "text": text, "kind": kind})
+
+    def _stage_summary(self) -> Optional[Dict[str, Any]]:
+        art = self._art_cache.get(self.stage["artifact_id"]) if self.stage["artifact_id"] is not None else None
+        return {"kind": art.get("kind"), "title": art.get("title", "")} if art else None
+
     async def _say(self, text: str, mood: str = "happy", quiet: bool = False):
         """quiet: chỉ hiện phụ đề, không đọc to (xác nhận chuyển slide: màn hình đổi là đủ, không cắt lời người nói)."""
         await self.emit({"type": "ai_say", "text": text, "mood": mood, "quiet": quiet})
@@ -1029,7 +1054,7 @@ class MeetingSession:
         action = intent["action"]
         if action in ("open", "close"):
             await self.emit({"type": "stage_command", "action": action})
-            await self._say("Mình mở màn hình trình bày đây." if action == "open" else "Đã thu nhỏ màn hình trình bày.")
+            await self._say("Dạ, em mở màn hình trình bày đây." if action == "open" else "Đã thu nhỏ màn hình trình bày.")
             return True
         if action == "prompt":
             await self.emit({"type": "stage_prompt"})
@@ -1040,7 +1065,7 @@ class MeetingSession:
         if self.stage["artifact_id"] is None:
             if action == "topic":
                 return False
-            await self._say("Hiện chưa có nội dung nào trên màn hình trình bày. Anh có thể nhờ mình soạn slide.", "concerned")
+            await self._say("Hiện chưa có nội dung nào trên màn hình trình bày. Anh chị có thể nhờ em soạn slide hoặc dựng dashboard.", "concerned")
             return True
         if action == "back" and not self.stage["history"]:
             await self._say("Không còn phần trình bày nào trước đó.", "concerned")
@@ -1051,7 +1076,7 @@ class MeetingSession:
             if idx is None:
                 if not slides:
                     return False
-                await self._say(f"Mình chưa thấy slide nào nói về {intent.get('query', '')}.", "concerned")
+                await self._say(f"Em chưa thấy slide nào nói về {intent.get('query', '')}.", "concerned")
                 return True
             await self.stage_action("goto", slide=idx)
         else:
@@ -1068,21 +1093,21 @@ class MeetingSession:
     async def _edit_on_stage(self, command: str):
         """Sửa nội dung đang trình chiếu bằng lời nói ("sửa slide này thêm số liệu doanh thu")."""
         st = self.stage
-        await self.emit({"type": "ai_thinking", "text": "Mình đang sửa nội dung đang trình chiếu..."})
+        await self.emit({"type": "ai_thinking", "text": "Em đang sửa nội dung đang trình chiếu..."})
         try:
             res = await artifacts.co_design_refine(self.id, st["artifact_id"], command, slide_index=st["slide"])
         except Exception as e:
-            await self.emit({"type": "ai_error", "text": f"Mình chưa sửa được: {e}"})
+            await self.emit({"type": "ai_error", "text": f"Em chưa sửa được: {e}"})
             return
         self._art_cache[res["id"]] = res
-        message = res.pop("chat_message", "") or "Mình đã sửa xong."
+        message = res.pop("chat_message", "") or "Em đã sửa xong."
         await self.emit({"type": "artifact_updated", "artifact": res})
         await self.stage_action("show", artifact_id=res["id"], slide=res.get("focus_slide", st["slide"]))
         await self._say(message)
 
     async def analyze_now(self, focus: str = "") -> List[Dict[str, str]]:
         """Trợ lý xem lại cuộc họp và nêu nhận xét (rủi ro, việc chưa có người nhận, điểm cần cải thiện)."""
-        await self.emit({"type": "ai_thinking", "text": "Mình đang xem lại toàn bộ cuộc họp..."})
+        await self.emit({"type": "ai_thinking", "text": "Em đang xem lại toàn bộ cuộc họp..."})
         items = await artifacts.meeting_insights(self.segments, self.meeting, focus)
         await self.emit({"type": "ai_insights", "items": items, "source": "analysis"})
         return items

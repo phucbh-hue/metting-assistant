@@ -49,6 +49,10 @@ def _gemini():
 
 async def _call_llm(system: str, prompt: str, max_tokens: int = 4000) -> str:
     """Gọi LLM (Claude hoặc Gemini theo LLM_PROVIDER) với fallback sang provider còn lại."""
+    return (await _call_llm_raw(system, prompt, max_tokens) or "").replace(chr(0x2014), "-")   # quy ước nội dung: "-" thay cho gạch dài
+
+
+async def _call_llm_raw(system: str, prompt: str, max_tokens: int = 4000) -> str:
     if not llm_available():
         raise RuntimeError("Chưa cấu hình ANTHROPIC_API_KEY hoặc GEMINI_API_KEY")
     use_claude_first = PROVIDER == "claude" or not os.getenv("GEMINI_API_KEY")
@@ -204,18 +208,24 @@ Quy tắc kỹ thuật BẮT BUỘC:
 2. Thiết kế hiện đại, sang trọng (phong cách Stripe / Linear / Vercel), hỗ trợ responsive.
 3. Kèm JavaScript nội tuyến (`<script>...</script>`) để xử lý các tương tác:
    - Chuyển tab, mở modal, toggle dark/light mode, bấm nút đổi trạng thái, lọc dữ liệu mẫu.
-4. Trả về mã trong khối ```html ... ```."""
+4. Dùng số liệu thật được cung cấp (ticket, người phụ trách, con số trong cuộc họp); dữ liệu mẫu phải ghi rõ là mẫu.
+5. Có thẻ <title> ngắn gọn. Trả về mã trong khối ```html ... ```."""
 
 
 async def generate_web_sandbox(meeting_id: int, prompt_request: str,
-                               context_text: str = "") -> Dict[str, Any]:
-    user_prompt = f"Yêu cầu thiết kế giao diện web: {prompt_request}\n\nÝ tưởng & dữ liệu trong cuộc họp:\n{context_text}"
-    raw = await _call_llm(WEB_SYSTEM, user_prompt, max_tokens=4000)
+                               context_text: str = "", data_text: str = "") -> Dict[str, Any]:
+    user_prompt = (f"Yêu cầu thiết kế giao diện web: {prompt_request}\n\n"
+                   f"Dữ liệu tra cứu nội bộ (dùng số liệu thật này nếu liên quan):\n{data_text or '(không có)'}\n\n"
+                   f"Ý tưởng & dữ liệu trong cuộc họp:\n{context_text}")
+    raw = await _call_llm(WEB_SYSTEM, user_prompt, max_tokens=8000)
 
     m = re.search(r"```html\s*(.*?)\s*```", raw, re.DOTALL)
-    html_code = m.group(1).strip() if m else raw.strip()
+    html_code = m.group(1).strip() if m else re.sub(r"^```(?:html)?\s*", "", raw.strip())
+    if "<" not in html_code:
+        raise RuntimeError("AI chưa tạo được mã giao diện")
 
-    title = f"Giao diện: {prompt_request[:50]}"
+    t = re.search(r"<title>\s*([^<]{3,80}?)\s*</title>", html_code, re.I)
+    title = f"Giao diện: {(t.group(1) if t else prompt_request)[:50]}"
     aid = db.save_artifact(
         meeting_id=meeting_id,
         kind="web_design",
@@ -223,7 +233,7 @@ async def generate_web_sandbox(meeting_id: int, prompt_request: str,
         content=html_code,
         prompt_trigger=prompt_request
     )
-    return {"id": aid, "kind": "web_design", "title": title, "content": html_code}
+    return db.get_artifact(aid)
 
 
 def _json_from_text(text: str) -> Any:
@@ -347,6 +357,218 @@ async def meeting_insights(segments: List[Dict[str, Any]], meeting: Optional[Dic
 
 
 # ==============================================================================
+# 3d. THỐNG KÊ CUỘC HỌP (số liệu thật, tính từ transcript - dùng cho dashboard và báo cáo)
+# ==============================================================================
+def _words(text: str) -> int:
+    return len(re.findall(r"\w+", text or ""))
+
+
+def meeting_facts(segments: List[Dict[str, Any]], meeting: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Thời lượng nói, số câu, số từ của từng người và nhịp trao đổi theo phút."""
+    per: Dict[str, Dict[str, Any]] = {}
+    buckets: Dict[int, int] = {}
+    end = 0.0
+    for s in segments:
+        lab = s.get("speaker_label") or "Không rõ"
+        t0, t1 = float(s.get("t_start") or 0), float(s.get("t_end") or 0)
+        n = _words(s.get("text", ""))
+        p = per.setdefault(lab, {"speaker": lab, "segments": 0, "talk_s": 0.0, "words": 0})
+        p["segments"] += 1
+        p["talk_s"] += max(0.0, t1 - t0)
+        p["words"] += n
+        buckets[int(t0 // 60)] = buckets.get(int(t0 // 60), 0) + n
+        end = max(end, t1)
+    total = sum(p["talk_s"] for p in per.values()) or 1.0
+    speakers = sorted(per.values(), key=lambda p: -p["talk_s"])
+    for p in speakers:
+        p["talk_s"] = round(p["talk_s"], 1)
+        p["share_pct"] = round(100.0 * p["talk_s"] / total, 1)
+    minutes = int(end // 60) + 1 if segments else 0
+    return {"title": (meeting or {}).get("title", ""), "duration_min": round(end / 60.0, 1),
+            "segments": len(segments), "speakers": speakers,
+            "words_per_minute": [{"minute": m + 1, "words": buckets.get(m, 0)} for m in range(minutes)][-60:]}
+
+
+# ==============================================================================
+# 3e. DASHBOARD SỐ LIỆU (kiểu Power BI: thẻ KPI + biểu đồ + bảng)
+# ==============================================================================
+CHART_TYPES = ("bar", "hbar", "line", "area", "pie", "donut", "stacked_bar", "table")
+_CHART_ALIASES = {"column": "bar", "columns": "bar", "horizontal_bar": "hbar", "barh": "hbar", "doughnut": "donut",
+                  "stacked": "stacked_bar", "stacked_column": "stacked_bar", "pie_chart": "pie", "spline": "line"}
+
+DASHBOARD_SYSTEM = """Bạn là chuyên gia phân tích dữ liệu, dựng dashboard kiểu Power BI để chiếu ngay trong cuộc họp nội bộ UrBox.
+Dựa vào yêu cầu, dữ liệu tra cứu, thống kê cuộc họp và transcript, chỉ trả về MỘT JSON:
+{"title": "...", "subtitle": "1 câu: phạm vi dữ liệu",
+ "kpis": [{"label": "Ticket đang mở", "value": "4", "unit": "ticket", "delta": "1 quá hạn", "trend": "up|down|flat", "note": "..."}],
+ "charts": [
+   {"type": "bar|hbar|line|area|pie|donut|stacked_bar", "title": "...", "labels": ["..."],
+    "series": [{"name": "...", "data": [3, 1]}], "unit": "...", "note": "...", "sample": false},
+   {"type": "table", "title": "...", "columns": ["..."], "rows": [["...", "..."]]}],
+ "highlights": ["Nhận xét quan trọng nhất, 1 câu cụ thể"],
+ "source": "Nguồn dữ liệu"}
+Quy tắc:
+- 2-4 KPI, 2-5 biểu đồ; có danh sách (ticket, việc cần làm) thì thêm 1 bảng. Chọn loại biểu đồ hợp dữ liệu:
+  so sánh nhóm -> bar/hbar, xu hướng theo thời gian -> line/area, tỉ trọng ít nhóm -> donut.
+- "data" chỉ chứa số (không kèm đơn vị, không dấu phân cách). Nhãn ngắn, tối đa 24 ký tự.
+- Chỉ dùng số liệu có trong dữ liệu được cung cấp hoặc đếm/cộng trực tiếp từ đó (thống kê cuộc họp là số liệu thật).
+  Không tự ước lượng phần trăm hoàn thành, doanh số hay tiến độ khi dữ liệu không nêu con số; KPI không có số thật thì bỏ.
+  Nếu buộc phải minh họa vì thiếu dữ liệu, đặt "sample": true và ghi rõ trong note.
+- Ngày dd/mm/yyyy, tiền dạng 1.000.000đ trong value của KPI. Tiếng Việt, không dùng gạch dài."""
+
+DASHBOARD_REFINE_SYSTEM = """Bạn cùng người dùng chỉnh dashboard đang chiếu trong cuộc họp (thêm/bớt/đổi loại biểu đồ, đổi KPI...).
+Áp dụng đúng yêu cầu, giữ nguyên phần không liên quan, giữ cùng cấu trúc JSON và quy tắc dữ liệu (không bịa số).
+Chỉ trả về MỘT JSON: {"chat_message": "Một câu cho biết đã sửa gì", "dashboard": {...cùng cấu trúc...}}"""
+
+
+def _num(x: Any) -> Optional[float]:
+    """'1.000.000' -> 1000000, '3,5' -> 3.5, '12%' -> 12; không phải số -> None."""
+    if isinstance(x, bool):
+        return None
+    if isinstance(x, (int, float)):
+        return float(x) if x == x and abs(x) != float("inf") else None
+    s = re.sub(r"(đồng|vnđ|vnd|đ|%|\s)", "", str(x or "").strip().lower())
+    if re.fullmatch(r"-?\d{1,3}([.,]\d{3})+", s):
+        s = re.sub(r"[.,]", "", s)
+    elif re.fullmatch(r"-?\d+,\d+", s):
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def normalize_dashboard(data: Any) -> Optional[Dict[str, Any]]:
+    """Chuẩn hóa dashboard từ LLM (cắt bớt, ép kiểu số, khớp nhãn với dữ liệu); None nếu không dùng được."""
+    if isinstance(data, dict) and isinstance(data.get("dashboard"), dict):
+        data = data["dashboard"]
+    if not isinstance(data, dict):
+        return None
+    kpis = []
+    for k in (data.get("kpis") or [])[:6]:
+        if not isinstance(k, dict):
+            continue
+        label = str(k.get("label") or "").strip()[:40]
+        value = str(k.get("value") if k.get("value") is not None else "").strip()[:24]
+        if label and value:
+            kpis.append({"label": label, "value": value, "unit": str(k.get("unit") or "").strip()[:16],
+                         "delta": str(k.get("delta") or "").strip()[:48],
+                         "trend": k.get("trend") if k.get("trend") in ("up", "down", "flat") else "",
+                         "note": str(k.get("note") or "").strip()[:140]})
+    charts = []
+    for c in (data.get("charts") or [])[:8]:
+        if not isinstance(c, dict):
+            continue
+        typ = str(c.get("type") or "bar").strip().lower()
+        typ = _CHART_ALIASES.get(typ, typ)
+        if typ not in CHART_TYPES:
+            typ = "bar"
+        item = {"type": typ, "title": str(c.get("title") or "").strip()[:80] or f"Biểu đồ {len(charts) + 1}",
+                "note": str(c.get("note") or "").strip()[:180], "sample": bool(c.get("sample")),
+                "unit": str(c.get("unit") or "").strip()[:16]}
+        if typ == "table":
+            cols = [str(x).strip()[:40] for x in (c.get("columns") or [])][:8]
+            rows = [[str(v).strip()[:90] for v in r][:max(1, len(cols) or 8)]
+                    for r in (c.get("rows") or []) if isinstance(r, list) and r][:40]
+            if not rows:
+                continue
+            item.update({"columns": cols or [f"Cột {i + 1}" for i in range(len(rows[0]))], "rows": rows})
+            charts.append(item)
+            continue
+        raw_series = c.get("series")
+        if not raw_series and isinstance(c.get("data"), list):
+            raw_series = [{"name": item["title"], "data": c["data"]}]
+        series = []
+        for s in (raw_series if isinstance(raw_series, list) else [])[:6]:
+            if not isinstance(s, dict):
+                continue
+            vals = [_num(v) for v in (s.get("data") or [])][:60]
+            if any(v is not None for v in vals):
+                series.append({"name": str(s.get("name") or "").strip()[:40], "data": [v or 0 for v in vals]})
+        if not series:
+            continue
+        labels = [str(x).strip()[:32] for x in (c.get("labels") or [])][:60]
+        n = min(len(labels), max(len(s["data"]) for s in series)) if labels else max(len(s["data"]) for s in series)
+        labels = labels[:n] if labels else [str(i + 1) for i in range(n)]
+        for s in series:
+            s["data"] = (s["data"] + [0] * n)[:n]
+        if typ in ("pie", "donut"):
+            series = series[:1]
+        item.update({"labels": labels, "series": series})
+        charts.append(item)
+    if not kpis and not charts:
+        return None
+    return {"title": str(data.get("title") or "Dashboard").strip()[:100],
+            "subtitle": str(data.get("subtitle") or "").strip()[:180],
+            "kpis": kpis, "charts": charts[:6],
+            "highlights": [str(h).strip()[:220] for h in (data.get("highlights") or []) if str(h).strip()][:5],
+            "source": str(data.get("source") or "").strip()[:200]}
+
+
+def _data_prompt(prompt_request: str, context_text: str, data_text: str, facts: Optional[Dict[str, Any]]) -> str:
+    return (f"Yêu cầu: {prompt_request}\n\n"
+            f"## Thống kê cuộc họp (số liệu thật, tính tự động):\n{json.dumps(facts or {}, ensure_ascii=False)}\n\n"
+            f"## Dữ liệu tra cứu nội bộ:\n{data_text or '(không có)'}\n\n"
+            f"## Nội dung cuộc họp gần nhất:\n{context_text or '(chưa có)'}")
+
+
+async def generate_dashboard(meeting_id: int, prompt_request: str, context_text: str = "", data_text: str = "",
+                             facts: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    raw = await _call_llm(DASHBOARD_SYSTEM, _data_prompt(prompt_request, context_text, data_text, facts), max_tokens=4000)
+    dash = normalize_dashboard(_json_from_text(raw))
+    if dash is None:
+        raise RuntimeError("AI chưa dựng được dashboard hợp lệ, hãy nói rõ cần biểu đồ số liệu gì")
+    aid = db.save_artifact(meeting_id=meeting_id, kind="dashboard", title=f"Dashboard: {dash['title'][:60]}",
+                           content=json.dumps(dash, ensure_ascii=False), prompt_trigger=prompt_request)
+    return db.get_artifact(aid)
+
+
+async def _refine_dashboard(meeting_id: int, art: Dict[str, Any], user_feedback: str) -> Dict[str, Any]:
+    cur = normalize_dashboard(_json_from_text(art.get("content", ""))) or {}
+    prompt = (f"## Dashboard hiện tại (JSON):\n{json.dumps(cur, ensure_ascii=False, indent=1)}\n\n"
+              f"## Yêu cầu chỉnh sửa:\n\"{user_feedback}\"")
+    data = _json_from_text(await _call_llm(DASHBOARD_REFINE_SYSTEM, prompt, max_tokens=4000))
+    dash = normalize_dashboard(data)
+    if dash is None:
+        raise RuntimeError("AI chưa sửa được dashboard, hãy nói rõ cần đổi biểu đồ nào, đổi thế nào")
+    new_aid = db.save_artifact(meeting_id=meeting_id, kind="dashboard", title=art.get("title", ""),
+                               content=json.dumps(dash, ensure_ascii=False), prompt_trigger=user_feedback,
+                               parent_id=art["id"])
+    out = db.get_artifact(new_aid)
+    out["chat_message"] = str((data or {}).get("chat_message") or "").strip() or f"Đã sửa dashboard: {user_feedback}"
+    return out
+
+
+# ==============================================================================
+# 3f. BÁO CÁO NHANH (văn bản chiếu lên màn hình: tóm tắt, gạch đầu dòng, bảng)
+# ==============================================================================
+REPORT_SYSTEM = """Bạn là trợ lý cuộc họp, viết BÁO CÁO NHANH để chiếu ngay lên màn hình.
+Markdown: "# Tiêu đề", một đoạn tóm tắt 2-3 câu, các mục "##" với gạch đầu dòng ngắn, bảng khi có số liệu hoặc danh sách việc.
+Viết cụ thể: tên người, số liệu, hạn chót. Chỉ dùng dữ liệu được cung cấp; thiếu thì ghi rõ "chưa có dữ liệu".
+Ngày dd/mm/yyyy, tiền 1.000.000đ, không dùng gạch dài. Tối đa khoảng 300 từ. Chỉ trả về nội dung markdown."""
+
+
+def report_title(markdown: str, fallback: str = "Báo cáo nhanh") -> str:
+    m = re.search(r"^\s*#{1,3}\s+(.+)$", markdown or "", re.M)
+    return (m.group(1).strip() if m else fallback).strip("* ")[:80] or fallback
+
+
+def save_report(meeting_id: int, markdown: str, prompt_request: str = "", title: str = "") -> Dict[str, Any]:
+    md = (markdown or "").strip()
+    aid = db.save_artifact(meeting_id=meeting_id, kind="report", title=f"Báo cáo: {title or report_title(md)}",
+                           content=md, prompt_trigger=prompt_request)
+    return db.get_artifact(aid)
+
+
+async def generate_report(meeting_id: int, prompt_request: str, context_text: str = "", data_text: str = "",
+                          facts: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    raw = await _call_llm(REPORT_SYSTEM, _data_prompt(prompt_request, context_text, data_text, facts), max_tokens=2500)
+    md = re.sub(r"^```(?:markdown|md)?\s*|\s*```$", "", (raw or "").strip())
+    if len(md) < 20:
+        raise RuntimeError("AI chưa viết được báo cáo")
+    return save_report(meeting_id, md, prompt_request)
+
+
+# ==============================================================================
 # 4. TRÒ CHUYỆN CO-DESIGN HAI CHIỀU (CONVERSATIONAL CO-DESIGN REFINEMENT)
 # ==============================================================================
 REFINE_SYSTEM = """Bạn là AI Co-Designer làm việc trực tiếp cùng người dùng trong cuộc họp.
@@ -393,6 +615,8 @@ async def co_design_refine(meeting_id: int, artifact_id: int, user_feedback: str
         raise ValueError(f"Không tìm thấy artifact id={artifact_id}")
     if art.get("kind") == "slides":
         return await _refine_slides(meeting_id, art, user_feedback, slide_index)
+    if art.get("kind") == "dashboard":
+        return await _refine_dashboard(meeting_id, art, user_feedback)
 
     kind = art.get("kind", "web_design")
     cur_content = art.get("content", "")

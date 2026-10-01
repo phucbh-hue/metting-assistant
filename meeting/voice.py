@@ -16,7 +16,7 @@ import logging
 import os
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
@@ -241,6 +241,7 @@ class SpeakerProfile:
     first_t: float = 0.0
     last_t: float = 0.0
     merged_into: Optional[int] = None
+    apart: List[int] = field(default_factory=list)   # Người dùng đã tách khỏi các hồ sơ này: không tự gộp lại
 
     @property
     def label(self) -> str:
@@ -275,6 +276,7 @@ class SpeakerProfile:
             "first_t": self.first_t,
             "last_t": self.last_t,
             "merged_into": self.merged_into,
+            "apart": list(self.apart),
             "has_voice": self.vsum is not None and self.weight > 0,
         }
         if with_vector:
@@ -320,6 +322,11 @@ class MeetingSpeakers:
     SPLIT_MIN_W = 6.0          # ... và >= 6 giây tiếng nói
     SPLIT_COHESION_GAP = 0.12  # Mỗi cụm con phải "chặt" hơn độ giống giữa 2 cụm ít nhất ngần này
     SPLIT_WINDOW = 40          # Xét tối đa 40 câu có vector gần nhất của hồ sơ
+    SPLIT_SAME_T = 0.86        # Tâm 2 cụm con giống từ mức này -> chắc chắn cùng một người, không tách
+    SPLIT_MEMBER_GAP = 0.10    # Tách theo từng câu: câu gần cụm mình hơn cụm kia trung bình ngần này
+    SPLIT_MEMBER_AGREE = 0.75  # ... và >= 75% (theo thời lượng) số câu gần cụm mình hơn
+    # Đo trên 3 cuộc họp thật có người nói trực tiếp + podcast phát qua loa: đúng 82% -> 87% câu,
+    # không đổi kết quả ở các cuộc họp khác (#15, #26, #30).
     MAX_W = 8.0                # Trọng số tối đa của một câu khi cộng vào centroid
     MAX_HISTORY = 2000         # Số câu tối đa giữ trong RAM
 
@@ -698,6 +705,9 @@ class MeetingSpeakers:
             if same_rk and self.profile(max(same_rk, key=lambda s: s["t"])["sid"]) is q:
                 votes[q.sid] = max(votes.get(q.sid, 0.0), votes.get(p.sid, 0.0) + 1.0)
             self.raw_votes[rk] = votes
+        # Tách dựa trên bằng chứng từng câu (mạnh hơn so tâm cụm khi tự gộp): không tự gộp lại, tránh vòng tách-gộp
+        p.apart.append(q.sid)
+        q.apart.append(p.sid)
         self.splits.append((p.sid, q.sid))
         self.dirty.update({p.sid, q.sid})
         log.info("meeting.voice: tách %d câu khỏi hồ sơ %d thành người nói mới %d (cos=%.2f)",
@@ -710,13 +720,26 @@ class MeetingSpeakers:
         if min(len(i) for i in idx) < self.SPLIT_MIN_SEGS or min(W[i].sum() for i in idx) < self.SPLIT_MIN_W:
             return None
         sums = [(V[i] * W[i, None]).sum(axis=0) for i in idx]
-        cross = float(unit(sums[0]) @ unit(sums[1]))
-        if cross >= self.SPLIT_CROSS_T:
+        cents = [unit(s) for s in sums]
+        cross = float(cents[0] @ cents[1])
+        if cross >= self.SPLIT_SAME_T:
             return None
-        coh = min(float(np.mean([V[j] @ unit(sums[c] - V[j] * W[j]) for j in idx[c]])) for c in (0, 1))
-        if coh < cross + self.SPLIT_COHESION_GAP:
-            return None
-        return cross, coh
+        # (a) Hai cụm khác hẳn nhau ở mức tâm cụm
+        if cross < self.SPLIT_CROSS_T:
+            coh = min(float(np.mean([V[j] @ unit(sums[c] - V[j] * W[j]) for j in idx[c]])) for c in (0, 1))
+            if coh >= cross + self.SPLIT_COHESION_GAP:
+                return cross, coh
+        # (b) Hai giọng gần nhau (tâm cụm vẫn giống ~0.7-0.8, ví dụ cùng phát qua loa) nhưng TỪNG CÂU vẫn gần
+        # cụm của mình hơn hẳn cụm kia. Tâm cụm lớn bị "làm mượt" nên so tâm-tâm đánh giá quá cao độ giống.
+        gaps, agrees = [], []
+        for c in (0, 1):
+            own = np.array([V[j] @ unit(sums[c] - V[j] * W[j]) for j in idx[c]])
+            other = V[idx[c]] @ cents[1 - c]
+            gaps.append(float(np.average(own - other, weights=W[idx[c]])))
+            agrees.append(float(np.average(own > other, weights=W[idx[c]])))
+        if min(gaps) >= self.SPLIT_MEMBER_GAP and min(agrees) >= self.SPLIT_MEMBER_AGREE:
+            return cross, min(gaps)
+        return None
 
     def pop_splits(self) -> List[Tuple[int, int]]:
         out, self.splits = self.splits, []
@@ -747,6 +770,8 @@ class MeetingSpeakers:
             if p.name and q.name and p.name.casefold() != q.name.casefold():
                 continue
             if p.voice_id is not None and q.voice_id is not None and p.voice_id != q.voice_id:
+                continue
+            if q.sid in p.apart or p.sid in q.apart:
                 continue
             s = cosine_sim(c, qc)
             thr = self.MERGE_T if min(p.weight, q.weight) >= self.RELIABLE_W else self.MERGE_T_WEAK
@@ -842,6 +867,41 @@ class MeetingSpeakers:
         affected = [dst.sid] + ([old.sid] if old else [])
         return dst, affected
 
+    def split_from(self, key: Any) -> Tuple[Optional[SpeakerProfile], List[Any]]:
+        """Người dùng chỉ ra "từ câu này trở đi là người khác": mọi câu từ đây về sau của hồ sơ sang người nói mới.
+
+        Dùng khi hai người có giọng quá giống nhau (ví dụ cùng phát qua loa) bị gộp chung một hồ sơ.
+        Trả về (hồ sơ mới, các câu đã chuyển); (None, []) nếu đây là câu đầu tiên của hồ sơ."""
+        seg = self.by_key.get(key)
+        p = self.profile(seg["sid"]) if seg else None
+        if p is None:
+            return None, []
+        mine = [s for s in self.segs if self.profile(s["sid"]) is p]
+        moved = [s for s in mine if s["t"] >= seg["t"]]
+        if not moved or len(moved) == len(mine):
+            return None, []
+        q = self._new_profile(seg["t"])
+        for s in moved:
+            self._detach(s, p)
+            s["sid"] = q.sid
+            s["reason"] = "manual"
+            self._attach(s, q)
+        p.apart.append(q.sid)
+        q.apart.append(p.sid)
+        # Nhãn Soniox các câu vừa chuyển: tính lại phiếu theo người nói thực tế, câu gần nhất quyết định câu ngắn sắp tới
+        for rk in {s["rk"] for s in moved if s["rk"] is not None}:
+            same = [s for s in self.segs if s["rk"] == rk]
+            votes: Dict[int, float] = {}
+            for s in same:
+                sid = self.profile(s["sid"]).sid
+                votes[sid] = votes.get(sid, 0.0) + self._vote_w(s)
+            latest = self.profile(max(same, key=lambda s: s["t"])["sid"])
+            if latest is q:
+                votes[q.sid] = max(votes.get(q.sid, 0.0), votes.get(p.sid, 0.0) + 1.0)
+            self.raw_votes[rk] = votes
+        self.dirty.update({p.sid, q.sid})
+        return q, [s["key"] for s in moved]
+
     def forget_voice(self, voice_id: int):
         """Hồ sơ giọng toàn cục bị xóa: bỏ liên kết nhưng giữ tên trong buổi họp."""
         self.remove_anchor(voice_id)
@@ -899,6 +959,7 @@ class MeetingSpeakers:
                 sid=sid, name=d.get("name") or "", voice_id=d.get("voice_id"), role=d.get("role") or "",
                 origin=d.get("origin") or "new", locked=bool(d.get("locked")),
                 confidence=float(d.get("confidence") or 0.0), merged_into=d.get("merged_into"),
+                apart=[int(x) for x in (d.get("apart") or [])],
                 first_t=float(d.get("first_t") or 0.0), last_t=float(d.get("last_t") or 0.0),
             )
             self.profiles[sid] = p

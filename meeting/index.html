@@ -12,6 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <script>
     tailwind.config = {
       theme: {
@@ -196,10 +197,11 @@
     .stage-side { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
     .stage-main { display: flex; flex-direction: column; gap: 10px; min-height: 0; min-width: 0; }
     .stage-foot { grid-column: 1 / -1; display: flex; gap: 12px; align-items: center; }
-    #stage-frame { flex: 1 1 0%; min-height: 0; display: grid; place-items: center; }
+    #stage-frame { flex: 1 1 0%; min-height: 0; display: grid; place-items: center; grid-template-rows: minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); }
     @media (max-width: 1023px) {
       .stage { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto auto; overflow-y: auto; padding: 12px 16px; }
       .stage-side { display: grid; grid-template-columns: 88px minmax(0, 1fr); align-items: start; }
+      .stage-side, .stage-main { min-height: auto; }   /* màn hẹp: cao theo nội dung, cả màn trình chiếu cuộn */
       .stage-side #av-insights, .stage-side #voice-hint { grid-column: 1 / -1; max-height: 30vh; }
       #stage-frame { flex: none; }
       .stage-foot { flex-wrap: wrap; }
@@ -259,6 +261,48 @@
     .prompter li { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; }
     .prompter li.done { color: rgb(var(--muted)); text-decoration: line-through; }
     .prompter li.next { color: rgb(var(--accent)); font-weight: 600; }
+    /* --------- dashboard số liệu (màu chuỗi: bảng 8 màu đã kiểm tra mù màu trên nền #121a20) --------- */
+    :root { --viz-surface: #121a20; }
+    .dash { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+    .dash-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 6px 16px; flex-wrap: wrap; }
+    .dash-title { font-size: 18px; font-weight: 700; line-height: 1.3; }
+    .dash-sub, .dash-src { font-size: 12.5px; color: rgb(var(--muted)); }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+    .kpi { background: var(--viz-surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; min-width: 0; }
+    .kpi-l { font-size: 12.5px; color: rgb(var(--muted)); }
+    .kpi-v { font-size: 26px; font-weight: 600; line-height: 1.2; margin-top: 2px; overflow-wrap: anywhere; }
+    .kpi-u { font-size: 13px; font-weight: 500; color: rgb(var(--muted)); margin-left: 5px; }
+    .kpi-d { font-size: 12.5px; margin-top: 4px; color: rgb(var(--ink) / .86); }
+    .kpi-n { font-size: 12px; margin-top: 2px; color: rgb(var(--muted)); }
+    .dash-hl { display: flex; flex-direction: column; gap: 6px; }
+    .dash-hl li { position: relative; padding-left: 14px; font-size: 13.5px; line-height: 1.5; }
+    .dash-hl li::before { content: ""; position: absolute; left: 0; top: .6em; width: 6px; height: 6px; border-radius: 99px; background: rgb(var(--accent)); }
+    .charts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    .chart-card { margin: 0; background: var(--viz-surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; min-width: 0; }
+    .chart-h { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .chart-t { flex: 1; min-width: 0; font-weight: 600; font-size: 14px; }
+    .chart-tg { flex: none; font-size: 12px; color: rgb(var(--muted)); padding: 3px 9px; border-radius: 8px; border: 1px solid var(--line); }
+    .chart-tg:hover { color: rgb(var(--ink)); }
+    .sample-badge { flex: none; font-size: 11.5px; padding: 2px 8px; border-radius: 99px; color: #fab219; background: rgba(250,178,25,.10); border: 1px solid rgba(250,178,25,.35); }
+    .chart-box { position: relative; height: 220px; }
+    .chart-note { margin-top: 8px; font-size: 12px; color: rgb(var(--muted)); }
+    .dtable { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .dtable th { text-align: left; font-weight: 600; color: rgb(var(--muted)); padding: 6px 8px; border-bottom: 1px solid var(--line-strong); }
+    .dtable td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    .dtable td.n { text-align: right; font-variant-numeric: tabular-nums; }
+    .dtable-wrap { overflow-x: auto; max-height: 340px; overflow-y: auto; }
+    .dash-wide .charts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .dash-wide .chart-card.is-table, .dash-wide .chart-card.is-wide { grid-column: 1 / -1; }
+    .dash-wide .chart-box { height: 250px; }
+    .dash-wide .kpi-v { font-size: 30px; }
+    .dash-wide .dash-title { font-size: 22px; }
+    @media (max-width: 1023px) { .dash-wide .charts { grid-template-columns: minmax(0, 1fr); } }
+    .stage-scroll { width: 100%; height: 100%; overflow-y: auto; padding-right: 4px; }
+    .report-stage { max-width: 960px; margin: 0 auto; font-size: 16.5px; line-height: 1.7; }
+    .report-stage h1 { font-size: 26px; } .report-stage h2 { font-size: 19px; }
+    .report-stage table { font-size: 15px; }
+    .turn-find { display: flex; gap: 7px; font-size: 13px; line-height: 1.5; margin: 2px 0; color: rgb(var(--ink) / .9); }
+    .turn-find::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 99px; margin-top: 7px; background: rgb(var(--accent)); }
   </style>
 </head>
 <body class="flex flex-col-reverse sm:flex-row overflow-hidden">
@@ -369,7 +413,8 @@
             <div id="ai-tabs" class="px-2 pt-2 pb-1 flex items-center gap-1 overflow-x-auto no-scrollbar flex-1 min-w-0" role="tablist" aria-label="Không gian AI">
               <button class="tab" role="tab" data-act="tab" data-tab="jarvis" aria-selected="true"><span data-assistant-name>Jarvis</span></button>
               <button class="tab" role="tab" data-act="tab" data-tab="slides" aria-selected="false">Slide <span class="count num" data-count="slides"></span></button>
-              <button class="tab" role="tab" data-act="tab" data-tab="minutes" aria-selected="false">Biên bản <span class="count num" data-count="minutes"></span></button>
+              <button class="tab" role="tab" data-act="tab" data-tab="dashboard" aria-selected="false">Dashboard <span class="count num" data-count="dashboard"></span></button>
+              <button class="tab" role="tab" data-act="tab" data-tab="docs" aria-selected="false">Báo cáo <span class="count num" data-count="docs"></span></button>
               <button class="tab" role="tab" data-act="tab" data-tab="diagram" aria-selected="false">Sơ đồ <span class="count num" data-count="diagram"></span></button>
               <button class="tab" role="tab" data-act="tab" data-tab="web_design" aria-selected="false">Giao diện <span class="count num" data-count="web_design"></span></button>
             </div>
@@ -445,7 +490,7 @@
           <div class="font-semibold text-[18px]" data-assistant-name>Jarvis</div>
           <div class="text-[13px] text-muted" data-av-status>Đang chờ</div>
         </div>
-        <div id="av-bubble" class="bubble text-muted" aria-live="polite">Gọi tên mình kèm yêu cầu, hoặc gõ ở ô bên dưới.</div>
+        <div id="av-bubble" class="bubble text-muted" aria-live="polite">Gọi tên em kèm yêu cầu, hoặc gõ ở ô bên dưới.</div>
       </div>
       <div class="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2" id="av-insights" aria-label="Nhận xét của trợ lý"></div>
       <p id="voice-hint" class="text-[12px] text-muted hidden"></p>
@@ -810,7 +855,7 @@ function closeRoom() {
   if (!R) return;
   if (STAGE.open) closeStage();
   stopVoice(); $('#av-insights').innerHTML = ''; avSet('idle', 'neutral');
-  const bub = $('#av-bubble'); bub.className = 'bubble text-muted'; bub.textContent = 'Gọi tên mình kèm yêu cầu, hoặc gõ ở ô bên dưới.';
+  const bub = $('#av-bubble'); bub.className = 'bubble text-muted'; bub.textContent = 'Gọi tên em kèm yêu cầu, hoặc gõ ở ô bên dưới.';
   R.closed = true;
   clearTimeout(R.wsTimer); clearInterval(R.pingTimer); clearInterval(R.pollTimer);
   if (R.ws) { try { R.ws.close(); } catch (e) { /* bỏ qua */ } }
@@ -936,6 +981,12 @@ function onEvent(R, ev) {
       renderTopbar(); renderMicBox(); renderTabs();
       if (ev.minutes_status === 'failed') toast(`Không lập được biên bản tự động. Thử nhờ ${AN()} lập lại.`, 'err');
       break;
+    case 'ai_progress': {
+      const t = currentTurn();
+      if (ev.kind === 'status') t.steps.push(ev.text);
+      else if (ev.kind !== 'ack') (t.finds = t.finds || []).push(ev.text);
+      renderJarvis(); break;
+    }
     case 'ai_say': {
       const t = R.turns[R.turns.length - 1];
       if (t && !t.done && !t.listening) { t.done = true; t.response = ev.text; renderJarvis(); } else appendAssistantNote(ev.text);
@@ -946,7 +997,7 @@ function onEvent(R, ev) {
       const items = ev.items || [];
       if (t && !t.done) {
         t.insights = items;
-        if (ev.source === 'analysis') { t.done = true; if (!items.length) t.response = 'Mình đã xem lại cuộc họp, chưa thấy điểm nào cần lưu ý thêm.'; }
+        if (ev.source === 'analysis') { t.done = true; if (!items.length) t.response = 'Em đã xem lại cuộc họp, chưa thấy điểm nào cần lưu ý thêm.'; }
       } else if (items.length) { const n = newTurn('', 'note'); n.done = true; n.insights = items; }
       renderJarvis(); break;
     }
@@ -1224,10 +1275,20 @@ async function lineMenu(btn, seq) {
   const items = [{ label: 'Câu này là của' }];
   [...R.speakers.values()].sort((a, b) => a.sid - b.sid).forEach(p => items.push({ id: `to:${p.sid}`, text: p.label + (p.sid === s.speaker_key ? ' (hiện tại)' : ''), swatch: colorOf(p.sid), disabled: p.sid === s.speaker_key }));
   items.push({ id: 'to:new', text: 'Một người nói mới' });
+  const firstOfSpk = R.order.find(q => (R.segs.get(q) || {}).speaker_key === s.speaker_key);
+  if (firstOfSpk !== undefined && firstOfSpk !== seq) items.push({ id: 'split', text: 'Từ câu này trở đi là người khác' });
   items.push({ id: 'copy', text: 'Sao chép câu' });
   const choice = await openMenu(btn, items);
   if (!choice) return;
   if (choice === 'copy') { try { await navigator.clipboard.writeText(s.text); toast('Đã sao chép.'); } catch (e) { toast('Trình duyệt chặn sao chép.', 'err'); } return; }
+  if (choice === 'split') {
+    try {
+      const r = await POST(`/api/meetings/${R.id}/segments/${seq}/split-after`);
+      toast(`Đã tách ${r.moved} câu thành ${r.speaker.label}. Bấm vào tên để đặt tên.`);
+      await refreshRoomIfNoWs(R);
+    } catch (e) { toast(e.message, 'err'); }
+    return;
+  }
   const target = choice === 'to:new' ? null : parseInt(choice.slice(3), 10);
   try {
     const r = await POST(`/api/meetings/${R.id}/segments/${seq}/speaker`, { target_sid: target });
@@ -1271,9 +1332,9 @@ async function endMeeting() {
   try {
     const r = await POST(`/api/meetings/${R.id}/archive`);
     R.meeting.status = 'ended'; R.meeting.ended_at = Date.now() / 1000; R.meeting.minutes_status = r.minutes_status;
-    toast(r.minutes_status === 'pending' ? 'Đã kết thúc. Biên bản đang được lập, sẽ hiện ở thẻ Biên bản.' : 'Đã kết thúc cuộc họp.');
+    toast(r.minutes_status === 'pending' ? 'Đã kết thúc. Biên bản đang được lập, sẽ hiện ở thẻ Báo cáo.' : 'Đã kết thúc cuộc họp.');
     renderTopbar(); renderMicBox(); renderTabs();
-    if (r.minutes_status === 'pending') { switchTab('minutes'); watchMinutes(R); }
+    if (r.minutes_status === 'pending') { switchTab('docs'); watchMinutes(R); }
   } catch (e) { toast(e.message, 'err'); }
 }
 function watchMinutes(R) {
@@ -1332,7 +1393,11 @@ const QUICK = [
   'Vẽ sơ đồ luồng xử lý đang được bàn',
   'Tra cứu ticket Jira liên quan tới nội dung vừa nói',
 ];
-const KIND_LABEL = { minutes: 'Biên bản', diagram: 'Sơ đồ', web_design: 'Giao diện', slides: 'Slide' };
+const KIND_LABEL = { minutes: 'Biên bản', diagram: 'Sơ đồ', web_design: 'Giao diện', slides: 'Slide', dashboard: 'Dashboard', report: 'Báo cáo' };
+const TAB_KINDS = { slides: ['slides'], dashboard: ['dashboard'], docs: ['report', 'minutes'], diagram: ['diagram'], web_design: ['web_design'] };
+const tabOf = kind => Object.keys(TAB_KINDS).find(t => TAB_KINDS[t].includes(kind)) || 'docs';
+const inTab = (a, tab) => (TAB_KINDS[tab] || []).includes(a.kind);
+const VISUAL_KINDS = new Set(['dashboard', 'slides', 'web_design', 'diagram', 'report']);
 function newTurn(prompt, via = 'chat') {
   const t = { prompt, via, steps: [], tools: [], response: null, artifact: null, error: null, done: false };
   S.room.turns.push(t); return t;
@@ -1343,7 +1408,7 @@ function currentTurn() {
 }
 function finishTurn(t, res) {
   if (!t || t.done) return;
-  t.done = true; t.response = res && res.chat_response; t.artifact = res && res.artifact;
+  t.done = true; t.response = res && res.chat_response; t.artifact = res && res.artifact; t.report = res && res.report;
   if (t.artifact) addArtifact(t.artifact, false);
   renderJarvis();
 }
@@ -1367,10 +1432,12 @@ function renderJarvis() {
     const tools = t.tools.length ? `<div class="flex flex-wrap gap-1 mb-1">${t.tools.map(x => `<span class="chip">tra cứu ${esc(x)}</span>`).join('')}</div>` : '';
     const body = t.listening ? `<div class="flex items-center gap-2 step"><span class="dot-live"></span>${esc(AN())} đang nghe yêu cầu của bạn...</div>`
       : t.error ? `<p style="color:rgb(var(--danger))">${esc(t.error)}</p>`
-      : (t.response ? `<div class="md">${renderMd(t.response)}</div>` : (t.done ? '' : `<div class="flex items-center gap-2 step"><span class="spinner"></span>${esc(AN())} đang trả lời...</div>`));
+      : (t.response ? `<div class="md">${renderMd(t.response)}</div>${t.report ? `<div class="md mt-2">${renderMd(t.report)}</div>` : ''}`
+        : (t.done ? '' : `<div class="flex items-center gap-2 step"><span class="spinner"></span>${esc(AN())} đang xử lý...</div>`));
+    const finds = (t.finds || []).map(f => `<div class="turn-find">${esc(f)}</div>`).join('');
     const art = t.artifact ? `<button class="btn btn-ghost btn-sm mt-2" data-act="open-art" data-aid="${t.artifact.id}">Mở ${esc(KIND_LABEL[t.artifact.kind] || 'sản phẩm')} v${t.artifact.version || 1}</button>` : '';
     const ins = (t.insights || []).length ? `<div class="flex flex-col gap-1.5 mb-2">${t.insights.map(insightHtml).join('')}</div>` : '';
-    return `${user}<div class="turn-ai">${steps}${tools}${ins}${body}${art}</div>`;
+    return `${user}<div class="turn-ai">${steps}${tools}${finds}${ins}${body}${art}</div>`;
   }).join('');
   box.scrollTop = box.scrollHeight;
 }
@@ -1383,14 +1450,14 @@ function renderMd(md) {
 function addArtifact(art, show) {
   const R = S.room; if (!R || !art || !art.id) return;
   if (!R.artifacts.some(a => a.id === art.id)) R.artifacts.push(art);
-  R.artSel[art.kind] = art.id;
+  R.artSel[tabOf(art.kind)] = art.id;
   renderTabs();
-  if (show) switchTab(art.kind);
+  if (show) switchTab(tabOf(art.kind));
 }
 function renderTabs() {
   const R = S.room; if (!R) return;
-  ['slides', 'minutes', 'diagram', 'web_design'].forEach(k => {
-    const n = R.artifacts.filter(a => a.kind === k).length;
+  Object.keys(TAB_KINDS).forEach(k => {
+    const n = R.artifacts.filter(a => inTab(a, k)).length;
     const c = $(`[data-count="${k}"]`); if (c) c.textContent = n ? n : '';
   });
   $$('[data-act="tab"]').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === R.tab ? 'true' : 'false'));
@@ -1412,34 +1479,36 @@ $('#ai-tabs').addEventListener('scroll', updateTabFade, { passive: true });
 window.addEventListener('resize', updateTabFade);
 function switchTab(tab) { if (!S.room) return; S.room.tab = tab; renderTabs(); }
 function currentArtifact() {
-  const R = S.room; const list = R.artifacts.filter(a => a.kind === R.tab);
+  const R = S.room; const list = R.artifacts.filter(a => inTab(a, R.tab));
   if (!list.length) return null;
   return list.find(a => a.id === R.artSel[R.tab]) || list[list.length - 1];
 }
 async function renderArtifactPane() {
   const R = S.room; const pane = $('#pane-art'); const bar = $('#art-bar'); const input = $('#ask-input');
-  const list = R.artifacts.filter(a => a.kind === R.tab);
+  const list = R.artifacts.filter(a => inTab(a, R.tab));
   const art = currentArtifact();
+  unmountDash(pane);
   $('#web-tools').classList.toggle('hidden', R.tab !== 'web_design' || !art);
   if (!art) {
     bar.classList.add('hidden');
     input.placeholder = `Hỏi ${AN()} về cuộc họp này`;
-    if (R.tab === 'minutes' && R.meeting.minutes_status === 'pending') {
+    if (R.tab === 'docs' && R.meeting.minutes_status === 'pending') {
       pane.innerHTML = '<div class="flex items-center gap-2 text-muted"><span class="spinner"></span>AI đang lập biên bản từ transcript...</div>';
     } else {
       const hint = {
-        minutes: ['Biên bản được lập tự động khi kết thúc cuộc họp.', 'Lập biên bản ngay', 'Lập biên bản cuộc họp với quyết định và bảng việc cần làm'],
+        docs: [`Biên bản được lập tự động khi kết thúc cuộc họp. Hỏi ${AN()} "tổng hợp nhanh cuộc họp" để có báo cáo ngay.`, 'Lập biên bản ngay', 'Lập biên bản cuộc họp với quyết định và bảng việc cần làm'],
+        dashboard: [`Nhờ ${AN()} vẽ biểu đồ, báo cáo số liệu kiểu Power BI từ dữ liệu Jira và thống kê cuộc họp.`, 'Dựng dashboard', 'Dựng dashboard số liệu: tiến độ ticket và thời lượng phát biểu của từng người'],
         diagram: [`Nhờ ${AN()} vẽ sơ đồ từ nội dung đang bàn.`, 'Vẽ sơ đồ luồng đang bàn', 'Vẽ sơ đồ luồng xử lý đang được bàn trong cuộc họp'],
         web_design: [`Nhờ ${AN()} phác thảo giao diện cho ý tưởng trong cuộc họp.`, 'Phác thảo giao diện', 'Thiết kế giao diện web cho ý tưởng chính đang bàn'],
         slides: [`Nhờ ${AN()} soạn bộ slide từ nội dung cuộc họp, rồi trình chiếu và điều khiển bằng giọng nói.`, 'Soạn slide báo cáo', 'Làm slide báo cáo tiến độ và các quyết định của cuộc họp'],
       }[R.tab];
-      pane.innerHTML = `<div class="text-muted"><p class="mb-3">${hint[0]}${R.meeting.minutes_status === 'failed' && R.tab === 'minutes' ? ' Lần lập tự động vừa rồi thất bại.' : ''}</p>
+      pane.innerHTML = `<div class="text-muted"><p class="mb-3">${hint[0]}${R.meeting.minutes_status === 'failed' && R.tab === 'docs' ? ' Lần lập tự động vừa rồi thất bại.' : ''}</p>
         <button class="btn btn-ghost btn-sm" data-act="quick" data-prompt="${esc(hint[2])}">${hint[1]}</button></div>`;
     }
     return;
   }
   bar.classList.remove('hidden');
-  $('#art-version').innerHTML = list.map(a => `<option value="${a.id}" ${a.id === art.id ? 'selected' : ''}>${esc(a.title)} - v${a.version || 1}</option>`).join('');
+  $('#art-version').innerHTML = [...list].reverse().map(a => `<option value="${a.id}" ${a.id === art.id ? 'selected' : ''}>${esc(artLabel(a))} - v${a.version || 1}</option>`).join('');
   input.placeholder = `Yêu cầu sửa ${KIND_LABEL[art.kind].toLowerCase()} này`;
   if (art.kind === 'slides') {
     const deck = parseDeck(art.content);
@@ -1455,8 +1524,13 @@ async function renderArtifactPane() {
         <button class="btn btn-primary btn-sm" data-act="stage-show" data-aid="${art.id}" data-slide="${i}">Trình chiếu</button>
       </div>
       ${deck.slides[i].notes ? `<p class="text-[12.5px] text-muted mt-3"><span class="text-ink font-medium">Ghi chú cho người trình bày:</span> ${esc(deck.slides[i].notes)}</p>` : ''}`;
-  } else if (art.kind === 'minutes') {
-    pane.innerHTML = `<article class="md">${renderMd(art.content)}</article>`;
+  } else if (art.kind === 'dashboard') {
+    const d = parseDash(art.content);
+    pane.innerHTML = `${dashHtml(d, false)}<div class="flex justify-end mt-3"><button class="btn btn-primary btn-sm" data-act="stage-show" data-aid="${art.id}">Trình chiếu</button></div>`;
+    mountDash(pane, d);
+  } else if (art.kind === 'minutes' || art.kind === 'report') {
+    pane.innerHTML = `<article class="md">${renderMd(art.content)}</article>
+      <div class="flex justify-end mt-3"><button class="btn btn-ghost btn-sm" data-act="stage-show" data-aid="${art.id}">Trình chiếu</button></div>`;
   } else if (art.kind === 'diagram') {
     pane.innerHTML = '<div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang vẽ sơ đồ...</div>';
     try {
@@ -1517,7 +1591,7 @@ async function sendCommand(text) {
   } catch (e) {
     t = t || newTurn(text, 'chat');
     t.done = true; t.error = e.message; renderJarvis();
-    avSet('idle', 'concerned'); showBubble('Mình chưa làm được yêu cầu này.', e.message);
+    avSet('idle', 'concerned'); showBubble('Em chưa làm được yêu cầu này.', e.message);
   }
 }
 $('#ask-form').addEventListener('submit', e => { e.preventDefault(); submitAsk($('#ask-input').value); });
@@ -1774,7 +1848,11 @@ function avFrame(ts) {
     if (k >= 1) { AV.blinkT = -1; AV.blinkAt = ts + 2200 + Math.random() * 3800; } else open = 1 - Math.sin(k * Math.PI);
   }
   let target = 0;
-  if (speaking) { AV.phase += 0.36 + Math.random() * 0.12; target = 0.28 + 0.38 * Math.abs(Math.sin(AV.phase)) + (ts - AV.kickAt < 110 ? 0.25 : 0); }
+  if (speaking) {
+    const lvl = voiceLevel();
+    if (lvl !== null) target = Math.min(1, lvl * 5.5);
+    else { AV.phase += 0.36 + Math.random() * 0.12; target = 0.28 + 0.38 * Math.abs(Math.sin(AV.phase)) + (ts - AV.kickAt < 110 ? 0.25 : 0); }
+  }
   AV.mouth += (target - AV.mouth) * 0.35;
   const smile = AV.mood === 'happy' ? 0.9 : AV.mood === 'concerned' ? -0.55 : st === 'thinking' ? 0.1 : 0.6;
   const lift = st === 'thinking' ? -5 : st === 'listening' ? -2.5 : 0;
@@ -1799,9 +1877,9 @@ function avFrame(ts) {
 }
 
 const VOICE = { enabled: true, supported: 'speechSynthesis' in window, voice: null, queue: [], current: null, audible: false, gateUntil: 0,
-  allowOnline: false, onlineAvailable: false };
+  allowOnline: false, onlineAvailable: false, server: false, ctx: null, analyser: null, src: null, buf: null };
 try { VOICE.enabled = localStorage.getItem('mc_voice') !== 'off'; VOICE.allowOnline = localStorage.getItem('mc_voice_online') === 'on'; } catch (e) { /* bỏ qua */ }
-/** Ưu tiên giọng cài trên máy (không gửi dữ liệu ra ngoài); giọng trực tuyến chỉ dùng khi người dùng cho phép. */
+/** Giọng dự phòng của trình duyệt: ưu tiên giọng cài trên máy; giọng trực tuyến chỉ dùng khi người dùng cho phép. */
 function pickVoice() {
   if (!VOICE.supported) return;
   const vi = speechSynthesis.getVoices().filter(v => /^vi/i.test(v.lang));
@@ -1812,21 +1890,52 @@ function pickVoice() {
   updateVoiceUi();
 }
 if (VOICE.supported) { pickVoice(); speechSynthesis.addEventListener('voiceschanged', pickVoice); }
+/** Giọng chính: Piper tiếng Việt chạy ngay trên máy chủ (miễn phí, không gửi nội dung ra ngoài). */
+async function loadTtsStatus() {
+  try { VOICE.server = !!(await GET('/api/tts/status')).available; } catch (e) { VOICE.server = false; }
+  updateVoiceUi();
+}
+function audioCtx() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  if (!VOICE.ctx) {
+    VOICE.ctx = new AC();
+    VOICE.analyser = VOICE.ctx.createAnalyser();
+    VOICE.analyser.fftSize = 512;
+    VOICE.analyser.connect(VOICE.ctx.destination);
+  }
+  if (VOICE.ctx.state === 'suspended') VOICE.ctx.resume().catch(() => {});
+  return VOICE.ctx;
+}
+// Trình duyệt chỉ cho phát âm thanh sau một thao tác của người dùng: mở khóa ở lần bấm hoặc gõ phím đầu tiên
+['pointerdown', 'keydown'].forEach(t => document.addEventListener(t, () => { if (VOICE.enabled && VOICE.server) audioCtx(); }, { passive: true }));
+/** Âm lượng tức thời của giọng đang phát (để miệng cử động theo đúng lời nói). */
+function voiceLevel() {
+  if (!VOICE.src || !VOICE.audible || !VOICE.analyser) return null;
+  const a = VOICE.analyser, buf = VOICE.buf || (VOICE.buf = new Uint8Array(a.fftSize));
+  a.getByteTimeDomainData(buf);
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) { const x = (buf[i] - 128) / 128; sum += x * x; }
+  return Math.sqrt(sum / buf.length);
+}
+function fetchTts(text) {
+  return fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })
+    .then(r => (r.ok ? r.arrayBuffer() : null)).catch(() => null);
+}
 function updateVoiceUi() {
   $$('[data-voice-btn]').forEach(b => { b.textContent = VOICE.enabled ? 'Giọng nói: bật' : 'Giọng nói: tắt'; b.setAttribute('aria-pressed', VOICE.enabled ? 'true' : 'false'); });
   const hint = $('#voice-hint');
   if (hint) {
-    const missing = VOICE.enabled && (!VOICE.supported || !VOICE.voice);
+    const missing = VOICE.enabled && !VOICE.server && (!VOICE.supported || !VOICE.voice);
     hint.classList.toggle('hidden', !missing);
-    hint.innerHTML = !missing ? '' : VOICE.onlineAvailable
-      ? 'Máy chỉ có giọng tiếng Việt trực tuyến, nên trợ lý đang hiện phụ đề. Nếu dùng giọng này, câu trả lời của trợ lý sẽ được gửi tới dịch vụ đọc của Microsoft. <button class="link" data-act="voice-online">Cho phép giọng trực tuyến</button>'
-      : 'Máy chưa có giọng đọc tiếng Việt nên trợ lý hiện phụ đề thay cho giọng nói. Cài giọng Tiếng Việt trong Windows (Cài đặt > Thời gian và ngôn ngữ > Giọng nói) rồi tải lại trang.';
+    hint.innerHTML = !missing ? '' : 'Chưa có giọng đọc tiếng Việt chạy trên máy nên trợ lý đang hiện phụ đề. Chạy <code>python scripts/download_tts.py</code> rồi khởi động lại server để có giọng đọc miễn phí, không cần mạng.'
+      + (VOICE.onlineAvailable ? ' Hoặc dùng giọng trực tuyến của trình duyệt (câu trả lời sẽ được gửi tới dịch vụ đọc của Microsoft): <button class="link" data-act="voice-online">Cho phép giọng trực tuyến</button>' : '');
   }
 }
 function toggleVoice() {
   VOICE.enabled = !VOICE.enabled;
   try { localStorage.setItem('mc_voice', VOICE.enabled ? 'on' : 'off'); } catch (e) { /* bỏ qua */ }
-  if (!VOICE.enabled) stopVoice();
+  if (!VOICE.enabled) stopVoice(); else if (VOICE.server) audioCtx();
   updateVoiceUi();
   toast(VOICE.enabled ? 'Trợ lý sẽ nói thành tiếng.' : 'Trợ lý chỉ hiện phụ đề, không nói thành tiếng.', 'info');
 }
@@ -1837,7 +1946,7 @@ function speakable(text) {
   if (t.length > 420) { const cut = t.slice(0, 420); const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('? '), cut.lastIndexOf('! ')); t = end > 120 ? cut.slice(0, end + 1) : cut + '...'; }
   return t;
 }
-/** Chia thành các câu ngắn: trình duyệt đọc ổn định hơn và có thể ngắt giữa chừng. */
+/** Chia thành các câu ngắn: đọc ổn định hơn, câu sau được tải trước trong lúc đọc câu trước, ngắt được giữa chừng. */
 function chunks(text) {
   const out = [];
   (text.match(/[^.!?…]+[.!?…]*\s*/g) || [text]).forEach(sn => {
@@ -1854,9 +1963,9 @@ function showBubble(text, caption) {
 }
 function say(text, opts = {}) {
   const spoken = speakable(text); if (!spoken) return;
-  const parts = chunks(spoken);
-  parts.forEach((part, k) => VOICE.queue.push({ spoken: part, bubble: opts.bubble || spoken, caption: opts.caption, first: k === 0,
-    mood: opts.mood || 'neutral', insightId: opts.insightId }));
+  chunks(spoken).forEach((part, k) => VOICE.queue.push({ spoken: part, bubble: opts.bubble || spoken, caption: opts.caption, first: k === 0,
+    mood: opts.mood || 'neutral', insightId: opts.insightId, stale: !!opts.stale,
+    audio: VOICE.enabled && VOICE.server ? fetchTts(part) : null }));
   if (VOICE.queue.length > 24) VOICE.queue.splice(0, VOICE.queue.length - 24);
   pumpVoice();
 }
@@ -1870,23 +1979,46 @@ function pumpVoice() {
   const done = () => {
     if (finished) return; finished = true;
     clearTimeout(item.timer);
+    if (VOICE.src) { try { VOICE.src.onended = null; VOICE.src.stop(); } catch (e) { /* đã dừng */ } VOICE.src = null; }
     if (!VOICE.queue.length || VOICE.queue[0].insightId !== item.insightId) markInsight(item.insightId, false);
     if (VOICE.audible) VOICE.gateUntil = performance.now() + 300;   // chờ tiếng vọng tắt hẳn
     VOICE.current = null; VOICE.audible = false;
-    setTimeout(pumpVoice, 220);
+    setTimeout(pumpVoice, 160);
   };
   item.finish = done;
-  if (VOICE.enabled && VOICE.supported && VOICE.voice) {
-    const u = new SpeechSynthesisUtterance(item.spoken);
-    u.voice = VOICE.voice; u.lang = VOICE.voice.lang || 'vi-VN'; u.rate = 1.05; u.pitch = 1.05;
-    u.onboundary = () => { AV.kickAt = performance.now(); };
-    u.onend = done; u.onerror = done;
-    VOICE.audible = true;
-    speechSynthesis.speak(u);
-    item.timer = setTimeout(done, 3000 + item.spoken.length * 110);
-  } else {
-    item.timer = setTimeout(done, Math.min(8000, 600 + item.spoken.split(/\s+/).length * 280));
+  if (!VOICE.enabled) return captionOnly(item, done);
+  if (item.audio) return playServer(item, done);
+  if (VOICE.supported && VOICE.voice) return playBrowser(item, done);
+  captionOnly(item, done);
+}
+function captionOnly(item, done) { item.timer = setTimeout(done, Math.min(8000, 600 + item.spoken.split(/\s+/).length * 280)); }
+function playBrowser(item, done) {
+  const u = new SpeechSynthesisUtterance(item.spoken);
+  u.voice = VOICE.voice; u.lang = VOICE.voice.lang || 'vi-VN'; u.rate = 1.05; u.pitch = 1.05;
+  u.onboundary = () => { AV.kickAt = performance.now(); };
+  u.onend = done; u.onerror = done;
+  VOICE.audible = true;
+  speechSynthesis.speak(u);
+  item.timer = setTimeout(done, 3000 + item.spoken.length * 110);
+}
+async function playServer(item, done) {
+  const data = await item.audio;
+  if (VOICE.current !== item) return;                       // đã bị dừng trong lúc tải
+  const ctx = audioCtx();
+  let buffer = null;
+  if (data && ctx) { try { buffer = await ctx.decodeAudioData(data); } catch (e) { buffer = null; } }
+  if (VOICE.current !== item) return;
+  if (!buffer || ctx.state !== 'running') {                 // lỗi tải/giải mã, hoặc chưa có thao tác nào để mở âm thanh
+    if (VOICE.supported && VOICE.voice) return playBrowser(item, done);
+    return captionOnly(item, done);
   }
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  src.connect(VOICE.analyser);
+  src.onended = done;
+  VOICE.src = src; VOICE.audible = true;
+  src.start();
+  item.timer = setTimeout(done, buffer.duration * 1000 + 1500);
 }
 function stopVoice() {
   VOICE.queue = [];
@@ -1910,11 +2042,11 @@ function insightHtml(it) {
 function markInsight(id, on) { if (id) $$(`[data-insight="${id}"]`).forEach(el => el.classList.toggle('speaking', on)); }
 function narrateInsights(items, source) {
   if (!items || !items.length) {
-    if (source === 'analysis') say('Mình đã xem lại cuộc họp, chưa thấy điểm nào cần lưu ý thêm.', { mood: 'happy' });
+    if (source === 'analysis') say('Em đã xem lại cuộc họp, chưa thấy điểm nào cần lưu ý thêm.', { mood: 'happy' });
     return;
   }
-  const intro = { meeting_end: 'Trong lúc chờ lập biên bản, mình có vài nhận xét.', request: 'Trong lúc chuẩn bị, mình để ý mấy điểm.',
-    analysis: 'Mình đã xem lại cuộc họp, có mấy điểm sau.' }[source] || 'Mình có vài nhận xét.';
+  const intro = { meeting_end: 'Trong lúc chờ lập biên bản, em có vài nhận xét.', request: 'Trong lúc chuẩn bị, em để ý mấy điểm.',
+    analysis: 'Em đã xem lại cuộc họp, có mấy điểm sau.' }[source] || 'Em có vài nhận xét.';
   say(intro, { mood: 'neutral' });
   const box = $('#av-insights');
   items.forEach(it => { it._id = `ins-${++insightSeq}`; });
@@ -1931,16 +2063,16 @@ function narrateInsights(items, source) {
 async function analyzeNow() {
   const R = S.room; if (!R) return;
   const live = R.ws && R.ws.readyState === 1;
-  avSet('thinking', 'neutral'); showBubble('Để mình xem lại toàn bộ cuộc họp...');
+  avSet('thinking', 'neutral'); showBubble('Để em xem lại toàn bộ cuộc họp...');
   try {
     const r = await POST(`/api/meetings/${R.id}/insights`, {});
     if (!live) {   // không có WebSocket (cuộc họp đã kết thúc): tự hiển thị kết quả
       narrateInsights(r.insights, 'analysis');
       const n = newTurn('', 'note'); n.done = true; n.insights = r.insights || [];
-      if (!n.insights.length) n.response = 'Mình đã xem lại cuộc họp, chưa thấy điểm nào cần lưu ý thêm.';
+      if (!n.insights.length) n.response = 'Em đã xem lại cuộc họp, chưa thấy điểm nào cần lưu ý thêm.';
       renderJarvis();
     }
-  } catch (e) { avSet('idle', 'concerned'); showBubble('Mình chưa xem lại được cuộc họp.', e.message); }
+  } catch (e) { avSet('idle', 'concerned'); showBubble('Em chưa xem lại được cuộc họp.', e.message); }
   finally { if (AV.state === 'thinking') avSet('idle'); }
 }
 
@@ -1949,20 +2081,28 @@ function avatarEvent(R, ev) {
   switch (ev.type) {
     case 'interim': if (ev.text) AV.heardAt = performance.now(); setLive(ev); break;
     case 'segment': setLive(null, ev.segment); if (STAGE.open) renderPrompter(); break;
-    case 'ai_listening': avSet('listening', 'happy'); showBubble('Mình nghe đây, anh chị cứ nói yêu cầu.'); break;
-    case 'ai_listening_end': avSet('idle', 'neutral'); showBubble(`Mình chưa nghe thấy yêu cầu. Thử nói "${ev.name} ơi, chuyển slide".`); break;
+    case 'ai_listening': avSet('listening', 'happy'); showBubble('Dạ, em nghe đây, anh chị cứ nói yêu cầu.'); break;
+    case 'ai_listening_end': avSet('idle', 'neutral'); showBubble(`Em chưa nghe thấy yêu cầu. Thử nói "${ev.name} ơi, vẽ dashboard tiến độ".`); break;
+    case 'ai_progress': if (AV.state !== 'thinking') avSet('thinking'); say(ev.text, { mood: ev.kind === 'ack' ? 'happy' : 'neutral', stale: ev.kind === 'status' }); break;
     case 'ai_activated': avSet('thinking', 'neutral'); showBubble(`"${ev.prompt}"`); break;
     case 'ai_thinking': showBubble(AV.bubbleText || 'Đang xử lý...', ev.text); break;
     case 'ai_insights': narrateInsights(ev.items, ev.source); if (ev.source === 'analysis') avSet('idle'); break;
-    case 'ai_response': avSet('idle', 'happy'); if (ev.response && ev.response.chat_response) say(ev.response.chat_response, { mood: 'happy' }); break;
+    case 'ai_response': {
+      avSet('idle', 'happy');
+      const res = ev.response || {};
+      VOICE.queue = VOICE.queue.filter(it => !it.stale);       // đã có kết quả: bỏ các câu "em đang làm..." còn chờ đọc
+      if (res.chat_response) say(res.chat_response, { mood: 'happy' });
+      if (res.artifact && VISUAL_KINDS.has(res.artifact.kind) && !STAGE.open) openStage(true);   // kết quả phải hiện ra ngay
+      break;
+    }
     case 'ai_say': avSet('idle', ev.mood || 'happy'); if (ev.quiet) showBubble(ev.text); else say(ev.text, { mood: ev.mood || 'happy' }); break;
-    case 'ai_error': avSet('idle', 'concerned'); say('Mình chưa làm được yêu cầu này.', { mood: 'concerned', caption: ev.text }); break;
+    case 'ai_error': avSet('idle', 'concerned'); say('Em chưa làm được yêu cầu này.', { mood: 'concerned', caption: ev.text }); break;
     case 'stage_state': applyStage(ev.stage); break;
     case 'stage_command': avSet('idle', 'happy'); if (ev.action === 'open') openStage(); else closeStage(); break;
     case 'stage_prompt': avSet('idle', 'happy'); break;
     case 'meeting_status':
-      if (ev.minutes_status === 'pending') { avSet('thinking', 'neutral'); showBubble('Mình đang lập biên bản cuộc họp...'); }
-      else if (ev.minutes_status === 'failed' && AV.state === 'thinking') { avSet('idle', 'concerned'); showBubble('Mình chưa lập được biên bản tự động.', `Thử nói "${AN()} ơi, lập biên bản".`); }
+      if (ev.minutes_status === 'pending') { avSet('thinking', 'neutral'); showBubble('Em đang lập biên bản cuộc họp...'); }
+      else if (ev.minutes_status === 'failed' && AV.state === 'thinking') { avSet('idle', 'concerned'); showBubble('Em chưa lập được biên bản tự động.', `Thử nói "${AN()} ơi, lập biên bản".`); }
       else if (AV.state === 'thinking' && ev.minutes_status === 'done') avSet('idle');
       renderStageMic(); break;
     case 'artifact_created':
@@ -1979,6 +2119,146 @@ function setLive(interim, seg) {
     const p = speakerOf(seg.speaker_key);
     el.innerHTML = `<span style="color:${colorOf(seg.speaker_key)}" class="font-medium">${esc(p ? p.label : seg.speaker_label)}:</span> ${esc(seg.text)}`;
   }
+}
+
+/* =====================================================================
+   DASHBOARD SỐ LIỆU (Chart.js)
+   ===================================================================== */
+const VIZ = { surface: '#121a20', ink: '#e9eef1', muted: '#8d99a5', grid: 'rgba(255,255,255,0.07)', axis: 'rgba(255,255,255,0.16)',
+  // 8 màu chuỗi theo thứ tự cố định (không xoay vòng), đã kiểm tra mù màu và độ tương phản trên nền #121a20
+  series: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'] };
+const NF = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 });
+const NF_COMPACT = new Intl.NumberFormat('vi-VN', { notation: 'compact', maximumFractionDigits: 1 });
+const fmtNum = (v, unit) => `${NF.format(v)}${unit ? ' ' + unit : ''}`;
+const fmtTick = v => (Math.abs(v) >= 10000 ? NF_COMPACT.format(v) : NF.format(v));
+if (window.Chart) { Chart.defaults.font.family = '"Be Vietnam Pro", system-ui, sans-serif'; Chart.defaults.color = VIZ.muted; }
+
+function parseDash(content) {
+  try {
+    const d = typeof content === 'string' ? JSON.parse(content) : content;
+    if (d && (Array.isArray(d.kpis) || Array.isArray(d.charts))) return d;
+  } catch (e) { /* bỏ qua */ }
+  return { title: 'Dashboard', kpis: [], charts: [] };
+}
+function tableHtml(cols, rows, numeric) {
+  return `<div class="dtable-wrap"><table class="dtable"><thead><tr>${cols.map(c => `<th scope="col">${esc(c)}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map(r => `<tr>${r.map((v, j) => `<td class="${numeric && numeric[j] ? 'n' : ''}">${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+/** Bảng số liệu tương đương của biểu đồ (đọc được không cần di chuột, cho cả trình đọc màn hình). */
+function chartTable(c) {
+  const cols = ['', ...c.series.map(s => s.name || c.title)];
+  const rows = c.labels.map((l, j) => [l, ...c.series.map(s => fmtNum(s.data[j], c.unit))]);
+  return tableHtml(cols, rows, cols.map((_, j) => j > 0));
+}
+function dashHtml(d, wide) {
+  const kpis = (d.kpis || []).map(k => `<div class="kpi"><div class="kpi-l">${esc(k.label)}</div>
+      <div class="kpi-v">${esc(k.value)}${k.unit ? `<span class="kpi-u">${esc(k.unit)}</span>` : ''}</div>
+      ${k.delta ? `<div class="kpi-d"><span aria-hidden="true">${k.trend === 'up' ? '▲ ' : k.trend === 'down' ? '▼ ' : ''}</span>${esc(k.delta)}</div>` : ''}
+      ${k.note ? `<div class="kpi-n">${esc(k.note)}</div>` : ''}</div>`).join('');
+  const charts = (d.charts || []).map((c, i) => {
+    const isTable = c.type === 'table';
+    const wideCard = !isTable && (c.labels || []).length > 12;
+    return `<figure class="chart-card${isTable ? ' is-table' : ''}${wideCard ? ' is-wide' : ''}" data-chart="${i}">
+      <figcaption class="chart-h"><span class="chart-t">${esc(c.title)}</span>${c.sample ? '<span class="sample-badge">Số liệu minh họa</span>' : ''}
+        ${isTable ? '' : '<button class="chart-tg" data-act="chart-table" aria-pressed="false">Xem bảng</button>'}</figcaption>
+      ${isTable ? tableHtml(c.columns || [], c.rows || [])
+        : `<div class="chart-box"><canvas role="img" aria-label="${esc(c.title)}"></canvas></div><div class="chart-alt hidden">${chartTable(c)}</div>`}
+      ${c.note ? `<p class="chart-note">${esc(c.note)}</p>` : ''}</figure>`;
+  }).join('');
+  const hl = (d.highlights || []).length ? `<ul class="dash-hl" aria-label="Điểm chính">${d.highlights.map(h => `<li>${esc(h)}</li>`).join('')}</ul>` : '';
+  return `<div class="dash${wide ? ' dash-wide' : ''}">
+    <div class="dash-head"><div class="min-w-0"><h3 class="dash-title">${esc(d.title || 'Dashboard')}</h3>${d.subtitle ? `<p class="dash-sub">${esc(d.subtitle)}</p>` : ''}</div>
+      ${d.source ? `<p class="dash-src">${esc(d.source)}</p>` : ''}</div>
+    ${kpis ? `<div class="kpis">${kpis}</div>` : ''}${hl}
+    ${charts ? `<div class="charts">${charts}</div>` : ''}</div>`;
+}
+const crosshair = { id: 'crosshair', afterDatasetsDraw(chart) {   // đường dọc theo con trỏ trên biểu đồ đường
+  const act = chart.tooltip && chart.tooltip.getActiveElements();
+  if (!act || !act.length) return;
+  const x = act[0].element.x, { top, bottom } = chart.chartArea, ctx = chart.ctx;
+  ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.28)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke(); ctx.restore();
+} };
+const hexA = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
+const lighten = hex => { const n = parseInt(hex.slice(1), 16); const f = c => Math.round(c + (255 - c) * 0.18); return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`; };
+function wrapLabel(text, max = 14) {
+  const words = String(text ?? '').split(/\s+/), lines = [];
+  words.forEach(w => { const last = lines[lines.length - 1]; if (last && (last + ' ' + w).length <= max) lines[lines.length - 1] = last + ' ' + w; else lines.push(w); });
+  return lines.length > 1 ? lines.slice(0, 3) : (lines[0] || '');
+}
+/** Biểu đồ tròn tối đa 6 phần: phần nhỏ gộp vào "Khác" (giữ thứ tự gốc để màu đi theo đối tượng). */
+function foldSlices(labels, data, max = 6) {
+  if (labels.length <= max) return [labels, data];
+  const order = labels.map((_, i) => i).sort((a, b) => data[b] - data[a]);
+  const keep = order.slice(0, max - 1).sort((a, b) => a - b);
+  const rest = order.slice(max - 1).reduce((sum, i) => sum + data[i], 0);
+  return [[...keep.map(i => labels[i]), 'Khác'], [...keep.map(i => data[i]), rest]];
+}
+function chartConfig(c) {
+  const multi = c.series.length > 1;
+  const round = c.type === 'pie' || c.type === 'donut';
+  const ints = c.series.every(s => s.data.every(v => Number.isInteger(v)));   // số đếm: vạch trục là số nguyên
+  const col = i => VIZ.series[Math.min(i, VIZ.series.length - 1)];
+  const valueOf = ctx => (typeof ctx.parsed === 'number' ? ctx.parsed : (c.type === 'hbar' ? ctx.parsed.x : ctx.parsed.y));
+  const tooltip = { backgroundColor: '#0b0f12', borderColor: 'rgba(255,255,255,0.14)', borderWidth: 1, titleColor: VIZ.muted,
+    bodyColor: VIZ.ink, bodyFont: { weight: '600' }, padding: 10, cornerRadius: 8, boxWidth: 12, boxHeight: 2,
+    callbacks: { label: ctx => ` ${fmtNum(valueOf(ctx), c.unit)}${round ? ` - ${ctx.label}` : multi ? ` - ${ctx.dataset.label}` : ''}` } };
+  const legend = (show, line) => ({ display: show, position: 'bottom',
+    labels: { color: VIZ.muted, boxWidth: 12, boxHeight: line ? 2 : 10, font: { size: 12 }, padding: 12 } });
+  const base = { responsive: true, maintainAspectRatio: false, animation: REDUCED_MOTION ? false : { duration: 350 } };
+  const valueAxis = stacked => ({ stacked, beginAtZero: true, grid: { color: VIZ.grid, drawTicks: false }, border: { display: false },
+    ticks: { color: VIZ.muted, font: { size: 11 }, padding: 6, callback: fmtTick, maxTicksLimit: 6, ...(ints ? { precision: 0 } : {}) } });
+  const fewCats = (c.labels || []).length <= 10;   // ít nhóm: hiện đủ mọi nhãn, nhãn dài xuống dòng thay vì bị ẩn
+  const catAxis = stacked => ({ stacked, grid: { display: false }, border: { color: VIZ.axis },
+    ticks: { color: VIZ.muted, font: { size: 11 }, padding: 4, maxRotation: 0, autoSkip: !fewCats,
+      callback(value) { const l = this.getLabelForValue(value); return fewCats ? wrapLabel(l) : l; } } });
+  if (round) {
+    const [labels, data] = foldSlices(c.labels, c.series[0].data);
+    const leg = legend(true, false);
+    leg.labels.generateLabels = chart => Chart.overrides.doughnut.plugins.legend.labels.generateLabels(chart)
+      .map(l => ({ ...l, text: `${l.text}: ${fmtNum(data[l.index], c.unit)}`, fontColor: VIZ.muted }));
+    return { type: c.type === 'pie' ? 'pie' : 'doughnut',
+      data: { labels, datasets: [{ label: c.series[0].name || c.title, data, backgroundColor: labels.map((_, i) => col(i)),
+        hoverBackgroundColor: labels.map((_, i) => lighten(col(i))), borderColor: VIZ.surface, borderWidth: 2, hoverOffset: 4 }] },
+      options: { ...base, cutout: c.type === 'donut' ? '62%' : 0, plugins: { tooltip, legend: leg } } };
+  }
+  if (c.type === 'line' || c.type === 'area') {
+    const dense = c.labels.length > 16;
+    return { type: 'line', plugins: [crosshair],
+      data: { labels: c.labels, datasets: c.series.map((s, i) => ({ label: s.name || c.title, data: s.data,
+        borderColor: col(i), backgroundColor: c.type === 'area' ? hexA(col(i), 0.10) : col(i), fill: c.type === 'area' ? 'origin' : false,
+        borderWidth: 2, borderCapStyle: 'round', borderJoinStyle: 'round', tension: 0.25,
+        pointRadius: dense ? 0 : 4, pointHoverRadius: 6, pointHitRadius: 14,
+        pointBackgroundColor: col(i), pointBorderColor: VIZ.surface, pointBorderWidth: 2 })) },
+      options: { ...base, interaction: { mode: 'index', intersect: false },
+        plugins: { tooltip, legend: legend(multi, true) }, scales: { x: catAxis(false), y: valueAxis(false) } } };
+  }
+  const horizontal = c.type === 'hbar', stacked = c.type === 'stacked_bar';
+  return { type: 'bar',
+    data: { labels: c.labels, datasets: c.series.map((s, i) => ({ label: s.name || c.title, data: s.data,
+      backgroundColor: col(i), hoverBackgroundColor: lighten(col(i)), maxBarThickness: 24,
+      borderRadius: stacked ? 0 : 4, borderSkipped: 'start', borderColor: VIZ.surface, borderWidth: stacked ? 2 : 0 })) },
+    options: { ...base, indexAxis: horizontal ? 'y' : 'x', interaction: { mode: 'index', intersect: false },
+      plugins: { tooltip, legend: legend(multi, false) },
+      scales: horizontal ? { x: valueAxis(stacked), y: catAxis(stacked) } : { x: catAxis(stacked), y: valueAxis(stacked) } } };
+}
+function unmountDash(root) {
+  if (root && root._charts) { root._charts.forEach(ch => { try { ch.destroy(); } catch (e) { /* bỏ qua */ } }); root._charts = []; }
+}
+function mountDash(root, d) {
+  unmountDash(root);
+  root._charts = [];
+  $$('.chart-card[data-chart]', root).forEach(fig => {
+    const c = (d.charts || [])[parseInt(fig.dataset.chart, 10)];
+    if (!c || c.type === 'table') return;
+    const canvas = $('canvas', fig);
+    if (!window.Chart || !canvas) {             // không tải được thư viện biểu đồ: hiện bảng số liệu
+      $('.chart-box', fig).classList.add('hidden'); $('.chart-alt', fig).classList.remove('hidden');
+      const tg = $('.chart-tg', fig); if (tg) tg.classList.add('hidden');
+      return;
+    }
+    try { root._charts.push(new Chart(canvas, chartConfig(c))); } catch (e) { console.error(e); }
+  });
 }
 
 /* =====================================================================
@@ -2064,13 +2344,18 @@ let stageRenderSeq = 0;
 async function renderStageFrame(animate) {
   const R = S.room; const frame = $('#stage-frame'); const nav = $('#stage-nav'); if (!frame || !R) return;
   const my = ++stageRenderSeq;
+  unmountDash(frame);
   const art = stageArtifact();
   const picker = R.artifacts.length ? `<select class="input" data-stage-pick style="height:32px;width:auto;max-width:280px;font-size:12.5px" aria-label="Chọn nội dung trình bày">
       ${art ? '' : '<option value="">Chọn nội dung...</option>'}${[...R.artifacts].reverse().map(a => `<option value="${a.id}" ${art && a.id === art.id ? 'selected' : ''}>${esc(artLabel(a))} - v${a.version || 1}</option>`).join('')}</select>` : '';
   if (!art) {
     frame.innerHTML = `<div class="text-center text-muted max-w-md"><p class="text-ink font-medium mb-2">Chưa có nội dung trên màn hình</p>
-      <p class="mb-4">Nói "${esc(AN())} ơi, làm slide báo cáo tiến độ" hoặc bấm nút dưới đây. ${esc(AN())} sẽ vừa soạn vừa nêu nhận xét.</p>
-      <button class="btn btn-primary btn-sm" data-act="quick" data-prompt="Làm slide báo cáo tiến độ và các quyết định của cuộc họp">Soạn slide từ cuộc họp</button></div>`;
+      <p class="mb-4">Nói "${esc(AN())} ơi, vẽ dashboard tiến độ sprint", "làm slide báo cáo" hoặc "tạo trang web giới thiệu". ${esc(AN())} vừa làm vừa nói những gì tìm thấy.</p>
+      <div class="flex flex-wrap justify-center gap-2">
+        <button class="btn btn-primary btn-sm" data-act="quick" data-prompt="Dựng dashboard số liệu: tiến độ ticket Jira và thời lượng phát biểu của từng người trong cuộc họp">Dựng dashboard</button>
+        <button class="btn btn-ghost btn-sm" data-act="quick" data-prompt="Làm slide báo cáo tiến độ và các quyết định của cuộc họp">Soạn slide</button>
+        <button class="btn btn-ghost btn-sm" data-act="quick" data-prompt="Tổng hợp nhanh cuộc họp: quyết định, việc cần làm, người phụ trách, hạn chót">Báo cáo nhanh</button>
+      </div></div>`;
     nav.innerHTML = picker ? `<div class="flex justify-end">${picker}</div>` : '';
     renderPrompter();
     return;
@@ -2093,7 +2378,13 @@ async function renderStageFrame(animate) {
     const cur = $('.thumb[aria-current="true"]', nav); if (cur) cur.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   } else {
     nav.innerHTML = `<div class="flex flex-wrap items-center justify-end gap-2">${back}${picker}</div>`;
-    if (art.kind === 'minutes') frame.innerHTML = `<article class="md panel w-full h-full overflow-y-auto p-6 max-w-4xl">${renderMd(art.content)}</article>`;
+    if (art.kind === 'dashboard') {
+      const d = parseDash(art.content);
+      frame.innerHTML = `<div class="stage-scroll">${dashHtml(d, true)}</div>`;
+      mountDash(frame, d);
+    } else if (art.kind === 'minutes' || art.kind === 'report') {
+      frame.innerHTML = `<div class="stage-scroll"><article class="md report-stage panel p-6 md:p-8">${renderMd(art.content)}</article></div>`;
+    }
     else if (art.kind === 'web_design') {
       frame.innerHTML = `<iframe title="Bản thiết kế giao diện" sandbox="allow-scripts allow-modals allow-forms" class="bg-white rounded-xl w-full h-full border divider"></iframe>`;
       $('iframe', frame).srcdoc = art.content;
@@ -2451,7 +2742,7 @@ document.addEventListener('click', async e => {
     case 'quick': switchTab('jarvis'); return submitAsk(el.dataset.prompt);
     case 'open-art': {
       const art = S.room.artifacts.find(a => a.id === parseInt(el.dataset.aid, 10));
-      if (art) { S.room.artSel[art.kind] = art.id; switchTab(art.kind); }
+      if (art) { S.room.artSel[tabOf(art.kind)] = art.id; switchTab(tabOf(art.kind)); if (VISUAL_KINDS.has(art.kind) && STAGE.open) stageAction('show', { artifact_id: art.id }); }
       return;
     }
     case 'web-viewport': S.room.vp = el.dataset.vp; return renderArtifactPane();
@@ -2475,6 +2766,14 @@ document.addEventListener('click', async e => {
     case 'stage-analyze': return analyzeNow();
     case 'voice-toggle': return toggleVoice();
     case 'voice-stop': return stopVoice();
+    case 'chart-table': {
+      const fig = el.closest('.chart-card'); if (!fig) return;
+      const showTable = el.getAttribute('aria-pressed') !== 'true';
+      $('.chart-box', fig).classList.toggle('hidden', showTable);
+      $('.chart-alt', fig).classList.toggle('hidden', !showTable);
+      el.setAttribute('aria-pressed', String(showTable)); el.textContent = showTable ? 'Xem biểu đồ' : 'Xem bảng';
+      return;
+    }
     case 'voice-online':
       VOICE.allowOnline = true;
       try { localStorage.setItem('mc_voice_online', 'on'); } catch (e) { /* bỏ qua */ }
@@ -2509,6 +2808,7 @@ document.addEventListener('keydown', e => {
 /* Khởi động */
 mountFaces();
 updateVoiceUi();
+loadTtsStatus();
 requestAnimationFrame(avFrame);
 loadAssistant();
 loadHealth();
