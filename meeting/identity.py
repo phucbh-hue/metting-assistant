@@ -8,8 +8,10 @@ Trong cuộc họp, người nói chưa có mẫu giọng mang nhãn tạm "Ngư
 3. Mẫu giọng chỉ được lưu vào Voice Registry khi người dùng xác nhận (hoặc bật AUTO_ENROLL_VOICES=1),
    vì vector giọng nói là dữ liệu sinh trắc học (Nghị định 13/2023/NĐ-CP).
 
-IdentityEngine chạy theo cơ chế debounce: chỉ gọi LLM khi có tín hiệu tên trong câu mới hoặc đủ nhiều câu mới,
-tối đa 1 lần mỗi IDENTITY_MIN_INTERVAL_S giây, và gom tất cả người nói chưa định danh vào MỘT lần gọi.
+IdentityEngine chỉ gọi LLM khi có thông tin mới: câu mới nhắc tới tên người chưa biết theo cách xưng hô tiếng Việt
+("anh Tuấn", "thầy Minh", "Tuấn ơi", "tôi là Phúc", tối đa 3 lần đầu mỗi tên) hoặc có câu tự giới thiệu; ngoài ra cứ
+IDENTITY_FALLBACK_SEGMENTS câu mới mới chạy lại một lần. Tối đa 1 lần mỗi IDENTITY_MIN_INTERVAL_S giây, gom tất cả
+người nói chưa định danh vào MỘT lần gọi. Phát lại 5 cuộc họp thật (#31, #36, #37, #38, #40): 84 lượt gọi còn 25.
 """
 import asyncio
 import json
@@ -28,7 +30,17 @@ log = logging.getLogger("meeting.identity")
 AUTO_APPLY_T = 0.85
 SUGGEST_T = 0.60
 MIN_INTERVAL_S = float(os.getenv("IDENTITY_MIN_INTERVAL_S", "20"))
-FALLBACK_EVERY_N = 12          # Không có tín hiệu tên thì cứ ~12 câu mới chạy lại một lần
+FALLBACK_EVERY_N = int(os.getenv("IDENTITY_FALLBACK_SEGMENTS", "40"))   # không có tên mới: cứ ~40 câu mới chạy lại một lần
+NAME_EVIDENCE_MAX = 3          # một tên được nhắc lại nhiều lần thì chỉ 3 lần đầu là thông tin mới
+SELF_INTRO = re.compile(r"(tên\s+(là|tôi|em|mình|anh|chị|tớ)|giới thiệu|my name|\bi am\b|\bi'm\b|\bthis is\b)",
+                        re.IGNORECASE)
+# Từ xưng hô đứng trước tên ("anh Tuấn", "thầy Minh"); "là" / "tên" đứng trước tên khi tự giới thiệu
+_HONORIFIC_WORDS = {"anh", "chị", "em", "bạn", "cô", "chú", "bác", "ông", "bà", "thầy", "sếp", "mr", "ms", "mrs", "dr"}
+# Từ viết hoa giữa câu nhưng không phải tên người
+_CAP_STOP = {"ok", "okay", "dạ", "vâng", "ừ", "ờ", "à", "ạ", "trời", "giời", "chúa", "phật", "mẹ", "má", "bố", "ba",
+             "con", "cháu", "urbox", "jira", "ai", "mcp", "slide", "dashboard", "api",
+             "google", "facebook", "youtube", "zalo", "tiktok", "excel", "word", "power", "bi", "sprint", "mega", "sale",
+             "podcast", "online", "việt", "nam", "hà", "nội", "sài", "gòn", "tp", "hcm", "redis", "postgres", "staging"}
 NAME_CUES = re.compile(
     r"(tên\s+(là|tôi|em|mình|anh|chị|tớ)|\b(mình|em|tôi|anh|chị|tớ|tui|con|cháu)\s+là\b|\bơi\b|\bchào\b|"
     r"giới thiệu|cảm ơn\s+(anh|chị|em|bạn|cô|chú)|mời\s+(anh|chị|em|bạn)|\bthưa\b|"
@@ -167,7 +179,8 @@ class IdentityEngine:
         self._running = False
         self._last_run = 0.0
         self._new_since = 0
-        self._cue_since = False
+        self._cue_since = False           # có thông tin mới (tên mới / tự giới thiệu) từ lần chạy trước
+        self._mentions: Dict[str, int] = {}
         self._timer: Optional[asyncio.Task] = None
         self._dismissed: Set[Tuple[int, str]] = set()
         self._suggestions: Dict[int, Dict[str, Any]] = {}
@@ -192,9 +205,50 @@ class IdentityEngine:
         return out
 
     # ------------------------------------------------------------ trigger ---
+    def fresh_names(self, text: str) -> Set[str]:
+        """Tên người được nhắc theo cách xưng hô ("anh Tuấn", "Tuấn ơi", "tôi là Bùi Hồng Phúc") mà còn là thông tin mới.
+
+        Bỏ tên trợ lý, tên người nói đã biết, và tên đã được nhắc từ 3 lần trở lên."""
+        cfg = llm.assistant_config()
+        skip = {w.lower() for n in [cfg.get("name", "")] + list(cfg.get("aliases") or []) for w in str(n).split()}
+        for p in self.session.speakers.visible_profiles():
+            if p.name:
+                skip |= {w.lower() for w in str(p.name).split()}
+
+        def is_name(w: str) -> bool:
+            lw = w.lower()
+            return (w[:1].isalpha() and w[0].isupper() and len(w) > 1 and lw not in _CAP_STOP
+                    and lw not in skip and lw not in _HONORIFIC_WORDS)
+
+        toks = re.findall(r"[^\W\d_]+|[.!?…,;:]", text or "")
+        found: Set[str] = set()
+        for i, w in enumerate(toks):
+            lw = w.lower()
+            if lw in _HONORIFIC_WORDS or lw in ("là", "tên"):          # anh Tuấn / là Bùi Hồng Phúc
+                run = []
+                for x in toks[i + 1:i + 5]:
+                    if not is_name(x):
+                        break
+                    run.append(x.lower())
+                if run:
+                    found.add(" ".join(run))
+            elif lw == "ơi":                                           # Tuấn ơi
+                run = []
+                for x in reversed(toks[max(0, i - 4):i]):
+                    if not is_name(x):
+                        break
+                    run.insert(0, x.lower())
+                if run:
+                    found.add(" ".join(run))
+        return {n for n in found if self._mentions.get(n, 0) < NAME_EVIDENCE_MAX}
+
     def notify(self, seg: Dict[str, Any]):
         self._new_since += 1
-        if NAME_CUES.search(seg.get("text") or ""):
+        text = seg.get("text") or ""
+        names = self.fresh_names(text)
+        for n in names:
+            self._mentions[n] = self._mentions.get(n, 0) + 1
+        if names or SELF_INTRO.search(text):
             self._cue_since = True
         if not artifacts.llm_available() or self._running or self._timer is not None:
             return

@@ -78,10 +78,15 @@ def _gemini():
 # Mọi lời gọi LLM đi qua đây để ghi lại: cuộc họp nào, việc gì, bao nhiêu token vào/ra, bao lâu, tốn khoảng bao nhiêu.
 CURRENT_MEETING: ContextVar[Optional[int]] = ContextVar("llm_meeting_id", default=None)
 CURRENT_PURPOSE: ContextVar[str] = ContextVar("llm_purpose", default="khác")
-# USD cho 1 triệu token (vào, ra); model không có trong bảng thì ghi 0
-PRICES_USD = {"claude-opus-4-7": (5.0, 25.0), "claude-opus-4-8": (5.0, 25.0), "claude-opus-5": (5.0, 25.0),
-              "claude-opus-5-5": (4.0, 20.0), "claude-sonnet-5": (2.0, 10.0), "claude-sonnet-5-5": (2.0, 10.0),
-              "claude-sonnet-4-6": (3.0, 15.0), "claude-haiku-4-5": (1.0, 5.0)}
+# USD cho 1 triệu token (vào, ra, hệ số giá đọc cache) theo trang Pricing của Anthropic (lấy ngày 02/10/2026).
+# Ghi cache 5 phút = 1,25 lần giá vào. Model không có trong bảng thì ghi 0.
+PRICES_USD = {"claude-opus-4-7": (5.0, 25.0, 0.1), "claude-opus-4-8": (5.0, 25.0, 0.1), "claude-opus-5": (5.0, 25.0, 0.1),
+              "claude-opus-5-5": (4.0, 20.0, 0.05), "claude-sonnet-5": (2.0, 10.0, 0.1),
+              "claude-sonnet-5-5": (2.0, 10.0, 0.1), "claude-sonnet-4-6": (3.0, 15.0, 0.1),
+              "claude-haiku-4-5": (1.0, 5.0, 0.1), "claude-fable-5-1": (10.0, 50.0, 0.025)}
+CACHE_WRITE_X = 1.25
+WEB_SEARCH_USD = 0.01           # công cụ web_search của Claude: 10 USD / 1.000 lượt tìm
+CACHE = {"type": "ephemeral"}   # điểm cache 5 phút (mỗi lần đọc làm mới thời hạn)
 
 
 def set_meeting(meeting_id: Optional[int], purpose: Optional[str] = None) -> None:
@@ -91,62 +96,117 @@ def set_meeting(meeting_id: Optional[int], purpose: Optional[str] = None) -> Non
         CURRENT_PURPOSE.set(purpose)
 
 
-def _cost_usd(model: str, inp: int, out: int) -> float:
-    pin, pout = PRICES_USD.get(model, (0.0, 0.0))
-    return (inp * pin + out * pout) / 1_000_000
+def _cost_usd(model: str, inp: int, out: int, cache_read: int = 0, cache_write: int = 0) -> float:
+    """inp = token vào không cache; cache_read / cache_write tính theo hệ số riêng của model."""
+    pin, pout, read_x = PRICES_USD.get(model, (0.0, 0.0, 0.1))
+    return (inp * pin + cache_write * pin * CACHE_WRITE_X + cache_read * pin * read_x + out * pout) / 1_000_000
 
 
-def _record(provider: str, model: str, inp: int, out: int, t0: float, ok: bool, estimated: bool = False) -> None:
+def _record(provider: str, model: str, inp: int, out: int, t0: float, ok: bool, estimated: bool = False,
+            cache_read: int = 0, cache_write: int = 0, extra_usd: float = 0.0) -> None:
     try:
-        db.record_llm_usage(CURRENT_MEETING.get(), provider, model, CURRENT_PURPOSE.get(), inp, out, time.time() - t0,
-                            ok=ok, cost_usd=_cost_usd(model, inp, out), estimated=estimated)
+        db.record_llm_usage(CURRENT_MEETING.get(), provider, model, CURRENT_PURPOSE.get(), inp + cache_read + cache_write,
+                            out, time.time() - t0, ok=ok,
+                            cost_usd=_cost_usd(model, inp, out, cache_read, cache_write) + extra_usd,
+                            estimated=estimated, cache_read_tokens=cache_read, cache_write_tokens=cache_write)
     except Exception as e:   # ghi nhật ký không được làm hỏng lời gọi chính
         log.warning("meeting.artifacts: không ghi được nhật ký LLM: %s", e)
 
 
-def _usage_of(resp: Any, fallback_in: str = "", fallback_out: str = "") -> Tuple[int, int, bool]:
+def _usage_of(resp: Any, fallback_in: str = "", fallback_out: str = "") -> Dict[str, Any]:
+    """Token của một lần gọi: input (không cache), cache_read, cache_write, output, estimated."""
     u = getattr(resp, "usage", None)
     inp = getattr(u, "input_tokens", None) or getattr(u, "prompt_tokens", None) or getattr(u, "prompt_token_count", None)
     out = getattr(u, "output_tokens", None) or getattr(u, "completion_tokens", None) or getattr(u, "candidates_token_count", None)
     if inp is None or out is None:
-        return len(fallback_in) // 4, len(fallback_out) // 4, True
-    cached = getattr(u, "cache_read_input_tokens", 0) or 0
-    return int(inp) + int(cached), int(out), False
+        return {"input": len(fallback_in) // 4, "output": len(fallback_out) // 4, "cache_read": 0, "cache_write": 0,
+                "estimated": True}
+    return {"input": int(inp), "output": int(out), "estimated": False,
+            "cache_read": int(getattr(u, "cache_read_input_tokens", 0) or 0),
+            "cache_write": int(getattr(u, "cache_creation_input_tokens", 0) or 0)}
 
 
-async def _call_llm(system: str, prompt: str, max_tokens: int = 4000) -> str:
-    """Gọi LLM (Claude hoặc Gemini theo LLM_PROVIDER) với fallback sang provider còn lại."""
+def _as_text(x: Any) -> str:
+    """Khối nội dung (list các {"type": "text"}) -> chuỗi, cho Gemini và cho ước lượng token."""
+    if isinstance(x, str):
+        return x
+    return "\n\n".join(str(b.get("text", "")) for b in (x or []) if isinstance(b, dict))
+
+
+def text_block(text: str, cache: bool = False) -> Dict[str, Any]:
+    b: Dict[str, Any] = {"type": "text", "text": text}
+    if cache:
+        b["cache_control"] = dict(CACHE)
+    return b
+
+
+class Blocks(str):
+    """Prompt chia khối cho prompt cache của Claude.
+
+    Dùng như một chuỗi bình thường (Gemini, log, test đọc được), còn Claude nhận .blocks: các khối giữ nguyên giữa
+    các lần gọi được đánh dấu cache, lần sau đọc lại chỉ tính 0,1 lần giá."""
+    blocks: List[Dict[str, Any]]
+
+    def __new__(cls, blocks: List[Dict[str, Any]]):
+        obj = super().__new__(cls, "\n\n".join(str(b.get("text", "")) for b in blocks))
+        obj.blocks = [dict(b) for b in blocks]
+        return obj
+
+
+class purpose:
+    """with artifacts.purpose("tra cứu web"): các lời gọi LLM bên trong được ghi vào việc đó, xong thì trả lại như cũ."""
+
+    def __init__(self, name: str):
+        self.name, self._tok = name, None
+
+    def __enter__(self):
+        self._tok = CURRENT_PURPOSE.set(self.name)
+        return self
+
+    def __exit__(self, *exc):
+        CURRENT_PURPOSE.reset(self._tok)
+        return False
+
+
+async def _call_llm(system: Any, prompt: Any, max_tokens: int = 4000) -> str:
+    """Gọi LLM (Claude hoặc Gemini theo LLM_PROVIDER) với fallback sang provider còn lại.
+
+    system / prompt là chuỗi, hoặc danh sách khối {"type": "text", "text": ..., "cache_control": ...} khi muốn dùng
+    prompt cache của Claude (phần đầu giống nhau giữa các lần gọi chỉ tính 0,1 lần giá khi đọc lại)."""
     return (await _call_llm_raw(system, prompt, max_tokens) or "").replace(chr(0x2014), "-")   # quy ước nội dung: "-" thay cho gạch dài
 
 
-async def _claude_text(system: str, prompt: str, max_tokens: int) -> str:
+async def _claude_text(system: Any, prompt: Any, max_tokens: int) -> str:
     t0 = time.time()
     try:
-        resp = await _anthropic().messages.create(model=CLAUDE_MODEL, max_tokens=max_tokens, system=system,
-                                                  messages=[{"role": "user", "content": prompt}])
+        resp = await _anthropic().messages.create(
+            model=CLAUDE_MODEL, max_tokens=max_tokens, system=getattr(system, "blocks", None) or system,
+            messages=[{"role": "user", "content": getattr(prompt, "blocks", None) or prompt}])
     except Exception:
-        _record("claude", CLAUDE_MODEL, len(system + prompt) // 4, 0, t0, ok=False, estimated=True)
+        _record("claude", CLAUDE_MODEL, len(_as_text(system) + _as_text(prompt)) // 4, 0, t0, ok=False, estimated=True)
         raise
     text = "\n".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
-    inp, out, est = _usage_of(resp, system + prompt, text)
-    _record("claude", CLAUDE_MODEL, inp, out, t0, ok=True, estimated=est)
+    u = _usage_of(resp, _as_text(system) + _as_text(prompt), text)
+    _record("claude", CLAUDE_MODEL, u["input"], u["output"], t0, ok=True, estimated=u["estimated"],
+            cache_read=u["cache_read"], cache_write=u["cache_write"])
     return text
 
 
-async def _gemini_text(system: str, prompt: str) -> str:
+async def _gemini_text(system: Any, prompt: Any) -> str:
     t0 = time.time()
+    system, prompt = _as_text(system), _as_text(prompt)
     try:
         resp = await asyncio.to_thread(_gemini().interactions.create, model=AGENT_MODEL, system_instruction=system, input=prompt)
     except Exception:
         _record("gemini", AGENT_MODEL, len(system + prompt) // 4, 0, t0, ok=False, estimated=True)
         raise
     text = resp.output_text
-    inp, out, est = _usage_of(resp, system + prompt, text or "")
-    _record("gemini", AGENT_MODEL, inp, out, t0, ok=True, estimated=est)
+    u = _usage_of(resp, system + prompt, text or "")
+    _record("gemini", AGENT_MODEL, u["input"], u["output"], t0, ok=True, estimated=u["estimated"])
     return text
 
 
-async def _call_llm_raw(system: str, prompt: str, max_tokens: int = 4000) -> str:
+async def _call_llm_raw(system: Any, prompt: Any, max_tokens: int = 4000) -> str:
     if not llm_available():
         raise RuntimeError("Chưa cấu hình ANTHROPIC_API_KEY hoặc GEMINI_API_KEY")
     use_claude_first = PROVIDER == "claude" or not os.getenv("GEMINI_API_KEY")
@@ -267,8 +327,11 @@ async def _claude_search(query: str, context_text: str = "") -> Tuple[str, List[
             for r in (content if isinstance(content, list) else []):
                 if getattr(r, "type", None) == "web_search_result":
                     _add_source(getattr(r, "url", None), getattr(r, "title", None))
-    inp, out, est = _usage_of(resp, prompt, "".join(texts))
-    _record("claude", CLAUDE_MODEL, inp, out, t0, ok=True, estimated=est)
+    u = _usage_of(resp, prompt, "".join(texts))
+    stu = getattr(getattr(resp, "usage", None), "server_tool_use", None)
+    billed = int(getattr(stu, "web_search_requests", 0) or 0) or searches
+    _record("claude", CLAUDE_MODEL, u["input"], u["output"], t0, ok=True, estimated=u["estimated"],
+            cache_read=u["cache_read"], cache_write=u["cache_write"], extra_usd=billed * WEB_SEARCH_USD)
     return _clean_report("".join(texts), query), sources, searches
 
 
@@ -336,8 +399,15 @@ async def web_research(meeting_id: int, query: str, context_text: str = "", on_p
     return _save_web_report(meeting_id, query, body, sources, f"công cụ tìm kiếm của Claude, {searches} lượt tìm")
 
 
-async def web_search_tool(query: str, on_progress=None) -> Dict[str, Any]:
-    """Công cụ web_search cho agent: nội dung các trang đã đọc (agent tự tổng hợp vào câu trả lời / sản phẩm)."""
+async def web_search_tool(query: str, on_progress=None, rewrite: bool = True) -> Dict[str, Any]:
+    """Công cụ web_search cho agent: nội dung các trang đã đọc (agent tự tổng hợp vào câu trả lời / sản phẩm).
+
+    rewrite=False: câu tìm do agent viết đã là từ khóa, không tốn thêm một lần gọi AI để đổi từ khóa."""
+    with purpose("tra cứu web"):
+        return await _web_search_tool(query, on_progress, rewrite)
+
+
+async def _web_search_tool(query: str, on_progress, rewrite: bool) -> Dict[str, Any]:
     from meeting import websearch
     query = (query or "").strip()
     if not query:
@@ -345,7 +415,8 @@ async def web_search_tool(query: str, on_progress=None) -> Dict[str, Any]:
     provider = web_provider()
     if provider in ("auto", "playwright") and websearch.available():
         try:
-            data = await websearch.research(query, on_progress, queries=await search_queries(query))
+            qs = await search_queries(query) if rewrite else list(dict.fromkeys([query, websearch.rewrite_heuristic(query)]))
+            data = await websearch.research(query, on_progress, queries=qs)
             if data["pages"]:
                 return {"query": query, "engine": data["engine"],
                         "sources": [{"n": i, "title": pg["title"], "url": pg["url"], "domain": pg["domain"],

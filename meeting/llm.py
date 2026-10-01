@@ -145,8 +145,26 @@ _NUM_WORDS = {"một": 1, "hai": 2, "ba": 3, "bốn": 4, "tư": 4, "năm": 5, "s
               "chín": 9, "mười": 10}
 KIND_WORDS = {"slide": "slides", "bộ slide": "slides", "sơ đồ": "diagram", "dashboard": "dashboard", "báo cáo": "report",
               "biên bản": "minutes", "trang web": "web_design", "giao diện": "web_design"}
-_BACK_KIND = re.compile(r"(quay|trở|mở|chiếu|bật)\s*(lại|về)\s*(cái\s*)?(bộ\s*)?(slide|sơ đồ|dashboard|báo cáo|biên bản|trang web|giao diện)"
-                        r"\s*(cũ|khi nãy|hồi nãy|lúc nãy|ban nãy|(mà\s*)?(em\s*)?(đã|vừa|mới)\s*(present|trình bày|chiếu|làm|soạn|tạo|vẽ|dựng))", re.I)
+_BACK_KIND = re.compile(r"(quay|trở|mở|chiếu|bật|chuyển|xem)\s*(lại|về)\s*(cái\s*)?(bộ\s*)?(slide|sơ đồ|dashboard|báo cáo|biên bản|trang web|giao diện)"
+                        r"\s*(cũ|khi nãy|hồi nãy|lúc nãy|ban nãy|lúc trước|(mà\s*)?(em\s*)?(đã\s*|vừa\s*|mới\s*)?"
+                        r"(present|trình bày|chiếu|làm|soạn|tạo|vẽ|dựng)\s*(hồi nãy|lúc nãy|khi nãy|ban nãy|lúc trước|cho anh|cho chị|$))", re.I)
+_KIND_ALT = r"(slide|bộ slide|sơ đồ|dashboard|báo cáo|biên bản|trang web|giao diện)"
+# "chuyển lại cái slide gần nhất mà em đã tạo" (#40): mở sản phẩm mới tạo gần nhất của loại đó
+_LATEST = re.compile(rf"(chuyển|quay|trở|mở|chiếu|bật|xem|đưa)\s*(lại|về|sang|lên)?\s*(cái\s*|bộ\s*)?{_KIND_ALT}\s*"
+                     r"(gần nhất|mới nhất|cuối cùng|vừa (tạo|làm|soạn|vẽ|dựng)|(mà\s*)?em\s*(vừa|mới)\s*(tạo|làm|soạn|vẽ|dựng))", re.I)
+# "quay lại cái slide v1" (#40): mở phiên bản cũ của bộ đang xem
+_VERSION = re.compile(r"(?:\bbản|phiên bản|version|\bver|\bv)\s*\.?\s*(\d{1,2})\b", re.I)
+_NAV_VERB = re.compile(r"(quay|trở|mở|chuyển|xem|chiếu|sang|qua|đưa)", re.I)
+# "thôi em đừng có soạn slide nữa" (#40): dừng việc đang làm
+_CANCEL = re.compile(r"(đừng|không cần|khỏi)\s*(có\s*)?(soạn|tạo|làm|vẽ|dựng|viết|tìm|tra cứu|search)|"
+                     r"^thôi\s*(em\s*)?(dừng|ngừng|khỏi|bỏ|không cần|đừng)", re.I)
+# "em quay lại cái slide điểm cộng" (#40): tìm slide theo chủ đề trong mọi bộ slide
+_TOPIC_ANY = re.compile(r"(?:quay|trở|chuyển|mở|xem|sang|qua|tới|đến)\s*(?:lại\s*|về\s*|sang\s*|tới\s*|đến\s*)?(?:cái\s*)?"
+                        r"(?:slide|slides|slai|trang)\s+(?!(?:trước|sau|tiếp|kế|cũ|gần|mới|cuối|số|này|đó|nữa|đầu|sang|qua|tới|đến)\b)"
+                        r"(?!v?\d)(?:về\s+|nói về\s+|có\s+)?(.+)", re.I)
+_TOPIC_TAIL = re.compile(r"(\s+(coi|nha|nhé|nhá|giúp anh|giúp chị|giúp em|giùm|đi|ạ|với|hồi nãy|lúc nãy|khi nãy|cho anh|cho chị))+$", re.I)
+_CREATE_DECK = re.compile(r"\b(tạo|làm|soạn|viết|dựng|chuẩn bị|thiết kế)\s+(giúp\s+|cho\s+)?(anh\s+|chị\s+|em\s+)?(một\s+|1\s+)?"
+                          r"(cái\s+|bộ\s+|bài\s+)?(slide|bài thuyết trình|bài trình bày)", re.I)
 _WEB_SEARCH = re.compile(r"\b(search|sớt|xớt|research|google)\b|(tra cứu|tìm kiếm|tìm|kiểm tra|xem)\s*(giúp|giùm|hộ|cho)?\s*(anh|chị|em|mình|tôi)?\s*"
                          r"(coi|xem|thử)?\s*(trên\s*)?(mạng|internet|google|web|online)", re.I)
 _WEB_FILLER = re.compile(r"^(em\s+)?(hãy\s+)?(search|sớt|xớt|research|tra cứu|tìm kiếm|tìm|kiểm tra|xem|google)\s*(trên\s*)?(mạng|internet|google|web|online)?"
@@ -159,9 +177,11 @@ _STAGE_PATTERNS = [
     ("follow_on", re.compile(r"(bật|mở|cho)\s*(chế độ\s*)?tự\s*(động\s*)?(chuyển|lật|theo|đổi)", re.I)),
     ("present_stop", re.compile(r"(dừng|ngừng|thôi|stop|tạm dừng)\s*(việc\s*)?(thuyết trình|trình bày|present|đọc|nói)|"
                                 r"(im|dừng|ngừng)\s*lại\s*(đi|nhé|đã)?$", re.I)),
-    ("present", re.compile(r"\bpresent\b|thuyết\s*trình|(tự\s*(động\s*)?chuyển\s*slide\s*(và|rồi)\s*(tự\s*)?(nói|đọc|trình bày))|"
-                           r"(trình bày|đọc|nói)\s*(giúp|cho|hộ|lại|qua|hết)?\s*(anh|chị|em|mình)?\s*(về\s*)?(cái\s*)?"
-                           r"(nội dung\s*)?(của\s*)?(bộ\s*|các\s*|mấy\s*)?(slide|bài này)", re.I)),
+    ("present", re.compile(r"\bpresent\b|\bresend\b|thuyết\s*trình|"
+                           r"((tự\s*(động\s*)?)?(chuyển|kéo|lật)\s*slide\s*(và|rồi|xong)?\s*(em\s*)?(tự\s*)?(nói|đọc|trình bày))|"
+                           r"(trình bày|đọc|nói)\s*(giúp|cho|hộ|lại|qua|hết|luôn)?\s*(anh|chị|em|mình)?\s*(về\s*)?(cái\s*)?"
+                           r"(nội dung\s*)?((của|trong|ở trong|trên|bên trong)\s*)?(cái\s*)?(bộ\s*|các\s*|mấy\s*)?"
+                           r"(slide|bài này)", re.I)),
     ("open", re.compile(r"(mở|bật|vào|chuyển sang)\s*(chế độ\s*|màn hình\s*|màn\s*)?(toàn màn hình|sân khấu|trình chiếu|trình bày)"
                         r"|phóng to", re.I)),
     ("close", re.compile(r"(thoát|tắt|đóng)\s*(chế độ\s*|màn hình\s*|màn\s*)?(toàn màn hình|sân khấu|trình chiếu|trình bày)"
@@ -183,6 +203,16 @@ def stage_intent(command: str) -> Optional[Dict[str, Any]]:
     m = _BACK_KIND.search(c)
     if m:
         return {"action": "back", "kind": KIND_WORDS.get(m.group(5), "slides")}
+    m = _LATEST.search(c)
+    if m:
+        return {"action": "latest", "kind": KIND_WORDS.get(m.group(4), "slides")}
+    if _CANCEL.search(c) and not _STAGE_PATTERNS[2][1].search(c):          # "dừng thuyết trình" là present_stop
+        return {"action": "cancel"}
+    m = _VERSION.search(c)
+    if m and _NAV_VERB.search(c):
+        k = re.search(_KIND_ALT, c)
+        return {"action": "version", "n": int(m.group(1)), "kind": KIND_WORDS.get(k.group(1), "slides") if k else None}
+    creating = bool(_CREATE_DECK.search(c))      # "làm slide thuyết trình về Q4" là soạn slide, không phải trình bày
     if _OPEN_FILE.search(c):
         return {"action": "open_file", "query": c}
     if _WEB_SEARCH.search(c):
@@ -190,6 +220,8 @@ def stage_intent(command: str) -> Optional[Dict[str, Any]]:
         q = re.sub(r"\s*(nhé|nha|nhá|đi|ạ|với|giúp anh|giúp em|cho anh)\s*$", "", q).strip(" ?.!,")
         return {"action": "web_search", "query": q or c}
     for action, pat in _STAGE_PATTERNS:
+        if action == "present" and creating:
+            continue
         if pat.search(c):
             return {"action": action}
     m = re.search(rf"{_SLIDE}\s*(?:số\s*)?(\d{{1,2}}|{'|'.join(_NUM_WORDS)})(?!\w)", c)
@@ -203,6 +235,11 @@ def stage_intent(command: str) -> Optional[Dict[str, Any]]:
     m = re.search(r"^(?:chuyển|sang|qua|tới|đến|mở)\s*(?:sang\s*|đến\s*|tới\s*)?phần\s+(?!trước|sau|tiếp)(.+)", c)
     if m:
         return {"action": "topic", "query": m.group(1).strip()}
+    m = _TOPIC_ANY.search(c)
+    if m:
+        q = _TOPIC_TAIL.sub("", m.group(1)).strip(" ?.!,")
+        if q:
+            return {"action": "topic", "query": q}
     if re.search(rf"{_SLIDE}\s*(trước|lúc nãy|ban nãy)|(quay|trở|lùi)\s*(lại|về)?\s*(một\s*)?{_SLIDE}", c):
         return {"action": "prev"}
     if re.search(rf"(chuyển|sang|qua|tới|tiếp)\s*(sang\s*)?(một\s*)?{_SLIDE}|{_SLIDE}\s*(tiếp|kế|sau)|"
@@ -499,6 +536,62 @@ def _data_text(tool_results: List[Dict[str, Any]], limit: int = 9000) -> str:
     return json.dumps(data, ensure_ascii=False)[:limit]
 
 
+TRANSCRIPT_CHUNK = 30           # số câu mỗi khối transcript: khối đã đủ câu giữ nguyên giữa các lần gọi -> đọc từ cache
+
+
+def transcript_blocks(segments: List[Dict[str, Any]], max_chars: int = 24000) -> List[Dict[str, Any]]:
+    """Transcript chia khối cố định 30 câu tính từ đầu cuộc họp, đánh dấu cache ở khối đủ câu cuối cùng.
+
+    Câu mới chỉ làm đổi khối cuối, nên lần gọi sau (vòng tra cứu tiếp theo, câu hỏi tiếp theo trong vài phút) đọc lại
+    phần đầu từ cache. Quá dài thì bỏ bớt nguyên khối ở đầu để phần còn lại vẫn giữ nguyên."""
+    lines = [f"{s.get('speaker_label', 'Không rõ')}: {s.get('text', '')}" for s in segments
+             if (s.get('text') or '').strip()]
+    if not lines:
+        return [artifacts.text_block("## Nội dung cuộc họp:\n(Chưa có nội dung)")]
+    chunks = [lines[i:i + TRANSCRIPT_CHUNK] for i in range(0, len(lines), TRANSCRIPT_CHUNK)]
+    total, start = sum(len(ln) + 1 for ln in lines), 0
+    while total > max_chars and start < len(chunks) - 1:
+        total -= sum(len(ln) + 1 for ln in chunks[start])
+        start += 1
+    last_full = len(chunks) - 1 if len(chunks[-1]) == TRANSCRIPT_CHUNK else len(chunks) - 2
+    blocks = []
+    for i in range(start, len(chunks)):
+        text = "\n".join(chunks[i])
+        if i == start:
+            head = ("## Nội dung cuộc họp (toàn bộ, theo thứ tự thời gian):" if start == 0
+                    else "## Nội dung cuộc họp (phần đầu đã lược bớt, theo thứ tự thời gian):")
+            text = f"{head}\n{text}"
+        blocks.append(artifacts.text_block(text, cache=(i == last_full)))
+    return blocks
+
+
+def _agent_request(prompt: str, transcript: List[Dict[str, Any]], facts: Dict[str, Any],
+                   tool_results: List[Dict[str, Any]], stage_art: Optional[Dict[str, Any]], final_only: bool) -> str:
+    """Lượt gọi agent: transcript (cache) -> màn hình -> từng kết quả tra cứu (cache ở kết quả cuối) -> yêu cầu.
+
+    Các vòng tra cứu sau gửi lại y nguyên phần trước, chỉ thêm kết quả mới ở cuối, nên phần lặp lại đọc từ cache."""
+    blocks = [dict(b) for b in transcript]
+    if artifacts.wants_stats(prompt):
+        blocks.append(artifacts.text_block(f"## Thống kê phát biểu (người dùng có hỏi; số liệu thật):\n"
+                                           f"{json.dumps(facts, ensure_ascii=False)}"))
+    if stage_art:
+        blocks.append(artifacts.text_block(f"## Đang chiếu trên màn hình: {KIND_NAMES.get(stage_art.get('kind'), stage_art.get('kind'))} "
+                                           f"\"{stage_art.get('title', '')}\""))
+    if tool_results:
+        for i, r in enumerate(tool_results, 1):
+            blocks.append(artifacts.text_block(f"## Dữ liệu đã tra cứu ({i}):\n{_data_text([r], limit=6000)}",
+                                               cache=(i == len(tool_results))))
+    else:
+        blocks.append(artifacts.text_block("## Dữ liệu đã tra cứu:\n(chưa tra cứu)"))
+    req = f"## Yêu cầu:\n\"{prompt}\""
+    if final_only:
+        req += "\n\nKhông gọi thêm công cụ. Trả về JSON cuối cùng ngay."
+    elif tool_results:
+        req += "\n\nĐã có kết quả tra cứu ở trên. Cần thêm dữ liệu thì gọi công cụ, đủ rồi thì trả về JSON cuối cùng."
+    blocks.append(artifacts.text_block(req))
+    return artifacts.Blocks(blocks)
+
+
 def _agent_prompt(prompt: str, context_text: str, facts: Dict[str, Any], tool_results: List[Dict[str, Any]],
                   stage_art: Optional[Dict[str, Any]], final_only: bool) -> str:
     parts = [f"## Nội dung cuộc họp (toàn bộ, theo thứ tự thời gian):\n{context_text}"]
@@ -602,15 +695,17 @@ async def think_and_act(meeting_id: int, prompt: str, segments: List[Dict[str, A
         if on_progress:
             await on_progress(text, kind)
 
-    system = artifacts.with_skill(AGENT_SYSTEM.replace("{{NAME}}", assistant_config()["name"])
-                                  .replace("{{TOOLS}}", "\n".join(f"- {d}" for d in AGENT_TOOLS.values())), "assistant")
+    system = artifacts.Blocks([artifacts.text_block(artifacts.with_skill(
+        AGENT_SYSTEM.replace("{{NAME}}", assistant_config()["name"])
+        .replace("{{TOOLS}}", "\n".join(f"- {d}" for d in AGENT_TOOLS.values())), "assistant"), cache=True)])
+    transcript = transcript_blocks(segments)
     plan: Dict[str, Any] = {}
     plain = ""
     early_kind = guess_kind(prompt) if guess_kind(prompt) in EARLY_KINDS else None
     early_job = None
     for rnd in range(MAX_TOOL_ROUNDS + 1):
         last = rnd == MAX_TOOL_ROUNDS
-        raw = await _call_llm(system, _agent_prompt(prompt, context_text, facts, tool_results, stage_art, last),
+        raw = await _call_llm(system, _agent_request(prompt, transcript, facts, tool_results, stage_art, last),
                               max_tokens=3000)
         calls, final, text = parse_agent_output(raw)
         if final is not None:
@@ -629,7 +724,8 @@ async def think_and_act(meeting_id: int, prompt: str, segments: List[Dict[str, A
             if tool == "web_search":                                # trình duyệt thật / Claude, không qua MCP
                 async def _web_status(text, kind="status"):
                     await _progress(text, "status")
-                res = await artifacts.web_search_tool(str(args.get("query") or prompt), _web_status)
+                res = await artifacts.web_search_tool(str(args.get("query") or prompt), _web_status,
+                                                      rewrite=not args.get("query"))
             else:
                 call_async = getattr(mcp, "call_tool_async", None)  # qua MCP thật nếu đã cấu hình, không thì tại chỗ
                 res = await call_async(tool, args) if call_async else await asyncio.to_thread(mcp.call_tool, tool, args)

@@ -43,7 +43,8 @@ CMD_MAX_WAIT_S = 15.0
 _SENTENCE_END = re.compile(r"[.?!…]\W*$")
 # Câu dừng ở những từ này chắc chắn chưa nói xong ("em hãy", "tạo một cái", "chuyển sang")
 _UNFINISHED_TAIL = {"hãy", "giúp", "cho", "một", "cái", "các", "những", "về", "là", "của", "và", "với", "để", "thì",
-                    "mà", "tạo", "làm", "vẽ", "lập", "viết", "dựng", "xem", "sang", "tới", "đến", "qua", "thêm", "này"}
+                    "mà", "tạo", "làm", "vẽ", "lập", "viết", "dựng", "xem", "sang", "tới", "đến", "qua", "thêm", "này",
+                    "thể", "muốn", "cần", "nên", "sẽ", "phải", "đang", "đi"}
 
 MAX_SEGMENT_S = 20.0            # Câu dài hơn: cắt tại dấu câu để transcript cập nhật đều
 AUDIO_KEEP_S = 180              # Giữ tối đa ngần này giây audio để cắt clip / phát lại
@@ -55,6 +56,12 @@ AUTO_ENROLL_AI = os.getenv("AUTO_ENROLL_VOICES", "0").strip().lower() in ("1", "
 SESSIONS: Dict[int, "MeetingSession"] = {}
 LIVE_MEETINGS = SESSIONS        # Tên cũ (tương thích)
 _session_locks: Dict[int, asyncio.Lock] = {}
+
+
+def _is_fragment(command: str) -> bool:
+    """Chưa có yêu cầu thật: tối đa 4 từ và dừng ở từ chưa trọn ý ("em có thể", "em hãy giúp")."""
+    words = re.findall(r"\w+", (command or "").lower())
+    return not words or (len(words) <= 4 and words[-1] in _UNFINISHED_TAIL)
 
 
 def _unfinished(command: str) -> bool:
@@ -497,6 +504,7 @@ class MeetingSession:
         self._pending_enroll: Dict[int, Dict[str, Any]] = {}
         self._pending_wake: Optional[Dict[str, Any]] = None
         self._pending_cmd: Optional[Dict[str, Any]] = None   # lời gọi trợ lý đang chờ nói hết câu
+        self._ai_tasks: set = set()                          # yêu cầu đang xử lý (để "đừng soạn nữa" dừng được)
         self._speech_at = 0.0                                  # lần cuối chữ tạm (interim) thay đổi
         self._lock = asyncio.Lock()
         # Màn hình trình bày: nội dung đang chiếu, slide hiện tại, lịch sử để "quay lại phần trước"
@@ -727,10 +735,11 @@ class MeetingSession:
         pw = self._pending_wake
         if pw is not None and now <= pw["until"] and re.search(r"\w", text):
             self._pending_wake = None
+            cmd = f"{pw['prefix']} {text}".strip() if pw.get("prefix") else text   # nối phần đã nói dở
             if _SENTENCE_END.search(text):
-                asyncio.create_task(self._handle_ai_activation(text, text, pw["name"]))
+                asyncio.create_task(self._handle_ai_activation(cmd, cmd, pw["name"]))
             else:                              # câu yêu cầu cũng có thể bị cắt giữa chừng: chờ nói nốt
-                self._pending_cmd = {"name": pw["name"], "parts": [text], "first": text, "sid": seg["speaker_key"],
+                self._pending_cmd = {"name": pw["name"], "parts": [cmd], "first": cmd, "sid": seg["speaker_key"],
                                      "raw": seg.get("raw_speaker"), "start": now, "last": now, "token": object()}
                 asyncio.create_task(self._settle_cmd(self._pending_cmd["token"]))
 
@@ -741,6 +750,14 @@ class MeetingSession:
         self._pending_cmd = None
         command = re.sub(r"\s+", " ", " ".join(pc["parts"])).strip()
         full = re.sub(r"\s+", " ", " ".join([pc["first"]] + pc["parts"][1:])).strip()
+        if _is_fragment(command):
+            # "Jarvis ơi, em có thể..." rồi ngừng: chưa có yêu cầu, chờ câu tiếp theo thay vì gọi AI với nửa câu
+            token = object()
+            self._pending_wake = {"name": pc["name"], "until": time.monotonic() + WAKE_FOLLOWUP_S, "token": token,
+                                  "prefix": command}
+            asyncio.create_task(self.emit({"type": "ai_listening", "name": pc["name"], "sid": pc.get("sid")}))
+            asyncio.create_task(self._expire_wake(token))
+            return
         log.info("meeting.live: gọi trợ lý '%s' với yêu cầu '%s'", pc["name"], command)
         asyncio.create_task(self._handle_ai_activation(command, full, pc["name"]))
 
@@ -1005,6 +1022,10 @@ class MeetingSession:
         """Kích hoạt trợ lý khi được gọi tên: lệnh trình chiếu xử lý ngay, còn lại qua Thinking Engine."""
         prompt = command if len(command) > 5 else full_sentence
         artifacts.set_meeting(self.id, "trợ lý")
+        task = asyncio.current_task()
+        if task is not None:
+            self._ai_tasks.add(task)
+            task.add_done_callback(self._ai_tasks.discard)
         await self.emit({"type": "ai_activated", "wake_word": name or llm.assistant_config()["name"], "prompt": prompt,
                          "source": source})
         try:
@@ -1194,6 +1215,35 @@ class MeetingSession:
             return True
         if action == "open_file":
             return await self._open_deck_file(intent.get("query", ""))
+        if action == "cancel":
+            me = asyncio.current_task()
+            running = [t for t in list(self._ai_tasks) if t is not me and not t.done()]
+            for t in running:
+                t.cancel()
+            await self.emit({"type": "ai_cancelled", "count": len(running)})
+            await self._say("Dạ, em dừng lại ạ." if running else "Dạ, em không làm nữa ạ.", quiet=True)
+            return True
+        if action in ("latest", "version"):
+            return await self._show_saved(intent)
+        if action == "topic":
+            found = await self._find_topic(intent.get("query", ""))
+            if found is None:
+                if self.stage["artifact_id"] is None and not await self._decks():
+                    return False                          # chưa có slide nào: để trợ lý hiểu câu này
+                await self._say(f"Em chưa thấy slide nào nói về {intent.get('query', '')}.", "concerned")
+                return True
+            aid, idx = found
+            same_deck = aid == self.stage["artifact_id"]
+            await self.emit({"type": "stage_command", "action": "open"})
+            if same_deck:
+                await self.stage_action("goto", slide=idx)
+            else:
+                await self.stage_action("show", artifact_id=aid, slide=idx)
+            art = await self._get_artifact(aid)
+            sl = self._slides_of(art)
+            where = "" if same_deck else f", trong bộ \"{(art or {}).get('title', '').replace('Slide: ', '')}\""
+            await self._say(f"Slide {idx + 1} trên {len(sl)}: {sl[idx]['title']}{where}.", quiet=True)
+            return True
         if action == "web_search":
             return await self._web_research(intent.get("query", ""))
         if action == "back" and intent.get("kind"):
@@ -1311,6 +1361,50 @@ class MeetingSession:
         sents = re.split(r"(?<=[.!?])\s+", summary)
         await self._say(" ".join(sents[:3])[:420] or "Em đã tra cứu xong, kết quả đang hiện trên màn hình.",
                         "happy")
+        return True
+
+    async def _saved(self, kind: str) -> List[Dict[str, Any]]:
+        """Sản phẩm đã lưu của cuộc họp theo loại, mới nhất trước (cùng thời điểm thì mã lớn hơn là mới hơn)."""
+        arts = [a for a in await asyncio.to_thread(db.get_artifacts, self.id) if a.get("kind") == kind]
+        return sorted(arts, key=lambda a: (a.get("created_at") or 0, a.get("id") or 0), reverse=True)
+
+    async def _decks(self) -> List[Dict[str, Any]]:
+        return await self._saved("slides")
+
+    async def _find_topic(self, query: str) -> Optional[Tuple[int, int]]:
+        """Slide khớp chủ đề: bộ đang chiếu trước, sau đó các bộ khác (mới nhất trước). Trả về (artifact_id, slide)."""
+        cur = await self._get_artifact(self.stage["artifact_id"]) if self.stage["artifact_id"] is not None else None
+        order = ([cur] if cur and self._slides_of(cur) else []) + \
+                [a for a in await self._decks() if not cur or a["id"] != cur["id"]]
+        for art in order:
+            idx = self._find_slide(self._slides_of(art), query)
+            if idx is not None:
+                return art["id"], idx
+        return None
+
+    async def _show_saved(self, intent: Dict[str, Any]) -> bool:
+        """"Slide gần nhất em vừa tạo" / "slide v1": mở lại sản phẩm đã có, không tạo mới."""
+        kind = intent.get("kind")
+        cur = await self._get_artifact(self.stage["artifact_id"]) if self.stage["artifact_id"] is not None else None
+        kind = kind or (cur or {}).get("kind") or "slides"
+        name = llm.KIND_NAMES.get(kind, kind)
+        arts = await self._saved(kind)
+        if not arts:
+            await self._say(f"Em chưa tạo {name} nào trong cuộc họp này.", "concerned")
+            return True
+        target = arts[0]
+        if intent["action"] == "version":
+            base = cur if cur and cur.get("kind") == kind else arts[0]
+            same = [a for a in arts if a.get("title") == base.get("title")]
+            target = next((a for a in same if int(a.get("version") or 1) == intent["n"]), None)
+            if target is None:
+                vs = ", ".join(f"v{v}" for v in sorted({int(a.get("version") or 1) for a in same}))
+                await self._say(f"\"{base.get('title', '')}\" chỉ có bản {vs}.", "concerned")
+                return True
+        await self.emit({"type": "stage_command", "action": "open"})
+        await self.stage_action("show", artifact_id=target["id"])
+        ver = f" bản v{int(target.get('version') or 1)}" if intent["action"] == "version" else ""
+        await self._say(f"Dạ, em mở lại {name} \"{target.get('title', '')}\"{ver}.", quiet=True)
         return True
 
     async def _open_deck_file(self, query: str) -> bool:

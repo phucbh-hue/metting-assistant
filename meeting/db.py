@@ -658,11 +658,15 @@ def get_artifact(artifact_id: int) -> Optional[Dict[str, Any]]:
 # --------------------------------------------------------- AI INTERACTIONS ---
 def record_llm_usage(meeting_id: Optional[int], provider: str, model: str, purpose: str,
                      input_tokens: int, output_tokens: int, duration_s: float, ok: bool = True,
-                     cost_usd: float = 0.0, estimated: bool = False) -> None:
-    """Mỗi lần gọi LLM ghi một dòng: cuộc họp nào, việc gì, bao nhiêu token vào/ra, mất bao lâu, tốn khoảng bao nhiêu."""
+                     cost_usd: float = 0.0, estimated: bool = False, cache_read_tokens: int = 0,
+                     cache_write_tokens: int = 0) -> None:
+    """Mỗi lần gọi LLM ghi một dòng: cuộc họp nào, việc gì, bao nhiêu token vào/ra, mất bao lâu, tốn khoảng bao nhiêu.
+
+    input_tokens là tổng token vào (kể cả phần đọc / ghi cache); cache_read_tokens là phần đọc lại từ cache."""
     _get_db()["llm_usage"].insert_one({
         "meeting_id": meeting_id, "provider": provider, "model": model, "purpose": purpose,
         "input_tokens": int(input_tokens or 0), "output_tokens": int(output_tokens or 0),
+        "cache_read_tokens": int(cache_read_tokens or 0), "cache_write_tokens": int(cache_write_tokens or 0),
         "duration_s": round(float(duration_s), 2), "ok": bool(ok), "cost_usd": round(float(cost_usd), 6),
         "estimated": bool(estimated), "created_at": time.time(),
     })
@@ -679,9 +683,10 @@ def usage_summary() -> Dict[str, Any]:
         for r in rows:
             k = key_fn(r)
             b = out.setdefault(k, {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0, "errors": 0,
-                                   "last_at": 0.0})
+                                   "last_at": 0.0, "cache_read_tokens": 0})
             b["requests"] += 1
             b["input_tokens"] += r.get("input_tokens", 0)
+            b["cache_read_tokens"] += r.get("cache_read_tokens", 0)
             b["output_tokens"] += r.get("output_tokens", 0)
             b["cost_usd"] += r.get("cost_usd", 0.0)
             b["errors"] += 0 if r.get("ok", True) else 1
@@ -691,7 +696,7 @@ def usage_summary() -> Dict[str, Any]:
         return out
 
     total = bucket(lambda r: "all").get("all", {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0,
-                                                 "errors": 0, "last_at": 0.0})
+                                                 "errors": 0, "last_at": 0.0, "cache_read_tokens": 0})
     by_meeting = [{"meeting_id": k, "title": titles.get(k, "") if k is not None else "(ngoài cuộc họp)", **v}
                   for k, v in bucket(lambda r: r.get("meeting_id")).items()]
     by_meeting.sort(key=lambda x: -x["last_at"])

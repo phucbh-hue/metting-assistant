@@ -189,8 +189,9 @@ class AgentWebSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("web_search", llm.AGENT_TOOLS)
         seen = []
 
-        async def fake_tool(query, on_progress=None):
+        async def fake_tool(query, on_progress=None, rewrite=True):
             seen.append(query)
+            self.assertFalse(rewrite)                     # agent đã viết sẵn từ khóa: không đổi lại bằng AI
             return {"query": query, "engine": "Bing",
                     "sources": [dict(n=i, excerpt=p["text"], **{k: p[k] for k in ("title", "url", "domain", "published")})
                                 for i, p in enumerate(PAGES, 1)]}

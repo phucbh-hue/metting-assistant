@@ -50,7 +50,8 @@ class UsageGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(rows[0]["cost_usd"], (100 * 5 + 30 * 25) / 1e6, places=8)
         s = db.usage_summary()
         self.assertEqual((s["total"]["requests"], s["total"]["input_tokens"], s["total"]["output_tokens"]), (2, 200, 60))
-        self.assertEqual(s["by_meeting"][0]["title"] if s["by_meeting"][0]["meeting_id"] == self.mid else None, "Họp A")
+        row = next(m for m in s["by_meeting"] if m["meeting_id"] == self.mid)       # không phụ thuộc thứ tự thời gian
+        self.assertEqual((row["title"], row["requests"]), ("Họp A", 1))
         self.assertEqual({p["purpose"] for p in s["by_purpose"]}, {"slide", "khác"})
 
     async def test_failed_call_is_logged_as_error(self):

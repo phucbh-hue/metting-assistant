@@ -6,12 +6,62 @@ tra cứu dữ liệu nội bộ qua MCP, soạn và trình chiếu slide theo l
 vẽ sơ đồ, dựng dashboard số liệu, báo cáo nhanh và phác thảo trang web. Trợ lý nói bằng giọng tiếng Việt chạy
 ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
 
-- Phiên bản: 3.7 - cập nhật 02/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.8 - cập nhật 02/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
 
-## 1. Có gì mới ở bản 3.7
+## 1. Có gì mới ở bản 3.8
+
+### Tối ưu chi phí gọi AI
+Phạm vi: mọi chỗ gọi Claude của ứng dụng, chạy trên Claude API của Anthropic, model `claude-opus-4-7`. Dữ liệu: nhật ký
+gọi AI thật của cuộc họp #40 (Atlas, collection `llm_usage`), bảng giá và hướng dẫn tối ưu chi phí của Anthropic lấy
+ngày 02/10/2026. Kiểm tra chất lượng: bộ test offline (không có bộ đánh giá chất lượng câu trả lời), nên chỉ áp dụng các
+thay đổi không đánh đổi chất lượng.
+
+Cuộc họp #40 (khoảng 30 phút thử nghiệm) tốn 2,835 USD:
+
+| Việc | Lượt gọi | Chi phí | Tỷ lệ |
+|---|---|---|---|
+| Trợ lý trả lời và tra cứu | 34 | 1,326 USD | 47% |
+| Đoán tên người nói (chạy nền) | 27 | 0,737 USD | 26% |
+| Soạn slide | 5 | 0,576 USD | 20% |
+| Dashboard, sơ đồ | 3 | 0,196 USD | 7% |
+
+Các thay đổi đã áp dụng (đều không làm giảm chất lượng), xếp theo mức tiết kiệm ước tính trên nhật ký #40:
+
+| Thay đổi | Loại | Tiết kiệm ước tính | Nguồn số liệu |
+|---|---|---|---|
+| Đoán tên chỉ chạy khi có tên người mới được nhắc ("anh Tuấn", "Tuấn ơi", "tôi là Phúc") | không đánh đổi | khoảng 22% hóa đơn | phát lại câu thoại thật: 87 lượt còn 25 trên 5 cuộc họp |
+| Nhận đúng lệnh điều hướng thật ("slide gần nhất", "slide v1", "slide điểm cộng", "quay lại slide em trình bày hồi nãy", "đừng soạn nữa", "trình bày nội dung trong slide") thay vì gửi AI và soạn lại slide mới | không đánh đổi | khoảng 20% hóa đơn (4 lần soạn lại slide và 7 lượt trợ lý) | lịch sử tương tác #40 |
+| Prompt cache cho trợ lý: hướng dẫn hệ thống, transcript chia khối 30 câu và kết quả tra cứu cũ được đọc lại từ cache | không đánh đổi | khoảng 16% hóa đơn (36% chi phí trợ lý) | mô phỏng trên chuỗi lượt gọi thật |
+| Bỏ lượt AI đổi từ khóa khi chính trợ lý đã viết sẵn từ khóa tìm web | không đánh đổi | khoảng 1% | 9 lượt trong #40 |
+| Câu gọi dở dang ("em có thể") chờ người nói tiếp thay vì gửi AI | không đánh đổi | khoảng 1% | 1 lượt trong #40 |
+
+Bảng xếp theo mức tiết kiệm, không phải thứ tự áp dụng. Các mức trên có phần chồng nhau và là ước tính, chưa phải số đo
+sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn khoảng một nửa.
+
+- Đo thật sau khi dùng: Cài đặt > Sử dụng AI có thêm tỷ lệ token đọc lại từ cache. Nhật ký `llm_usage` ghi riêng token
+  ghi cache (1,25 lần giá) và đọc cache (0,1 lần giá), và phí 0,01 USD mỗi lượt tìm của công cụ web_search của Claude.
+- Đề xuất có đánh đổi, CHƯA áp dụng (cần anh duyệt và một bộ đánh giá nhỏ khoảng 20 yêu cầu thật, ước tính 1-2 USD):
+  - Chuyển `CLAUDE_MODEL` sang `claude-opus-5-5`: rẻ hơn 20% mỗi token, đọc cache 0,05 lần giá, là model Anthropic
+    khuyên dùng làm điểm bắt đầu; nhưng model này luôn suy nghĩ trước khi trả lời nên số token ra có thể tăng.
+  - Dùng model rẻ hơn (Sonnet 5.5) cho việc đoán tên; sau khi đã giảm số lượt, phần này còn nhỏ nên ưu tiên thấp.
+  - Giảm `effort` cho các vòng trợ lý chỉ chọn công cụ.
+- Không áp dụng vì không hợp với cách dùng: Batch API (mọi lời gọi đều có người đang chờ), tìm công cụ trì hoãn (danh sách
+  công cụ nhỏ), nén ngữ cảnh (vòng lặp ngắn), thu nhỏ ảnh (không gửi ảnh).
+- `IDENTITY_FALLBACK_SEGMENTS` (mặc định 40): không có tên mới thì cứ bấy nhiêu câu mới đoán lại tên một lần.
+
+### Linh vật UrBox
+- Hình đại diện trợ lý mặc định là linh vật hộp quà UrBox, thiết kế gốc theo màu trên urbox.vn (tím #6821C2, #8235E4,
+  #A426ED, vàng #FFB700). Trang urbox.vn không có linh vật chính thức; nếu công ty có tệp linh vật chính thức thì thay
+  được `MASCOT_SVG` trong `meeting/index.html`.
+- Chuyển động theo trạng thái: chờ thì nhún nhẹ và chớp mắt; nghe thì vẫy tay và nhìn về phía người nói; nghĩ thì nghiêng
+  nắp, nhìn lên, vòng vàng xoay; nói thì miệng và nắp hộp mở theo âm lượng giọng đọc, nơ lắc; có kết quả tốt thì nhảy lên,
+  má hồng và lấp lánh. Tôn trọng cài đặt giảm chuyển động của hệ điều hành.
+- Đổi lại khuôn mặt tròn cũ: Cài đặt > Hình đại diện trợ lý.
+
+## 2. Bản 3.7: lưu trên máy khi mất Atlas, tra cứu bằng Playwright
 
 ### Không còn mất lịch sử cuộc họp khi Atlas lỗi
 - Nguyên nhân mất lịch sử: máy hiện không kết nối được MongoDB Atlas (Atlas từ chối bắt tay TLS, thường do IP của máy chưa
@@ -46,11 +96,11 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
 - Chạy `run.cmd` khi server cũ vẫn còn ở cửa sổ khác: hỏi dừng server cũ (Y) hay giữ server cũ và chỉ mở trình duyệt
   (N, mặc định sau 20 giây), thay vì báo lỗi trùng cổng 8080.
 
-## 2. Bản 3.6: cổng gọi AI, xuất dữ liệu
+## 3. Bản 3.6: cổng gọi AI, xuất dữ liệu
 
 ### Tra cứu trên mạng
 - "UrBox ơi, em search giúp anh coi giá vàng đang bao nhiêu": trợ lý tìm trên web (bản 3.6 dùng công cụ web_search của
-  Claude, tối đa 5 lượt tìm; từ bản 3.7 mặc định dùng trình duyệt, xem mục 1), viết báo cáo "Tra cứu: ..." gồm kết luận, chi tiết, liên hệ với cuộc họp và danh sách nguồn, chiếu lên
+  Claude, tối đa 5 lượt tìm; từ bản 3.7 mặc định dùng trình duyệt, xem mục 2), viết báo cáo "Tra cứu: ..." gồm kết luận, chi tiết, liên hệ với cuộc họp và danh sách nguồn, chiếu lên
   màn hình, đọc kết luận. Yêu cầu và thời điểm tra cứu được ghi ở cuối báo cáo. Cần `ANTHROPIC_API_KEY`.
 - Một lần tra cứu tốn khoảng 25.000-30.000 token vào (kết quả web tính vào input), tức khoảng 0,15-0,20 USD với Opus 4.7.
 
@@ -65,7 +115,7 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
   hồ sơ người nói, sản phẩm AI, nhật ký gọi AI. Dùng khi server đang chạy DB tạm (in-memory) để không mất dữ liệu, hoặc để
   gửi cho người phân tích lỗi nhận diện người nói.
 
-## 3. Bản 3.4: trợ lý thuyết trình, nội dung bám sát, MCP data server
+## 4. Bản 3.4: trợ lý thuyết trình, nội dung bám sát, MCP data server
 
 ### Trợ lý tự thuyết trình
 - "Thanh ơi, thuyết trình giúp anh" / "present slide" / "tự chuyển slide và nói nội dung bên trong": trợ lý đọc nội dung
@@ -105,7 +155,7 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
   thành người nói mới ngay, không bị gộp vào người đang nói; câu ngắn theo người vừa được nhận ra bằng giọng.
 - Model trợ lý mặc định đổi sang `claude-opus-4-7` (`CLAUDE_MODEL` trong `.env`); muốn nhanh và rẻ hơn dùng `claude-sonnet-5-5`.
 
-## 4. Bản 3.3: slide theo lời trình bày, ghép lệnh bị cắt
+## 5. Bản 3.3: slide theo lời trình bày, ghép lệnh bị cắt
 
 ### Slide tự chuyển theo lời trình bày
 
@@ -134,7 +184,7 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
 - Đo trên 5 cuộc họp thật có nhãn đúng gần đúng: 87,0% -> 89,2% câu (#37: 91% -> 100%, #36: 83% -> 86%), các
   cuộc họp khác không đổi.
 
-## 5. Bản 3.2: kết quả luôn hiện ra, dashboard, giọng đọc chạy trên máy
+## 6. Bản 3.2: kết quả luôn hiện ra, dashboard, giọng đọc chạy trên máy
 
 ### Trợ lý trả lời có nội dung thật và luôn hiện kết quả
 
@@ -181,7 +231,7 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
   Mô phỏng trên #31: bấm một lần ở câu đầu của khách mời thì đúng 95% câu.
 - Giới hạn: giọng phát qua loa máy tính bị kênh âm thanh làm giống nhau; họp trực tiếp với người thật tách tốt hơn.
 
-## 6. Bản 3.1: khuôn mặt, màn hình trình chiếu, tên gọi
+## 7. Bản 3.1: khuôn mặt, màn hình trình chiếu, tên gọi
 
 ### Trợ lý có khuôn mặt, giọng nói và màn hình trình chiếu
 
@@ -189,7 +239,7 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
   trình chiếu: bên trái là khuôn mặt trợ lý, bên phải là nội dung đang trình bày (slide, biên bản, sơ đồ, giao diện).
 - Khuôn mặt đổi theo trạng thái: **chờ**, **lắng nghe** (vòng sáng co giãn theo âm lượng mic), **suy nghĩ**
   (vòng nét đứt xoay, mắt nhìn lên), **nói** (miệng mấp máy theo lời). Nét mặt vui hoặc lo lắng theo nội dung.
-- Giọng nói: từ bản 3.2 dùng giọng Piper chạy trên máy chủ (xem mục 5); giọng của trình duyệt chỉ là dự phòng.
+- Giọng nói: từ bản 3.2 dùng giọng Piper chạy trên máy chủ (xem mục 6); giọng của trình duyệt chỉ là dự phòng.
   Giọng trực tuyến "Online (Natural)" của Microsoft Edge chỉ được dùng khi người dùng bấm cho phép (xem mục Lưu ý
   dữ liệu). Nút "Giọng nói" hoặc phím V để bật/tắt; bấm vào khuôn mặt để trợ lý dừng nói.
 - Khi trợ lý đang nói, mic gửi khoảng lặng thay cho âm thanh để giọng trợ lý không lọt vào transcript
@@ -237,7 +287,7 @@ chờ câu yêu cầu tiếp theo trong 8 giây. Câu chỉ nhắc tới tên (v
 - Menu "..." của cuộc họp -> **Phân tích lại người nói**: chạy lại bộ phân vai trên toàn bộ câu đã lưu.
   Tên đã đặt được giữ cho người nói xuất hiện sớm nhất trong nhóm.
 
-## 7. Bản 3.0: sửa lỗi phân biệt người nói
+## 8. Bản 3.0: sửa lỗi phân biệt người nói
 
 | Vấn đề ở bản 2.5 | Nguyên nhân gốc | Cách sửa |
 |---|---|---|
@@ -255,7 +305,7 @@ Khác:
 - Nội dung do AI sinh ra được làm sạch (DOMPurify) và chạy trong iframe sandbox cô lập.
 - Kết thúc cuộc họp trả về ngay, biên bản lập ở chế độ nền.
 
-## 8. Cách phân biệt người nói
+## 9. Cách phân biệt người nói
 
 ```
 Soniox (nhãn người nói theo phiên)  ─┐
@@ -275,7 +325,7 @@ CAM++ (vector giọng 192D mỗi câu)  ──┘          │               │
 
 Ngưỡng được đo trên dữ liệu thật của model CAM++: cùng người câu ngắn 0.3-0.6, câu dài 0.6-0.87; khác người 0.0-0.4.
 
-## 9. Cấu trúc thư mục
+## 10. Cấu trúc thư mục
 
 ```
 meeting-assistant/
@@ -308,7 +358,7 @@ meeting-assistant/
 └── static/
 ```
 
-## 10. Chạy
+## 11. Chạy
 
 Cách nhanh nhất: bấm đúp **`run.cmd`** (hoặc gõ `run` trong terminal) -> server chạy ở http://127.0.0.1:8080 và tự mở
 trình duyệt; lần đầu tự tải giọng đọc tiếng Việt nếu chưa có. `run.cmd demo` chạy bản demo dữ liệu giả lập ở cổng 8090.
@@ -343,7 +393,7 @@ màu riêng -> bấm **Đặt tên** (hoặc xác nhận gợi ý của AI, tick
 Trình bày: nhờ trợ lý soạn slide (hoặc chọn tab **Slide**) -> bấm biểu tượng toàn màn hình ở khung AI ->
 nói "<tên gọi> ơi, chuyển slide", "nhắc bài"... Cần giọng Tiếng Việt cài trên Windows để trợ lý nói thành tiếng.
 
-## 11. Cấu hình
+## 12. Cấu hình
 
 Xem `.env.example`. Các biến quan trọng:
 
@@ -360,13 +410,14 @@ Xem `.env.example`. Các biến quan trọng:
 | `SONIOX_IDLE_CLOSE_S` | `30` | Tắt mic quá ngần này giây thì đóng stream |
 | `SONIOX_LANGUAGE_HINTS` | `vi,en` | Gợi ý ngôn ngữ cho Soniox |
 | `IDENTITY_MIN_INTERVAL_S` | `20` | Khoảng cách tối thiểu giữa 2 lần AI đoán tên |
+| `IDENTITY_FALLBACK_SEGMENTS` | `40` | Không có tên người mới được nhắc thì cứ bấy nhiêu câu mới đoán lại tên một lần |
 | `TTS_VOICE` | `vits-piper-vi_VN-vais1000-medium` | Giọng đọc trong `models/tts/` |
 | `TTS_SPEED` | `1.05` | Tốc độ đọc |
 | `TTS_MODEL_DIR` | | Đường dẫn thư mục giọng đọc nếu để ngoài `models/tts/` |
 | `SLIDES_DIR` | `slides/` | Thư viện slide trên máy cho lệnh "mở slide ở folder ..." |
 | `MCP_SERVER_CMD` / `MCP_SERVER_URL` | | Trỏ trợ lý tới MCP server thật (stdio hoặc http); không đặt thì dùng dữ liệu tại chỗ |
 
-## 12. API chính
+## 13. API chính
 
 | Method | Đường dẫn | Mô tả |
 |---|---|---|
@@ -395,7 +446,7 @@ Xem `.env.example`. Các biến quan trọng:
 | WS | `/ws/meeting/{id}/audio` | PCM16 16kHz mono từ mic (một thiết bị ghi mỗi cuộc họp) |
 | WS | `/ws/meeting/{id}/events` | Sự kiện: `segment`, `segments_relabeled`, `speakers`, `speakers_split`, `interim`, `identity_suggestion`, `ai_progress`, `ai_say`, `ai_insights`, `stage_state`, `stage_command`, `stage_prompt`... |
 
-## 13. Lưu ý dữ liệu
+## 14. Lưu ý dữ liệu
 
 - `data/local_db/` (lưu trên máy khi mất kết nối Atlas) chứa nội dung cuộc họp và vector giọng nói: không chia sẻ, không đưa
   lên git (đã có trong `.gitignore`). Xóa thư mục này khi chưa đồng bộ sẽ mất các cuộc họp trong đó.

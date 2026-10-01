@@ -103,7 +103,7 @@
     .notice ol { margin: 6px 0 0 18px; list-style: decimal; }
     .seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: rgba(0,0,0,.25); border: 1px solid var(--line); }
     .seg button { height: 28px; padding: 0 12px; border-radius: 7px; font-size: 12.5px; font-weight: 500; color: rgb(var(--muted)); }
-    .seg button[aria-selected="true"] { background: rgba(255,255,255,.1); color: rgb(var(--ink)); }
+    .seg button[aria-selected="true"], .seg button[aria-checked="true"] { background: rgba(255,255,255,.1); color: rgb(var(--ink)); }
     .dot-live { width: 8px; height: 8px; border-radius: 99px; background: rgb(var(--live)); box-shadow: 0 0 0 0 rgb(var(--live) / .6); animation: pulse 1.6s infinite; }
     @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgb(var(--live) / .55); } 70% { box-shadow: 0 0 0 7px rgb(var(--live) / 0); } 100% { box-shadow: 0 0 0 0 rgb(var(--live) / 0); } }
 
@@ -225,6 +225,20 @@
     .face .mouth { fill: #4a1124; stroke: #063b26; stroke-width: 4; stroke-linejoin: round; }
     .face .cheek { fill: #FF7AC6; opacity: 0; transition: opacity .5s; }
     .face.mood-happy .cheek { opacity: .35; }
+    /* Linh vật UrBox: hộp quà tím (#6821C2, #8235E4, #A426ED theo urbox.vn) với nơ vàng #FFB700 */
+    .face.mascot .ring { stroke: #FFB700; }
+    .face.mascot .ring2 { stroke: rgb(255 183 0 / .55); }
+    .face.mascot .white { fill: #FFFFFF; }
+    .face.mascot .pupil { fill: #1B0B33; }
+    .face.mascot .brow { stroke: #2A0B57; stroke-width: 4.5; }
+    .face.mascot .mouth { fill: #3B0A28; stroke: #2A0B57; stroke-width: 3.5; }
+    .face.mascot .cheek { fill: #EF65C5; opacity: .28; }
+    .face.mascot.mood-happy .cheek { opacity: .55; }
+    .face .shadow { fill: #000; opacity: .28; }
+    .face .spark { fill: #FFD25A; opacity: 0; transform-box: fill-box; transform-origin: center; }
+    .face.mood-happy .spark { animation: av-spark 1.3s ease-in-out infinite; }
+    @keyframes av-spark { 0%, 100% { opacity: 0; transform: scale(.3) rotate(0deg); } 50% { opacity: 1; transform: scale(1) rotate(25deg); } }
+    @media (prefers-reduced-motion: reduce) { .face .spark { animation: none !important; } }
     .face-mini { width: 40px; height: 40px; flex: none; }
     .bubble { position: relative; background: rgb(var(--raise)); border: 1px solid var(--line-strong); border-radius: 16px;
       padding: 12px 14px; font-size: 14.5px; line-height: 1.55; min-height: 50px; }
@@ -1029,6 +1043,7 @@ function onEvent(R, ev) {
     case 'ai_tool_call': currentTurn().tools.push(ev.tool); renderJarvis(); break;
     case 'ai_response': finishTurn(currentTurn(), ev.response); break;
     case 'ai_error': { const t = currentTurn(); t.error = ev.text; t.done = true; renderJarvis(); break; }
+    case 'ai_cancelled': (S.room.turns || []).forEach(t => { if (!t.done) { t.done = true; t.response = t.response || 'Đã dừng theo yêu cầu.'; } }); renderJarvis(); break;
     case 'artifact_created':
     case 'artifact_updated':
       addArtifact(ev.artifact, true);
@@ -1860,6 +1875,55 @@ const FACE_SVG = (id) => `
     <path class="brow" d=""/><path class="brow" d=""/>
     <path class="mouth" d=""/>
   </g>`;
+/* Linh vật UrBox (thiết kế gốc theo màu thương hiệu trên urbox.vn): hộp quà tím, nơ vàng, mặt biểu cảm.
+   Nắp bật theo nhịp giọng nói, nơ lắc, tay vẫy khi vui, hộp nhún khi nói, lấp lánh khi có kết quả tốt. */
+const MASCOT_SVG = (id) => `
+  <defs>
+    <linearGradient id="${id}-body" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#8E44EC"/><stop offset="100%" stop-color="#6821C2"/></linearGradient>
+    <linearGradient id="${id}-lid" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#A84FF0"/><stop offset="100%" stop-color="#7A2FD6"/></linearGradient>
+    <linearGradient id="${id}-gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FFD25A"/><stop offset="100%" stop-color="#FFB700"/></linearGradient>
+    <clipPath id="${id}-clip"><rect x="42" y="90" width="116" height="86" rx="18"/></clipPath>
+  </defs>
+  <circle class="ring2" cx="100" cy="100" r="97"/>
+  <circle class="ring" cx="100" cy="100" r="90"/>
+  <ellipse class="shadow" data-shadow cx="100" cy="183" rx="50" ry="6.5"/>
+  <path class="spark" d="M30 58 l3 7 7 3 -7 3 -3 7 -3 -7 -7 -3 7 -3z"/>
+  <path class="spark" style="animation-delay:.45s" d="M172 48 l2.5 6 6 2.5 -6 2.5 -2.5 6 -2.5 -6 -6 -2.5 6 -2.5z"/>
+  <path class="spark" style="animation-delay:.9s" d="M166 142 l2 5 5 2 -5 2 -2 5 -2 -5 -5 -2 5 -2z"/>
+  <g data-head>
+    <g data-arm-l><path d="M46 122 q-19 4 -22 21 q-1 7 6 6 q11 -2 18 -14 z" fill="#7A2FD6" stroke="#5B1AA8" stroke-width="2"/></g>
+    <g data-arm-r><path d="M154 122 q19 4 22 21 q1 7 -6 6 q-11 -2 -18 -14 z" fill="#7A2FD6" stroke="#5B1AA8" stroke-width="2"/></g>
+    <rect x="42" y="90" width="116" height="86" rx="18" fill="url(#${id}-body)"/>
+    <g clip-path="url(#${id}-clip)">
+      <rect x="42" y="156" width="116" height="11" fill="url(#${id}-gold)"/>
+      <rect x="93" y="156" width="14" height="22" fill="url(#${id}-gold)"/>
+      <rect x="42" y="90" width="116" height="8" fill="#000" opacity=".12"/>
+    </g>
+    <ellipse class="cheek" cx="64" cy="140" rx="9" ry="5.5"/><ellipse class="cheek" cx="136" cy="140" rx="9" ry="5.5"/>
+    <ellipse class="white" cx="78" cy="119" rx="12" ry="14"/><ellipse class="white" cx="122" cy="119" rx="12" ry="14"/>
+    <circle class="pupil" cx="78" cy="121" r="6"/><circle class="pupil" cx="122" cy="121" r="6"/>
+    <circle class="shine" cx="81" cy="117" r="2.1"/><circle class="shine" cx="125" cy="117" r="2.1"/>
+    <path class="brow" d=""/><path class="brow" d=""/>
+    <path class="mouth" d=""/>
+    <g data-lid>
+      <rect x="34" y="72" width="132" height="24" rx="9" fill="url(#${id}-lid)" stroke="#5B1AA8" stroke-width="2"/>
+      <rect x="93" y="72" width="14" height="24" fill="url(#${id}-gold)"/>
+      <g data-bow>
+        <path d="M100 72 C 84 48, 60 56, 73 70 C 80 77, 92 75, 100 72 Z" fill="url(#${id}-gold)" stroke="#E39A00" stroke-width="2"/>
+        <path d="M100 72 C 116 48, 140 56, 127 70 C 120 77, 108 75, 100 72 Z" fill="url(#${id}-gold)" stroke="#E39A00" stroke-width="2"/>
+        <circle cx="100" cy="71" r="6.5" fill="#FFB700" stroke="#E39A00" stroke-width="2"/>
+      </g>
+    </g>
+  </g>`;
+/* Hình học từng kiểu: tâm mắt, độ cao mắt, lông mày, miệng (toạ độ trong viewBox 200 x 200) */
+const AV_GEO = {
+  face: { eyes: [72, 128], eyeY: 92, eyeRy: 16, pupilDy: 2, shineDx: 3, shineDy: -2, browY: 70, browW: 14, browLift: 1,
+          mouthY: 129, mouthW: 21, mouthDepth: 22 },
+  mascot: { eyes: [78, 122], eyeY: 119, eyeRy: 14, pupilDy: 2, shineDx: 3, shineDy: -2, browY: 102, browW: 12, browLift: 0.55,
+            mouthY: 140, mouthW: 15, mouthDepth: 15 },
+};
+let AV_STYLE = 'mascot';
+try { AV_STYLE = localStorage.getItem('mc_avatar') === 'face' ? 'face' : 'mascot'; } catch (e) { /* bỏ qua */ }
 const AV = { faces: [], state: 'idle', mood: 'neutral', heardAt: -1e9, mouth: 0, phase: 0, kickAt: 0, bubbleText: '',
   gx: 0, gy: 0, tgx: 0, tgy: 0, nextGaze: 0, blinkT: -1, blinkAt: 2000, shown: '' };
 const AV_STATUS = { idle: 'Đang chờ', listening: 'Đang lắng nghe', thinking: 'Đang suy nghĩ', speaking: 'Đang nói' };
@@ -1867,17 +1931,27 @@ const REDUCED_MOTION = window.matchMedia && matchMedia('(prefers-reduced-motion:
 
 function mountFaces() {
   $$('[data-face]').forEach((svg, i) => {
-    if (svg.dataset.ready) return;
-    svg.innerHTML = FACE_SVG(`face-grad-${i}`);
-    svg.dataset.ready = '1';
-    AV.faces.push({ svg, head: $('[data-head]', svg), ring: $('.ring', svg), ring2: $('.ring2', svg), mouth: $('.mouth', svg),
-      whites: $$('.white', svg), pupils: $$('.pupil', svg), shines: $$('.shine', svg), brows: $$('.brow', svg) });
+    if (svg.dataset.ready === AV_STYLE) return;
+    if (svg.dataset.ready) AV.faces = AV.faces.filter(f => f.svg !== svg);
+    const mascot = AV_STYLE === 'mascot';
+    svg.innerHTML = mascot ? MASCOT_SVG(`mascot-${i}`) : FACE_SVG(`face-grad-${i}`);
+    svg.classList.toggle('mascot', mascot);
+    svg.dataset.ready = AV_STYLE;
+    AV.faces.push({ svg, geo: AV_GEO[AV_STYLE], mascot, head: $('[data-head]', svg), ring: $('.ring', svg), ring2: $('.ring2', svg),
+      mouth: $('.mouth', svg), whites: $$('.white', svg), pupils: $$('.pupil', svg), shines: $$('.shine', svg), brows: $$('.brow', svg),
+      lid: $('[data-lid]', svg), bow: $('[data-bow]', svg), armL: $('[data-arm-l]', svg), armR: $('[data-arm-r]', svg),
+      shadow: $('[data-shadow]', svg) });
   });
 }
+function setAvatarStyle(style) {
+  AV_STYLE = style === 'face' ? 'face' : 'mascot';
+  try { localStorage.setItem('mc_avatar', AV_STYLE); } catch (e) { /* bỏ qua */ }
+  mountFaces();
+}
 function avSet(state, mood) { if (state) AV.state = state; if (mood) { AV.mood = mood; AV.moodAt = performance.now(); } }
-function mouthPath(open, smile) {
-  const w = 21, cx = 100, y = 129 - smile * 3;
-  const up = y + smile * 8 - open * 2, low = y + smile * 8 + 3 + open * 22;
+function mouthPath(open, smile, g = AV_GEO.face) {
+  const w = g.mouthW, cx = 100, y = g.mouthY - smile * 3;
+  const up = y + smile * 8 - open * 2, low = y + smile * 8 + 3 + open * g.mouthDepth;
   return `M ${cx - w} ${y.toFixed(1)} Q ${cx} ${up.toFixed(1)} ${cx + w} ${y.toFixed(1)} Q ${cx} ${low.toFixed(1)} ${cx - w} ${y.toFixed(1)} Z`;
 }
 function avFrame(ts) {
@@ -1922,14 +1996,37 @@ function avFrame(ts) {
   const ringScale = 1 + (st === 'listening' ? Math.min(0.07, MIC.level * 1.5) + (REDUCED_MOTION ? 0 : 0.02 * (1 + Math.sin(t * 5)))
     : st === 'speaking' ? AV.mouth * 0.04 : 0);
   const bob = REDUCED_MOTION ? 0 : Math.sin(t * 1.6) * 1.4;
+  // Linh vật: nhảy lên khi vừa vui (có kết quả), nhún theo giọng, nắp bật theo âm lượng, nơ lắc, tay vẫy
+  const sinceMood = ts - (AV.moodAt || 0);
+  const hop = REDUCED_MOTION || AV.mood !== 'happy' || sinceMood > 900 ? 0 : Math.abs(Math.sin(sinceMood / 900 * Math.PI * 2)) * 9;
+  const waving = !REDUCED_MOTION && (AV.mood === 'happy' && sinceMood < 2600 || st === 'listening');
   for (const f of visible) {
-    f.head.setAttribute('transform', `translate(0 ${bob.toFixed(2)})`);
-    f.whites.forEach(w => w.setAttribute('ry', (16 * Math.max(0.08, open)).toFixed(2)));
-    f.pupils.forEach((pp, i) => { pp.setAttribute('cx', (72 + i * 56 + AV.gx).toFixed(2)); pp.setAttribute('cy', (94 + AV.gy).toFixed(2)); pp.style.opacity = open < 0.3 ? 0 : 1; });
-    f.shines.forEach((sh, i) => { sh.setAttribute('cx', (75 + i * 56 + AV.gx).toFixed(2)); sh.setAttribute('cy', (90 + AV.gy).toFixed(2)); sh.style.opacity = open < 0.3 ? 0 : 0.9; });
-    f.brows[0].setAttribute('d', `M 58 ${70 + lift + tilt} Q 72 ${63 + lift} 86 ${70 + lift - tilt}`);
-    f.brows[1].setAttribute('d', `M 114 ${70 + lift - tilt} Q 128 ${63 + lift} 142 ${70 + lift + tilt}`);
-    f.mouth.setAttribute('d', mouthPath(AV.mouth, smile));
+    const g = f.geo;
+    if (f.mascot) {
+      const sy = 1 + AV.mouth * 0.035, sx = 1 - AV.mouth * 0.02;
+      f.head.setAttribute('transform', `translate(0 ${(bob - hop).toFixed(2)}) translate(100 176) scale(${sx.toFixed(3)} ${sy.toFixed(3)}) translate(-100 -176)`);
+      const lidUp = AV.mouth * 9 + hop * 0.5 + (st === 'thinking' && !REDUCED_MOTION ? 2 + Math.sin(t * 4) * 2 : 0);
+      f.lid.setAttribute('transform', `translate(0 ${(-lidUp).toFixed(2)}) rotate(${(-AV.mouth * 4 - (st === 'thinking' ? 3 : 0)).toFixed(2)} 100 84)`);
+      const wig = REDUCED_MOTION ? 0 : Math.sin(t * 2.2) * 3 + (speaking ? Math.sin(t * 12) * 4 : 0);
+      f.bow.setAttribute('transform', `rotate(${wig.toFixed(2)} 100 72)`);
+      const sway = REDUCED_MOTION ? 0 : Math.sin(t * 1.6) * 3;
+      f.armL.setAttribute('transform', `rotate(${(sway + (st === 'thinking' ? 8 : 0)).toFixed(2)} 46 124)`);
+      const armR = waving ? -40 + Math.sin(t * 13) * 22 : st === 'thinking' ? -55 : -sway;
+      f.armR.setAttribute('transform', `rotate(${armR.toFixed(2)} 154 124)`);
+      f.shadow.setAttribute('rx', (50 - hop * 1.6 + AV.mouth * 2).toFixed(2));
+      f.shadow.style.opacity = (0.28 - hop * 0.015).toFixed(3);
+    } else {
+      f.head.setAttribute('transform', `translate(0 ${bob.toFixed(2)})`);
+    }
+    const [ex0, ex1] = g.eyes, dx = ex1 - ex0;
+    const lf = lift * g.browLift;
+    f.whites.forEach(w => w.setAttribute('ry', (g.eyeRy * Math.max(0.08, open)).toFixed(2)));
+    f.pupils.forEach((pp, i) => { pp.setAttribute('cx', (ex0 + i * dx + AV.gx).toFixed(2)); pp.setAttribute('cy', (g.eyeY + g.pupilDy + AV.gy).toFixed(2)); pp.style.opacity = open < 0.3 ? 0 : 1; });
+    f.shines.forEach((sh, i) => { sh.setAttribute('cx', (ex0 + g.shineDx + i * dx + AV.gx).toFixed(2)); sh.setAttribute('cy', (g.eyeY + g.shineDy + AV.gy).toFixed(2)); sh.style.opacity = open < 0.3 ? 0 : 0.9; });
+    const by = g.browY, bw = g.browW;
+    f.brows[0].setAttribute('d', `M ${ex0 - bw} ${by + lf + tilt} Q ${ex0} ${by - 7 + lf} ${ex0 + bw} ${by + lf - tilt}`);
+    f.brows[1].setAttribute('d', `M ${ex1 - bw} ${by + lf - tilt} Q ${ex1} ${by - 7 + lf} ${ex1 + bw} ${by + lf + tilt}`);
+    f.mouth.setAttribute('d', mouthPath(AV.mouth, smile, g));
     f.ring.style.opacity = ringOn; f.ring.style.transform = `scale(${ringScale.toFixed(3)})`;
     f.ring2.style.opacity = st === 'thinking' ? 1 : 0; f.ring2.style.transform = REDUCED_MOTION ? '' : `rotate(${(t * 50) % 360}deg)`;
     f.svg.classList.toggle('mood-happy', AV.mood === 'happy');
@@ -2146,6 +2243,7 @@ function avatarEvent(R, ev) {
       break;
     case 'segment': setLive(null, ev.segment); if (STAGE.open) { renderPrompter(); focusBullet(ev.segment.text); } break;
     case 'ai_listening': avSet('listening', 'happy'); showBubble('Dạ, em nghe đây, anh chị cứ nói yêu cầu.'); break;
+    case 'ai_cancelled': avSet('idle', 'neutral'); VOICE.queue = VOICE.queue.filter(it => !it.stale); break;
     case 'ai_listening_end': avSet('idle', 'neutral'); showBubble(`Em chưa nghe thấy yêu cầu. Thử nói "${ev.name} ơi, vẽ dashboard tiến độ".`); break;
     case 'ai_progress': if (AV.state !== 'thinking') avSet('thinking'); say(ev.text, { mood: ev.kind === 'ack' ? 'happy' : 'neutral', stale: ev.kind === 'status' }); break;
     case 'ai_activated': if (PRESENT.on) stopPresent(); avSet('thinking', 'neutral'); showBubble(`"${ev.prompt}"`); break;
@@ -2784,6 +2882,14 @@ function openSettings() {
       <div class="flex justify-end gap-2"><button type="button" class="btn btn-ghost" data-act="modal-close">Hủy</button><button class="btn btn-primary" type="submit">Lưu tên gọi</button></div>
     </form>
     <div class="mt-5 pt-4 border-t divider">
+      <h4 class="font-semibold mb-2">Hình đại diện trợ lý</h4>
+      <div class="seg" role="radiogroup" aria-label="Hình đại diện trợ lý">
+        <button type="button" role="radio" data-act="avatar-style" data-style="mascot" aria-checked="${AV_STYLE === 'mascot'}">Linh vật UrBox</button>
+        <button type="button" role="radio" data-act="avatar-style" data-style="face" aria-checked="${AV_STYLE === 'face'}">Khuôn mặt tròn</button>
+      </div>
+      <p class="text-[12px] text-muted mt-1">Linh vật hộp quà theo màu thương hiệu UrBox: nắp bật theo giọng nói, vẫy tay khi nghe, nhảy lên khi có kết quả.</p>
+    </div>
+    <div class="mt-5 pt-4 border-t divider">
       <h4 class="font-semibold mb-2">Lưu trữ dữ liệu</h4>
       <div id="storage-box" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang kiểm tra...</div></div>
     </div>
@@ -2827,13 +2933,14 @@ async function renderUsage(box) {
     box.innerHTML = `
       <div class="kpis mb-3" style="grid-template-columns:repeat(4,minmax(0,1fr))">
         <div class="kpi"><div class="kpi-l">Lần gọi</div><div class="kpi-v" style="font-size:18px;overflow-wrap:normal">${fmtTok(t.requests)}</div>${t.errors ? `<div class="kpi-n">${fmtTok(t.errors)} lỗi</div>` : ''}</div>
-        <div class="kpi"><div class="kpi-l">Token vào</div><div class="kpi-v" style="font-size:18px;overflow-wrap:normal">${fmtTok(t.input_tokens)}</div></div>
+        <div class="kpi"><div class="kpi-l">Token vào</div><div class="kpi-v" style="font-size:18px;overflow-wrap:normal">${fmtTok(t.input_tokens)}</div><div class="kpi-n">${t.input_tokens ? `${Math.round(100 * (t.cache_read_tokens || 0) / t.input_tokens)}% đọc lại từ cache` : 'chưa có'}</div></div>
         <div class="kpi"><div class="kpi-l">Token ra</div><div class="kpi-v" style="font-size:18px;overflow-wrap:normal">${fmtTok(t.output_tokens)}</div></div>
         <div class="kpi"><div class="kpi-l">Chi phí ước tính</div><div class="kpi-v" style="font-size:18px;overflow-wrap:normal">${fmtUsd(t.cost_usd || 0)}</div><div class="kpi-n">theo giá niêm yết của model</div></div>
       </div>
       ${meetings ? `<div class="dtable-wrap mb-3"><table class="dtable">${head(['Cuộc họp', 'Lần gọi', 'Token vào', 'Token ra', 'Chi phí'])}<tbody>${meetings}</tbody></table></div>` : '<p class="text-muted mb-3">Chưa có lời gọi AI nào được ghi.</p>'}
       ${purposes ? `<details><summary class="cursor-pointer text-muted">Theo loại việc</summary><div class="dtable-wrap mt-2"><table class="dtable">${head(['Việc', 'Lần gọi', 'Token vào', 'Token ra', 'Chi phí'])}<tbody>${purposes}</tbody></table></div></details>` : ''}
-      ${u.estimated_rows ? `<p class="text-[12px] text-muted mt-2">${fmtTok(u.estimated_rows)} lần gọi không trả về số token (hoặc lỗi), số liệu ước tính theo độ dài chữ.</p>` : ''}`;
+      ${u.estimated_rows ? `<p class="text-[12px] text-muted mt-2">${fmtTok(u.estimated_rows)} lần gọi không trả về số token (hoặc lỗi), số liệu ước tính theo độ dài chữ.</p>` : ''}
+      <p class="text-[12px] text-muted mt-2">Phần prompt lặp lại giữa các lần gọi (hướng dẫn, transcript, kết quả tra cứu) được đọc lại từ cache với 10% giá. Chi phí tính theo bảng giá Anthropic ngày 02/10/2026.</p>`;
   } catch (e) { box.innerHTML = `<p style="color:rgb(var(--danger))">${esc(e.message)}</p>`; }
 }
 async function exportMeetingData(mid) {
@@ -2972,6 +3079,11 @@ document.addEventListener('click', async e => {
     case 'stage-present': return PRESENT.on ? stopPresent('Dạ, em dừng thuyết trình.') : startPresent();
     case 'stage-follow': return stageAction('follow', { follow: !(S.room.stage && S.room.stage.follow !== false) });
     case 'storage-sync': return syncStorage();
+    case 'avatar-style': {
+      setAvatarStyle(el.dataset.style);
+      $$('[data-act="avatar-style"]').forEach(b => b.setAttribute('aria-checked', b.dataset.style === AV_STYLE));
+      return;
+    }
     case 'stage-analyze': return analyzeNow();
     case 'voice-toggle': return toggleVoice();
     case 'voice-stop': return stopVoice();
