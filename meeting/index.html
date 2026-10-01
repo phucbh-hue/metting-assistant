@@ -235,6 +235,19 @@
     .face.mascot .cheek { fill: #EF65C5; opacity: .28; }
     .face.mascot.mood-happy .cheek { opacity: .55; }
     .face .shadow { fill: #000; opacity: .28; }
+    /* Linh vật UrBox chính thức (static/mascot/urbox-mascot.svg): bong bóng suy nghĩ, sóng âm khi nghe */
+    .face.urbox .ring { stroke: #FFCD35; }
+    .face.urbox .ring2 { stroke: rgb(255 205 53 / .55); }
+    .face .thought, .face .waves { opacity: 0; transition: opacity .35s; }
+    .face.st-thinking .thought, .face.st-listening .waves { opacity: 1; }
+    .face .thought .cloud { fill: #F6F5F0; stroke: #231F20; stroke-width: 2; }
+    .face .thought .dot { fill: #231F20; }
+    .face.st-thinking .thought .dot { animation: av-dot 1.2s ease-in-out infinite; }
+    .face .waves path { fill: none; stroke: #FFCD35; stroke-width: 3; stroke-linecap: round; }
+    .face.st-listening .waves path { animation: av-wave 1.4s ease-out infinite; }
+    @keyframes av-dot { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
+    @keyframes av-wave { 0% { opacity: 0; transform: translateX(5px); } 35% { opacity: 1; } 100% { opacity: 0; transform: translateX(-4px); } }
+    @media (prefers-reduced-motion: reduce) { .face .thought .dot, .face .waves path { animation: none !important; } }
     .face .spark { fill: #FFD25A; opacity: 0; transform-box: fill-box; transform-origin: center; }
     .face.mood-happy .spark { animation: av-spark 1.3s ease-in-out infinite; }
     @keyframes av-spark { 0%, 100% { opacity: 0; transform: scale(.3) rotate(0deg); } 50% { opacity: 1; transform: scale(1) rotate(25deg); } }
@@ -1915,6 +1928,57 @@ const MASCOT_SVG = (id) => `
       </g>
     </g>
   </g>`;
+/* Linh vật UrBox chính thức: dùng nguyên nét vẽ trong static/mascot/urbox-mascot.svg (168 x 164), chỉ gom các nét
+   thành bộ phận để cử động. Số thứ tự nét (theo thứ tự vẽ trong tệp): 0-14 chân giày, 15 chỏm tóc phải, 16-26 tay phải
+   giơ cao, 27-29 thân, 30 chỏm tóc trái, 31-40 tay trái, 41-43 khe bụng và cằm, 44-46 miệng, 47-48 môi trên và mũi,
+   49-50 mặt nạ trắng, 51-52 hai mắt. */
+const BEAN = { paths: null, loading: null };
+function loadBean() {
+  if (BEAN.paths) return Promise.resolve(BEAN.paths);
+  if (!BEAN.loading) {
+    BEAN.loading = fetch('/static/mascot/urbox-mascot.svg').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); })
+      .then(text => {
+        const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
+        const paths = [...doc.querySelectorAll('path')].map(el => new XMLSerializer().serializeToString(el).replace(/ xmlns="[^"]*"/g, ''));
+        if (paths.length < 53) throw new Error(`tệp linh vật chỉ có ${paths.length} nét`);
+        BEAN.paths = paths;
+        return paths;
+      });
+  }
+  return BEAN.loading;
+}
+const BEAN_SVG = (P) => {
+  const pick = (a, b = a) => P.slice(a, b + 1).join('');
+  return `
+  <circle class="ring2" cx="100" cy="100" r="97"/>
+  <circle class="ring" cx="100" cy="100" r="90"/>
+  <ellipse class="shadow" data-shadow cx="118" cy="181" rx="40" ry="6"/>
+  <path class="spark" d="M26 96 l3 7 7 3 -7 3 -3 7 -3 -7 -7 -3 7 -3z"/>
+  <path class="spark" style="animation-delay:.45s" d="M182 92 l2.5 6 6 2.5 -6 2.5 -2.5 6 -2.5 -6 -6 -2.5 6 -2.5z"/>
+  <path class="spark" style="animation-delay:.9s" d="M64 22 l2 5 5 2 -5 2 -2 5 -2 -5 -5 -2 5 -2z"/>
+  <g class="thought">
+    <circle class="cloud" cx="52" cy="44" r="3"/><circle class="cloud" cx="43" cy="35" r="4.5"/>
+    <ellipse class="cloud" cx="27" cy="19" rx="17" ry="11"/>
+    <circle class="dot" cx="19" cy="19" r="2.2"/><circle class="dot" cx="27" cy="19" r="2.2" style="animation-delay:.2s"/><circle class="dot" cx="35" cy="19" r="2.2" style="animation-delay:.4s"/>
+  </g>
+  <g class="waves">
+    <path d="M22 70 Q 15 80 22 90"/><path d="M14 64 Q 3 80 14 96" style="animation-delay:.25s"/><path d="M6 58 Q -9 80 6 102" style="animation-delay:.5s"/>
+  </g>
+  <g data-head>
+    <g transform="translate(24.4 30) scale(0.9)">
+      <g data-legs>${pick(0, 14)}</g>
+      <g data-hair-r>${pick(15)}</g>
+      <g data-arm-r>${pick(16, 26)}</g>
+      ${pick(27, 29)}
+      <g data-hair-l>${pick(30)}</g>
+      <g data-arm-l>${pick(31, 40)}</g>
+      ${pick(41, 43)}
+      <g data-mouth-art>${pick(44, 46)}</g>
+      ${pick(47, 50)}
+      <g data-eye-l>${pick(51)}</g><g data-eye-r>${pick(52)}</g>
+    </g>
+  </g>`;
+};
 /* Hình học từng kiểu: tâm mắt, độ cao mắt, lông mày, miệng (toạ độ trong viewBox 200 x 200) */
 const AV_GEO = {
   face: { eyes: [72, 128], eyeY: 92, eyeRy: 16, pupilDy: 2, shineDx: 3, shineDy: -2, browY: 70, browW: 14, browLift: 1,
@@ -1922,29 +1986,40 @@ const AV_GEO = {
   mascot: { eyes: [78, 122], eyeY: 119, eyeRy: 14, pupilDy: 2, shineDx: 3, shineDy: -2, browY: 102, browW: 12, browLift: 0.55,
             mouthY: 140, mouthW: 15, mouthDepth: 15 },
 };
-let AV_STYLE = 'mascot';
-try { AV_STYLE = localStorage.getItem('mc_avatar') === 'face' ? 'face' : 'mascot'; } catch (e) { /* bỏ qua */ }
+const AV_STYLES = ['urbox', 'mascot', 'face'];          // linh vật UrBox chính thức, hộp quà, khuôn mặt tròn
+let AV_STYLE = 'urbox';
+try { const v = localStorage.getItem('mc_avatar'); if (AV_STYLES.includes(v)) AV_STYLE = v; } catch (e) { /* bỏ qua */ }
 const AV = { faces: [], state: 'idle', mood: 'neutral', heardAt: -1e9, mouth: 0, phase: 0, kickAt: 0, bubbleText: '',
   gx: 0, gy: 0, tgx: 0, tgy: 0, nextGaze: 0, blinkT: -1, blinkAt: 2000, shown: '' };
 const AV_STATUS = { idle: 'Đang chờ', listening: 'Đang lắng nghe', thinking: 'Đang suy nghĩ', speaking: 'Đang nói' };
 const REDUCED_MOTION = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function mountFaces() {
+  const style = AV_STYLE;
+  if (style === 'urbox' && !BEAN.paths) {               // tải tệp linh vật một lần rồi dựng lại
+    loadBean().then(() => mountFaces()).catch(e => {
+      console.warn('Không tải được linh vật UrBox, dùng hộp quà:', e);
+      if (AV_STYLE === 'urbox') { AV_STYLE = 'mascot'; mountFaces(); }
+    });
+    return;
+  }
   $$('[data-face]').forEach((svg, i) => {
-    if (svg.dataset.ready === AV_STYLE) return;
+    if (svg.dataset.ready === style) return;
     if (svg.dataset.ready) AV.faces = AV.faces.filter(f => f.svg !== svg);
-    const mascot = AV_STYLE === 'mascot';
-    svg.innerHTML = mascot ? MASCOT_SVG(`mascot-${i}`) : FACE_SVG(`face-grad-${i}`);
-    svg.classList.toggle('mascot', mascot);
-    svg.dataset.ready = AV_STYLE;
-    AV.faces.push({ svg, geo: AV_GEO[AV_STYLE], mascot, head: $('[data-head]', svg), ring: $('.ring', svg), ring2: $('.ring2', svg),
-      mouth: $('.mouth', svg), whites: $$('.white', svg), pupils: $$('.pupil', svg), shines: $$('.shine', svg), brows: $$('.brow', svg),
-      lid: $('[data-lid]', svg), bow: $('[data-bow]', svg), armL: $('[data-arm-l]', svg), armR: $('[data-arm-r]', svg),
-      shadow: $('[data-shadow]', svg) });
+    svg.innerHTML = style === 'urbox' ? BEAN_SVG(BEAN.paths) : style === 'mascot' ? MASCOT_SVG(`mascot-${i}`) : FACE_SVG(`face-grad-${i}`);
+    svg.classList.toggle('mascot', style === 'mascot');
+    svg.classList.toggle('urbox', style === 'urbox');
+    svg.dataset.ready = style;
+    AV.faces.push({ svg, kind: style, geo: AV_GEO[style], mascot: style === 'mascot', head: $('[data-head]', svg),
+      ring: $('.ring', svg), ring2: $('.ring2', svg), mouth: $('.mouth', svg), whites: $$('.white', svg), pupils: $$('.pupil', svg),
+      shines: $$('.shine', svg), brows: $$('.brow', svg), lid: $('[data-lid]', svg), bow: $('[data-bow]', svg),
+      armL: $('[data-arm-l]', svg), armR: $('[data-arm-r]', svg), shadow: $('[data-shadow]', svg),
+      hairL: $('[data-hair-l]', svg), hairR: $('[data-hair-r]', svg), eyeL: $('[data-eye-l]', svg), eyeR: $('[data-eye-r]', svg),
+      mouthArt: $('[data-mouth-art]', svg), ms: 0.5, lis: 0 });
   });
 }
 function setAvatarStyle(style) {
-  AV_STYLE = style === 'face' ? 'face' : 'mascot';
+  AV_STYLE = AV_STYLES.includes(style) ? style : 'urbox';
   try { localStorage.setItem('mc_avatar', AV_STYLE); } catch (e) { /* bỏ qua */ }
   mountFaces();
 }
@@ -2002,6 +2077,15 @@ function avFrame(ts) {
   const waving = !REDUCED_MOTION && (AV.mood === 'happy' && sinceMood < 2600 || st === 'listening');
   for (const f of visible) {
     const g = f.geo;
+    f.svg.classList.toggle('st-thinking', st === 'thinking');
+    f.svg.classList.toggle('st-listening', st === 'listening');
+    if (f.kind === 'urbox') {
+      avBean(f, { ts, t, st, speaking, bob, hop, waving, open });
+      f.ring.style.opacity = ringOn; f.ring.style.transform = `scale(${ringScale.toFixed(3)})`;
+      f.ring2.style.opacity = st === 'thinking' ? 1 : 0; f.ring2.style.transform = REDUCED_MOTION ? '' : `rotate(${(t * 50) % 360}deg)`;
+      f.svg.classList.toggle('mood-happy', AV.mood === 'happy');
+      continue;
+    }
     if (f.mascot) {
       const sy = 1 + AV.mouth * 0.035, sx = 1 - AV.mouth * 0.02;
       f.head.setAttribute('transform', `translate(0 ${(bob - hop).toFixed(2)}) translate(100 176) scale(${sx.toFixed(3)} ${sy.toFixed(3)}) translate(-100 -176)`);
@@ -2031,6 +2115,38 @@ function avFrame(ts) {
     f.ring2.style.opacity = st === 'thinking' ? 1 : 0; f.ring2.style.transform = REDUCED_MOTION ? '' : `rotate(${(t * 50) % 360}deg)`;
     f.svg.classList.toggle('mood-happy', AV.mood === 'happy');
   }
+}
+
+/** Linh vật UrBox: nói thì miệng mở theo âm lượng và tay phải đưa nhịp; nghe thì nghiêng người, đưa găng trái lên cạnh
+    đầu, có sóng âm; nghĩ thì tay phải gãi đầu, mắt nhìn lên, có bong bóng suy nghĩ; có kết quả thì nhảy lên. */
+function avBean(f, { t, st, speaking, bob, hop, waving, open }) {
+  const still = REDUCED_MOTION;
+  const sp = speaking ? AV.mouth : 0;
+  f.lis += ((st === 'listening' ? 1 : 0) - f.lis) * 0.12;
+  const think = st === 'thinking' ? 1 : 0;
+  const lean = still ? 0 : f.lis * (4 + Math.sin(t * 2) * 1) - think * 3 + (AV.mood === 'concerned' ? Math.sin(t * 3) * 1.5 : 0);
+  const sy = 1 + sp * 0.03 + (still ? 0 : Math.sin(t * 1.6) * 0.008), sx = 1 - sp * 0.015;
+  f.head.setAttribute('transform', `translate(0 ${(bob - hop).toFixed(2)}) rotate(${lean.toFixed(2)} 118 178) `
+    + `translate(118 178) scale(${sx.toFixed(3)} ${sy.toFixed(3)}) translate(-118 -178)`);
+  const sway = still ? 0 : Math.sin(t * 1.6) * 3;
+  const armR = think ? -58 + (still ? 0 : Math.sin(t * 6) * 4)                  // đưa tay lên gãi đầu
+    : waving && st !== 'listening' ? Math.sin(t * 12) * 14                     // vui: vẫy nắm tay
+    : speaking ? (still ? 0 : Math.sin(t * 5) * 6) - sp * 6 : sway;            // nói: đưa nhịp theo lời
+  f.armR.setAttribute('transform', `rotate(${armR.toFixed(2)} 117 53)`);
+  const l = f.lis;
+  f.armL.setAttribute('transform', `translate(${(-3 * l).toFixed(2)} ${(-16 * l).toFixed(2)}) rotate(${(-18 * l + sway * 0.6).toFixed(2)} 36 64)`);
+  const hairW = still ? 0 : Math.sin(t * 2.4) * 3 + sp * 4;
+  f.hairL.setAttribute('transform', `rotate(${hairW.toFixed(2)} 58 46)`);
+  f.hairR.setAttribute('transform', `rotate(${(-hairW).toFixed(2)} 100 33)`);
+  const gx = AV.gx * 0.35, gy = AV.gy * 0.35, o = Math.max(0.1, open).toFixed(3);
+  f.eyeL.setAttribute('transform', `translate(${gx.toFixed(2)} ${gy.toFixed(2)}) translate(87.6 40) scale(1 ${o}) translate(-87.6 -40)`);
+  f.eyeR.setAttribute('transform', `translate(${gx.toFixed(2)} ${gy.toFixed(2)}) translate(105.5 34.6) scale(1 ${o}) translate(-105.5 -34.6)`);
+  const target = speaking ? 0.3 + Math.min(0.9, AV.mouth * 1.1) : AV.mood === 'happy' ? 1 : AV.mood === 'concerned' ? 0.28
+    : think ? 0.35 : st === 'listening' ? 0.6 : 0.5;
+  f.ms += (target - f.ms) * (speaking ? 0.45 : 0.15);
+  f.mouthArt.setAttribute('transform', `translate(99.6 48.2) scale(1 ${f.ms.toFixed(3)}) translate(-99.6 -48.2)`);
+  f.shadow.setAttribute('rx', (40 - hop * 1.4 + sp * 1.5).toFixed(2));
+  f.shadow.style.opacity = (0.28 - hop * 0.015).toFixed(3);
 }
 
 const VOICE = { enabled: true, supported: 'speechSynthesis' in window, voice: null, queue: [], current: null, audible: false, gateUntil: 0,
@@ -2884,10 +3000,11 @@ function openSettings() {
     <div class="mt-5 pt-4 border-t divider">
       <h4 class="font-semibold mb-2">Hình đại diện trợ lý</h4>
       <div class="seg" role="radiogroup" aria-label="Hình đại diện trợ lý">
-        <button type="button" role="radio" data-act="avatar-style" data-style="mascot" aria-checked="${AV_STYLE === 'mascot'}">Linh vật UrBox</button>
+        <button type="button" role="radio" data-act="avatar-style" data-style="urbox" aria-checked="${AV_STYLE === 'urbox'}">Linh vật UrBox</button>
+        <button type="button" role="radio" data-act="avatar-style" data-style="mascot" aria-checked="${AV_STYLE === 'mascot'}">Hộp quà</button>
         <button type="button" role="radio" data-act="avatar-style" data-style="face" aria-checked="${AV_STYLE === 'face'}">Khuôn mặt tròn</button>
       </div>
-      <p class="text-[12px] text-muted mt-1">Linh vật hộp quà theo màu thương hiệu UrBox: nắp bật theo giọng nói, vẫy tay khi nghe, nhảy lên khi có kết quả.</p>
+      <p class="text-[12px] text-muted mt-1">Linh vật UrBox: nói thì miệng mở theo giọng, nghe thì nghiêng người và đưa tay lên tai, nghĩ thì gãi đầu kèm bong bóng suy nghĩ. Hộp quà: nắp bật theo giọng nói.</p>
     </div>
     <div class="mt-5 pt-4 border-t divider">
       <h4 class="font-semibold mb-2">Lưu trữ dữ liệu</h4>

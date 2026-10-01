@@ -53,13 +53,17 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
 - `IDENTITY_FALLBACK_SEGMENTS` (mặc định 40): không có tên mới thì cứ bấy nhiêu câu mới đoán lại tên một lần.
 
 ### Linh vật UrBox
-- Hình đại diện trợ lý mặc định là linh vật hộp quà UrBox, thiết kế gốc theo màu trên urbox.vn (tím #6821C2, #8235E4,
-  #A426ED, vàng #FFB700). Trang urbox.vn không có linh vật chính thức; nếu công ty có tệp linh vật chính thức thì thay
-  được `MASCOT_SVG` trong `meeting/index.html`.
-- Chuyển động theo trạng thái: chờ thì nhún nhẹ và chớp mắt; nghe thì vẫy tay và nhìn về phía người nói; nghĩ thì nghiêng
-  nắp, nhìn lên, vòng vàng xoay; nói thì miệng và nắp hộp mở theo âm lượng giọng đọc, nơ lắc; có kết quả tốt thì nhảy lên,
-  má hồng và lấp lánh. Tôn trọng cài đặt giảm chuyển động của hệ điều hành.
-- Đổi lại khuôn mặt tròn cũ: Cài đặt > Hình đại diện trợ lý.
+- Hình đại diện mặc định là linh vật UrBox chính thức, vẽ từ đúng tệp `static/mascot/urbox-mascot.svg` (bản chép của
+  `brandhome_mascot_first_05f635d4d4.svg`). Không vẽ lại: 53 nét gốc được gom thành bộ phận (mắt, miệng, hai tay, chỏm tóc,
+  chân) để cử động. Thay tệp này bằng bản mới cùng thứ tự nét là linh vật đổi theo.
+  - Chờ: nhún nhẹ, chớp mắt, đảo mắt, chỏm tóc lắc nhẹ.
+  - Nghe: nghiêng người về phía người nói, đưa găng trái lên cạnh đầu, có sóng âm và vòng vàng sáng.
+  - Nghĩ: đưa tay phải lên gãi đầu, mắt nhìn lên, bong bóng suy nghĩ "...", vòng vàng nét đứt xoay.
+  - Nói: miệng mở khép theo âm lượng giọng đọc, tay phải đưa nhịp, người nhún theo lời.
+  - Có kết quả tốt: nhảy lên và lấp lánh. Tôn trọng cài đặt giảm chuyển động của hệ điều hành.
+- Thêm lựa chọn hộp quà UrBox (thiết kế theo màu urbox.vn: tím #6821C2, #8235E4, #A426ED, vàng #FFB700): nắp bật theo giọng
+  nói, nơ lắc, vẫy tay khi nghe.
+- Đổi qua lại giữa linh vật UrBox, hộp quà và khuôn mặt tròn: Cài đặt > Hình đại diện trợ lý.
 
 ## 2. Bản 3.7: lưu trên máy khi mất Atlas, tra cứu bằng Playwright
 
@@ -348,6 +352,7 @@ meeting-assistant/
 │   └── index.html      # Giao diện web (SPA), gồm màn hình trình chiếu và khuôn mặt trợ lý
 ├── mcp_server/         # MCP data server "urbox-meeting-data" + kho tri thức mẫu (kb/*.md)
 ├── data/local_db/      # Dữ liệu lưu trên máy khi mất kết nối Atlas (không commit, có vector giọng)
+├── static/mascot/      # Linh vật UrBox chính thức (SVG) dùng làm hình đại diện trợ lý
 ├── tests/              # Test offline (unittest), không gọi API ngoài
 ├── scripts/
 │   ├── demo_replay.py              # Server demo phát lại cuộc họp mẫu (có slide + dashboard mẫu), không cần mic
