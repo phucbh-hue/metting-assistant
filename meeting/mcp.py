@@ -6,9 +6,13 @@ Mô phỏng hạ tầng dữ liệu nội bộ của UrBox:
 - Kiến trúc hệ thống & Database Schemas (System Specs)
 - Lịch sử biên bản các cuộc họp trước (Meeting History)
 
+- Kho tri thức (KB) markdown: search_knowledge / read_document (logic dùng chung mcp_server/kb_search.py)
+
 Hỗ trợ giao thức MCP:
 - list_tools()
-- call_tool(name, arguments)
+- call_tool(name, arguments): chạy in-process trên Mock Database (đồng bộ)
+- call_tool_async(name, arguments): gọi MCP server thật qua meeting.mcp_client nếu đặt MCP_SERVER_URL
+  hoặc MCP_SERVER_CMD, ngược lại fallback về call_tool in-process
 """
 import json
 import logging
@@ -312,6 +316,38 @@ MCP_TOOLS = [
             },
             "required": ["issue_key", "new_status"]
         }
+    },
+    {
+        "name": "search_knowledge",
+        "description": "Tìm trong kho tri thức nội bộ UrBox (quy trình, chính sách đổi trả, phát hành voucher, kiến trúc thanh toán, quy định họp, onboarding, FAQ đối tác). Trả về tài liệu liên quan nhất kèm đoạn trích và điểm.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Câu hỏi hoặc từ khóa tiếng Việt, có dấu hoặc không dấu (ví dụ 'đổi trả voucher')."
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "Số tài liệu tối đa trả về (1-20, mặc định 5)."
+                }
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "read_document",
+        "description": "Đọc toàn văn markdown một tài liệu trong kho tri thức, dùng path lấy từ kết quả search_knowledge.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Đường dẫn tài liệu (ví dụ 'chinh-sach-doi-tra-voucher.md' hoặc 'kb://chinh-sach-doi-tra-voucher')."
+                }
+            },
+            "required": ["path"]
+        }
     }
 ]
 
@@ -399,9 +435,44 @@ def call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
             db.put_mcp_item("jira_issues", key, item)
             return {"success": True, "key": key, "new_status": st, "message": f"Đã cập nhật trạng thái {key} sang '{st}'"}
 
+        elif name in ("search_knowledge", "read_document"):
+            from mcp_server import kb_search
+            if name == "search_knowledge":
+                return kb_search.search(arguments.get("query", ""), arguments.get("top_k", 5))
+            try:
+                return kb_search.read_document(arguments.get("path", ""))
+            except (ValueError, FileNotFoundError) as e:
+                return {"error": str(e)}
+
         else:
             return {"error": f"Tool không tồn tại: {name}"}
 
     except Exception as e:
         log.error("meeting.mcp call_tool error (%s): %s", name, e)
         return {"error": str(e)}
+
+
+_route_logged: Dict[str, bool] = {}
+
+
+def _log_route_once(path: str, detail: str = ""):
+    if not _route_logged.get(path):
+        _route_logged[path] = True
+        log.info("meeting.mcp: gọi tool qua %s%s", path, f" ({detail})" if detail else "")
+
+
+async def call_tool_async(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Gọi tool MCP: qua MCP server thật (meeting.mcp_client) nếu đã cấu hình MCP_SERVER_URL/MCP_SERVER_CMD,
+    ngược lại (hoặc khi server lỗi) chạy in-process bằng call_tool trong thread riêng."""
+    import asyncio
+    from meeting import mcp_client
+    cfg = mcp_client.config()
+    if cfg["mode"]:
+        try:
+            res = await mcp_client.call_tool(name, arguments or {})
+            _log_route_once("mcp-server", f"{cfg['mode']}: {cfg['target']}")
+            return res
+        except Exception as e:
+            log.warning("meeting.mcp: MCP server lỗi khi gọi %s (%s) - fallback in-process", name, e)
+    _log_route_once("in-process")
+    return await asyncio.to_thread(call_tool, name, arguments or {})

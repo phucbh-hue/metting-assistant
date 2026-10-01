@@ -41,6 +41,9 @@ class StageIntentTests(unittest.TestCase):
     def test_spoken_commands(self):
         cases = {
             "mở màn hình trình bày": {"action": "open"},
+            "em hãy present về cái slide em đã nói đi": {"action": "present"},
+            "tự chuyển slide và nói nội dung bên trong slide giúp anh": {"action": "present"},
+            "dừng thuyết trình": {"action": "present_stop"},
             "bật chế độ trình chiếu": {"action": "open"},
             "thu nhỏ màn hình trình bày": {"action": "close"},
             "chuyển slide": {"action": "next"},
@@ -124,6 +127,24 @@ class StageSessionTests(unittest.IsolatedAsyncioTestCase):
         await self.s._handle_ai_activation("nhắc bài", "Bông ơi, nhắc bài", "Bông")
         self.assertEqual(len(self.events("stage_prompt")), 1)
 
+    async def test_present_intent_starts_assistant_presentation(self):
+        """"Em tự chuyển slide và nói nội dung bên trong slide" (#38): mở màn hình và bắt đầu thuyết trình."""
+        self.events()
+        await self.s._handle_ai_activation("thuyết trình giúp anh", "Bông ơi, thuyết trình giúp anh", "Bông")
+        ev = self.events()
+        self.assertEqual(self.s.stage["artifact_id"], self.aid)       # chưa có gì trên màn hình: lấy bộ slide mới nhất
+        self.assertIn(("stage_command", "open"), [(e["type"], e.get("action")) for e in ev])
+        start = [e for e in ev if e["type"] == "stage_present"]
+        self.assertEqual((start[0]["action"], start[0]["slide"]), ("start", 0))
+        await self.s._handle_ai_activation("dừng thuyết trình", "Bông ơi, dừng thuyết trình", "Bông")
+        self.assertEqual([e["action"] for e in self.events("stage_present")], ["stop"])
+
+    async def test_present_without_any_deck(self):
+        db._get_db()["ai_artifacts"].delete_many({})
+        await self.s._handle_ai_activation("present slide đi", "Bông ơi, present slide đi", "Bông")
+        say = self.events("ai_say")
+        self.assertIn("Chưa có bộ slide", say[0]["text"])
+
     async def test_no_content_on_stage(self):
         await self.s._handle_ai_activation("chuyển slide", "Bông ơi, chuyển slide", "Bông")
         say = self.events("ai_say")
@@ -158,7 +179,7 @@ class StageSessionTests(unittest.IsolatedAsyncioTestCase):
         async def fake(system, prompt, max_tokens=4000):
             if "bộ điều phối tool" in system:
                 return json.dumps({"needs_tool": False})
-            if system is artifacts.SLIDES_SYSTEM:
+            if system.startswith(artifacts.SLIDES_SYSTEM):
                 order.append("slides")
                 return json.dumps(DECK, ensure_ascii=False)
             order.append("plan")

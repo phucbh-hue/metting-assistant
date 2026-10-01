@@ -77,6 +77,46 @@ class FindingTests(unittest.TestCase):
         self.assertEqual(len(f["words_per_minute"]), 2)
 
 
+class SkillTests(unittest.TestCase):
+    def test_skills_are_loaded_into_prompts(self):
+        for name in ("diagram", "slides", "report", "dashboard", "assistant"):
+            self.assertGreater(len(artifacts.load_skill(name)), 300, name)
+        self.assertIn("Skill: Vẽ sơ đồ", artifacts.with_skill("SYS", "diagram"))
+        self.assertEqual(artifacts.with_skill("SYS", "không-có"), "SYS")
+
+    def test_talk_stats_only_when_asked(self):
+        self.assertTrue(artifacts.wants_stats("ai nói nhiều nhất trong cuộc họp"))
+        self.assertFalse(artifacts.wants_stats("làm slide báo cáo tiến độ sprint"))
+        facts = {"speakers": [{"speaker": "A", "talk_s": 10}]}
+        self.assertNotIn("Thống kê", artifacts._data_prompt("làm slide tiến độ", "A: x", "", facts))
+        self.assertIn("Thống kê phát biểu", artifacts._data_prompt("ai nói nhiều nhất", "A: x", "", facts))
+
+    def test_mermaid_checks(self):
+        ok = 'flowchart LR\n  A["Thanh toán (VNPay)"] --> B["OK"]'
+        self.assertEqual(artifacts.mermaid_problem(ok), "")
+        self.assertIn("ngoặc kép", artifacts.mermaid_problem("flowchart LR\n  A[Thanh toán (VNPay)] --> B"))
+        self.assertIn("loại sơ đồ", artifacts.mermaid_problem("Dưới đây là sơ đồ"))
+        self.assertIn("dateFormat", artifacts.mermaid_problem("gantt\n  title X\n  section A\n  Việc :a1, 2026-10-01, 3d"))
+        self.assertEqual(artifacts.extract_mermaid("Sơ đồ:\n```mermaid\nflowchart TD\n A-->B\n```"), "flowchart TD\n A-->B")
+
+
+class DiagramRetryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_invalid_mermaid_is_retried_once(self):
+        reset_db()
+        mid = db.create_meeting("Họp")
+        calls = []
+
+        async def fake(system, prompt, max_tokens=4000):
+            calls.append(prompt)
+            return "flowchart LR\n  A[Lỗi (x)] --> B" if len(calls) == 1 else '```mermaid\nflowchart LR\n  A["Lỗi (x)"] --> B\n```'
+
+        with mock.patch.object(artifacts, "_call_llm", fake):
+            art = await artifacts.generate_diagram(mid, "vẽ luồng", "A: nói gì đó")
+        self.assertEqual(len(calls), 2)
+        self.assertIn("bị lỗi", calls[1])
+        self.assertEqual(art["content"], 'flowchart LR\n  A["Lỗi (x)"] --> B')
+
+
 class DashboardTests(unittest.TestCase):
     def test_normalize_messy_dashboard(self):
         raw = {"dashboard": {"title": "Doanh thu", "kpis": [{"label": "Doanh thu", "value": "1.200.000.000đ"}, {"label": ""}],
@@ -125,9 +165,9 @@ class AgentFlowTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake(system, prompt, max_tokens=4000):
             prompts.append((system, prompt))
-            if system is artifacts.DASHBOARD_SYSTEM:
+            if system.startswith(artifacts.DASHBOARD_SYSTEM):
                 self.assertIn('"tong_hop"', prompt)                       # số liệu Jira tổng hợp sẵn cho dashboard
-                self.assertIn('"speakers"', prompt)                       # thống kê cuộc họp thật
+                self.assertNotIn('"speakers"', prompt)                    # không hỏi ai nói nhiều -> không đưa thống kê phát biểu
                 return json.dumps(DASH, ensure_ascii=False)
             if "Dữ liệu đã tra cứu:\n(chưa tra cứu)" in prompt:
                 return 'TOOL_CALL: {"tool": "query_jira_issues", "arguments": {}}'
@@ -174,7 +214,7 @@ class AgentFlowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_model_keeps_calling_tools_still_produces_result(self):
         async def fake(system, prompt, max_tokens=4000):
-            if system is artifacts.DASHBOARD_SYSTEM:
+            if system.startswith(artifacts.DASHBOARD_SYSTEM):
                 return json.dumps(DASH, ensure_ascii=False)
             return 'TOOL_CALL: {"tool": "query_jira_issues", "arguments": {}}'
 
@@ -189,7 +229,7 @@ class AgentFlowTests(unittest.IsolatedAsyncioTestCase):
         report = "# Số liệu sprint\n- 6 ticket, 1 quá hạn\n- 3 đang làm\n" + "- chi tiết\n" * 30
 
         async def fake(system, prompt, max_tokens=4000):
-            if system is artifacts.DASHBOARD_SYSTEM:
+            if system.startswith(artifacts.DASHBOARD_SYSTEM):
                 await asyncio.sleep(0.3)          # dựng sớm còn đang chạy thì kế hoạch đã chọn báo cáo
                 return json.dumps(DASH, ensure_ascii=False)
             if "Dữ liệu đã tra cứu:\n(chưa tra cứu)" in prompt:
@@ -205,7 +245,7 @@ class AgentFlowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_artifact_failure_is_reported_not_hidden(self):
         async def fake(system, prompt, max_tokens=4000):
-            if system is artifacts.DASHBOARD_SYSTEM:
+            if system.startswith(artifacts.DASHBOARD_SYSTEM):
                 return "không phải json"
             return json.dumps(FINAL_DASHBOARD, ensure_ascii=False)
 

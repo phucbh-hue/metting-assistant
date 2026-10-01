@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from meeting import db, mcp
@@ -25,6 +26,31 @@ PROVIDER = (os.getenv("LLM_PROVIDER") or "claude").strip().lower()
 
 _anthropic_client = None
 _gemini_client = None
+
+SKILLS_DIR = Path(__file__).resolve().parent / "skills"
+_skill_cache: Dict[str, str] = {}
+
+
+def load_skill(name: str) -> str:
+    """Hướng dẫn chuyên môn cho từng loại sản phẩm (meeting/skills/<name>.md), nối vào system prompt."""
+    if name not in _skill_cache:
+        p = SKILLS_DIR / f"{name}.md"
+        _skill_cache[name] = p.read_text(encoding="utf-8").strip() if p.exists() else ""
+    return _skill_cache[name]
+
+
+def with_skill(system: str, name: str) -> str:
+    sk = load_skill(name)
+    return f"{system}\n\n{sk}" if sk else system
+
+
+_STATS_RE = re.compile(r"ai\s+nói\s+(nhiều|ít)|thời\s*(gian|lượng)\s*(nói|phát biểu)|tỉ\s*lệ\s*(nói|phát biểu)|"
+                       r"thống\s*kê\s*(cuộc họp|phát biểu|người nói)|nói\s*bao\s*(nhiêu|lâu)|talk\s*time", re.I)
+
+
+def wants_stats(text: str) -> bool:
+    """Người dùng có hỏi về thống kê phát biểu (ai nói bao lâu) không. Mặc định sản phẩm nói về NỘI DUNG họp."""
+    return bool(_STATS_RE.search(text or ""))
 
 
 def llm_available() -> bool:
@@ -173,16 +199,62 @@ Quy tắc BẮT BUỘC:
 - Đặt nhãn rõ ràng bằng tiếng Việt / tiếng Anh kỹ thuật."""
 
 
+MERMAID_TYPES = ("flowchart", "graph", "sequenceDiagram", "stateDiagram-v2", "stateDiagram", "erDiagram", "gantt",
+                 "mindmap", "classDiagram", "journey", "timeline")
+
+
+def extract_mermaid(raw: str) -> str:
+    m = re.search(r"```(?:mermaid)?\s*(.*?)\s*```", raw or "", re.DOTALL)
+    code = (m.group(1) if m else (raw or "")).strip()
+    return re.sub(r"^mermaid\s*\n", "", code)
+
+
+def mermaid_problem(code: str) -> str:
+    """Kiểm tra cú pháp Mermaid ở mức cơ bản (không render được ở server). Rỗng = tạm ổn."""
+    lines = [ln for ln in (code or "").splitlines() if ln.strip() and not ln.strip().startswith("%%")]
+    if not lines:
+        return "không có mã"
+    head = lines[0].strip()
+    if not any(head.startswith(t) for t in MERMAID_TYPES):
+        return f"dòng đầu phải là loại sơ đồ (flowchart, sequenceDiagram...), đang là '{head[:40]}'"
+    if "```" in code:
+        return "còn dấu ``` trong mã"
+    if head.startswith(("flowchart", "graph")):
+        for ln in lines[1:]:
+            # nhãn có dấu ngoặc / hai chấm mà không nằm trong ngoặc kép -> Mermaid lỗi
+            for lab in re.findall(r"[\[{(]([^\]\})\"]*)[\]})]", ln):
+                if re.search(r"[():;,/]", lab) and not lab.startswith('"'):
+                    return f"nhãn '{lab[:30]}' chứa ký tự đặc biệt nhưng chưa đặt trong ngoặc kép"
+    if head.startswith("sequenceDiagram") and not any(re.search(r"->>|-->>|->|-->", ln) for ln in lines[1:]):
+        return "sequenceDiagram không có thông điệp nào"
+    if head.startswith("gantt") and not any(ln.strip().startswith("dateFormat") for ln in lines):
+        return "gantt thiếu dòng dateFormat"
+    return ""
+
+
+def diagram_title(code: str) -> str:
+    m = re.search(r"^\s*title\s*:?\s*(.+)$", code or "", re.M)
+    return m.group(1).strip().strip('"')[:60] if m else ""
+
+
 async def generate_diagram(meeting_id: int, prompt_request: str,
-                           context_text: str = "") -> Dict[str, Any]:
-    user_prompt = f"Yêu cầu vẽ sơ đồ: {prompt_request}\n\nNgữ cảnh cuộc họp liên quan:\n{context_text}"
-    raw = await _call_llm(DIAGRAM_SYSTEM, user_prompt, max_tokens=2500)
+                           context_text: str = "", data_text: str = "") -> Dict[str, Any]:
+    user_prompt = (f"Yêu cầu vẽ sơ đồ: {prompt_request}\n\nDữ liệu tra cứu nội bộ:\n{data_text or '(không có)'}\n\n"
+                   f"Nội dung cuộc họp:\n{context_text}")
+    system = with_skill(DIAGRAM_SYSTEM, "diagram")
+    mermaid_code, problem = "", ""
+    for attempt in range(2):
+        raw = await _call_llm(system, user_prompt if not problem else
+                              f"{user_prompt}\n\nMã lần trước bị lỗi: {problem}. Hãy sửa và trả về mã Mermaid hợp lệ.",
+                              max_tokens=2500)
+        mermaid_code = extract_mermaid(raw)
+        problem = mermaid_problem(mermaid_code)
+        if not problem:
+            break
+    if problem:
+        raise RuntimeError(f"Sơ đồ chưa hợp lệ: {problem}")
 
-    # Bóc tách mã mermaid
-    m = re.search(r"```mermaid\s*(.*?)\s*```", raw, re.DOTALL)
-    mermaid_code = m.group(1).strip() if m else raw.strip()
-
-    title = f"Sơ đồ: {prompt_request[:50]}"
+    title = f"Sơ đồ: {diagram_title(mermaid_code) or prompt_request[:50]}"
     aid = db.save_artifact(
         meeting_id=meeting_id,
         kind="diagram",
@@ -311,7 +383,7 @@ async def generate_slides(meeting_id: int, prompt_request: str, context_text: st
                           data_text: str = "") -> Dict[str, Any]:
     user_prompt = (f"Yêu cầu: {prompt_request}\n\nDữ liệu tra cứu (nếu có):\n{data_text or '(không có)'}\n\n"
                    f"Nội dung cuộc họp gần nhất:\n{context_text or '(chưa có)'}")
-    deck = normalize_deck(_json_from_text(await _call_llm(SLIDES_SYSTEM, user_prompt, max_tokens=3500)))
+    deck = normalize_deck(_json_from_text(await _call_llm(with_skill(SLIDES_SYSTEM, "slides"), user_prompt, max_tokens=3500)))
     if deck is None:
         raise RuntimeError("AI chưa tạo được bộ slide hợp lệ, hãy thử lại với yêu cầu cụ thể hơn")
     title = f"Slide: {deck['title'][:60]}"
@@ -505,15 +577,17 @@ def normalize_dashboard(data: Any) -> Optional[Dict[str, Any]]:
 
 
 def _data_prompt(prompt_request: str, context_text: str, data_text: str, facts: Optional[Dict[str, Any]]) -> str:
-    return (f"Yêu cầu: {prompt_request}\n\n"
-            f"## Thống kê cuộc họp (số liệu thật, tính tự động):\n{json.dumps(facts or {}, ensure_ascii=False)}\n\n"
+    stats = (f"## Thống kê phát biểu (người dùng có hỏi; số liệu thật, tính tự động):\n"
+             f"{json.dumps(facts, ensure_ascii=False)}\n\n") if facts and wants_stats(prompt_request) else ""
+    return (f"Yêu cầu: {prompt_request}\n\n{stats}"
             f"## Dữ liệu tra cứu nội bộ:\n{data_text or '(không có)'}\n\n"
-            f"## Nội dung cuộc họp gần nhất:\n{context_text or '(chưa có)'}")
+            f"## Nội dung cuộc họp (toàn bộ, theo thứ tự thời gian):\n{context_text or '(chưa có)'}")
 
 
 async def generate_dashboard(meeting_id: int, prompt_request: str, context_text: str = "", data_text: str = "",
                              facts: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    raw = await _call_llm(DASHBOARD_SYSTEM, _data_prompt(prompt_request, context_text, data_text, facts), max_tokens=4000)
+    raw = await _call_llm(with_skill(DASHBOARD_SYSTEM, "dashboard"), _data_prompt(prompt_request, context_text, data_text, facts),
+                          max_tokens=4000)
     dash = normalize_dashboard(_json_from_text(raw))
     if dash is None:
         raise RuntimeError("AI chưa dựng được dashboard hợp lệ, hãy nói rõ cần biểu đồ số liệu gì")
@@ -561,7 +635,8 @@ def save_report(meeting_id: int, markdown: str, prompt_request: str = "", title:
 
 async def generate_report(meeting_id: int, prompt_request: str, context_text: str = "", data_text: str = "",
                           facts: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    raw = await _call_llm(REPORT_SYSTEM, _data_prompt(prompt_request, context_text, data_text, facts), max_tokens=2500)
+    raw = await _call_llm(with_skill(REPORT_SYSTEM, "report"), _data_prompt(prompt_request, context_text, data_text, facts),
+                          max_tokens=2500)
     md = re.sub(r"^```(?:markdown|md)?\s*|\s*```$", "", (raw or "").strip())
     if len(md) < 20:
         raise RuntimeError("AI chưa viết được báo cáo")

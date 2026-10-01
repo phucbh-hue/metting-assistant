@@ -1043,6 +1043,8 @@ class MeetingSession:
 
     # ------------------------------------------------- màn hình trình bày ---
     STAGE_ACTIONS = ("show", "next", "prev", "goto", "topic", "back", "follow")
+    # Khi trợ lý đang thuyết trình, khuôn mặt nói nên mic gửi khoảng lặng; lệnh người dùng đến giữa chừng vẫn được xử lý
+    # ở frontend (nút Dừng, phím Esc) hoặc khi trợ lý ngắt nghỉ giữa hai slide.
 
     def stage_public(self) -> Dict[str, Any]:
         st = self.stage
@@ -1172,6 +1174,21 @@ class MeetingSession:
             return True
         if action == "prompt":
             await self.emit({"type": "stage_prompt"})
+            return True
+        if action in ("present", "present_stop"):
+            if action == "present_stop":
+                await self.emit({"type": "stage_present", "action": "stop"})
+                await self._say("Dạ, em dừng thuyết trình.", quiet=True)
+                return True
+            slides = self._slides_of(await self._get_artifact(self.stage["artifact_id"]))
+            if not slides:
+                decks = [a for a in await asyncio.to_thread(db.get_artifacts, self.id) if a.get("kind") == "slides"]
+                if not decks:
+                    await self._say("Chưa có bộ slide nào để em thuyết trình. Anh chị nhờ em soạn slide trước nhé.", "concerned")
+                    return True
+                await self.stage_action("show", artifact_id=decks[0]["id"])
+            await self.emit({"type": "stage_command", "action": "open"})
+            await self.emit({"type": "stage_present", "action": "start", "slide": self.stage["slide"]})
             return True
         if action in ("follow_on", "follow_off"):
             await self.stage_action("follow", follow=action == "follow_on")

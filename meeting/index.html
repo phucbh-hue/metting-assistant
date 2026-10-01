@@ -2092,7 +2092,7 @@ function avatarEvent(R, ev) {
     case 'ai_listening': avSet('listening', 'happy'); showBubble('Dạ, em nghe đây, anh chị cứ nói yêu cầu.'); break;
     case 'ai_listening_end': avSet('idle', 'neutral'); showBubble(`Em chưa nghe thấy yêu cầu. Thử nói "${ev.name} ơi, vẽ dashboard tiến độ".`); break;
     case 'ai_progress': if (AV.state !== 'thinking') avSet('thinking'); say(ev.text, { mood: ev.kind === 'ack' ? 'happy' : 'neutral', stale: ev.kind === 'status' }); break;
-    case 'ai_activated': avSet('thinking', 'neutral'); showBubble(`"${ev.prompt}"`); break;
+    case 'ai_activated': if (PRESENT.on) stopPresent(); avSet('thinking', 'neutral'); showBubble(`"${ev.prompt}"`); break;
     case 'ai_thinking': showBubble(AV.bubbleText || 'Đang xử lý...', ev.text); break;
     case 'ai_insights': narrateInsights(ev.items, ev.source); if (ev.source === 'analysis') avSet('idle'); break;
     case 'ai_response': {
@@ -2106,7 +2106,8 @@ function avatarEvent(R, ev) {
     case 'ai_say': avSet('idle', ev.mood || 'happy'); if (ev.quiet) showBubble(ev.text); else say(ev.text, { mood: ev.mood || 'happy' }); break;
     case 'ai_error': avSet('idle', 'concerned'); say('Em chưa làm được yêu cầu này.', { mood: 'concerned', caption: ev.text }); break;
     case 'stage_state': applyStage(ev.stage, ev.auto); break;
-    case 'stage_command': avSet('idle', 'happy'); if (ev.action === 'open') openStage(); else closeStage(); break;
+    case 'stage_command': avSet('idle', 'happy'); if (ev.action === 'open') openStage(true); else closeStage(); break;
+    case 'stage_present': if (ev.action === 'start') startPresent(ev.slide); else stopPresent('Dạ, em dừng thuyết trình.'); break;
     case 'stage_prompt': avSet('idle', 'happy'); break;
     case 'meeting_status':
       if (ev.minutes_status === 'pending') { avSet('thinking', 'neutral'); showBubble('Em đang lập biên bản cuộc họp...'); }
@@ -2381,7 +2382,7 @@ async function renderStageFrame(animate) {
           <span class="num text-muted text-[13px]">${i + 1} / ${deck.slides.length}</span>
           <button class="btn btn-ghost btn-sm" data-act="stage-next" ${i >= deck.slides.length - 1 ? 'disabled' : ''} aria-label="Slide sau">Sau<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg></button>
         </div>
-        <div class="flex flex-wrap items-center gap-2">${back}<button class="btn btn-ghost btn-sm" data-act="stage-follow" aria-pressed="${followOn}" title="Slide tự chuyển theo nội dung đang trình bày">Tự chuyển: ${followOn ? 'bật' : 'tắt'}</button><button class="btn btn-ghost btn-sm" data-act="stage-prompter" aria-pressed="${prompterOn}" title="Phím N">Nhắc bài</button>${picker}</div>
+        <div class="flex flex-wrap items-center gap-2">${back}<button class="btn ${PRESENT.on ? 'btn-primary' : 'btn-ghost'} btn-sm" data-act="stage-present" aria-pressed="${PRESENT.on}" title="Trợ lý tự đọc nội dung từng slide và chuyển tiếp (nói: 'thuyết trình giúp anh')">${PRESENT.on ? 'Dừng thuyết trình' : 'Thuyết trình'}</button><button class="btn btn-ghost btn-sm" data-act="stage-follow" aria-pressed="${followOn}" title="Slide tự chuyển theo nội dung đang trình bày">Tự chuyển: ${followOn ? 'bật' : 'tắt'}</button><button class="btn btn-ghost btn-sm" data-act="stage-prompter" aria-pressed="${prompterOn}" title="Phím N">Nhắc bài</button>${picker}</div>
       </div>
       <div class="thumbs" aria-label="Danh sách slide">${deck.slides.map((sl, k) => `<button class="thumb" data-act="stage-goto" data-slide="${k}" aria-current="${k === i}">${k + 1}. ${esc(sl.title)}</button>`).join('')}</div>`;
     const cur = $('.thumb[aria-current="true"]', nav); if (cur) cur.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -2420,6 +2421,7 @@ async function applyStage(st, auto) {
   const R = S.room; if (!R || !st) return;
   const prev = R.stage || {};
   const changed = prev.artifact_id !== st.artifact_id || prev.slide !== st.slide;
+  if (PRESENT.on && changed && !auto && !PRESENT.moving) stopPresent();
   R.stage = st;
   if (st.artifact_id && !R.artifacts.some(a => a.id === st.artifact_id)) {
     try { const art = await GET(`/api/artifacts/${st.artifact_id}`); if (S.room === R && !R.artifacts.some(a => a.id === art.id)) R.artifacts.push(art); renderTabs(); } catch (e) { /* bỏ qua */ }
@@ -2495,6 +2497,55 @@ function promptNext() {
   const text = next ? `Ý tiếp theo: ${next.text}.` : (sl.notes ? `Slide này đã nói đủ ý. Lưu ý: ${sl.notes}` : 'Slide này đã nói đủ ý, có thể chuyển slide.');
   say(text, { mood: 'happy' });
   return text;
+}
+/* ---------- trợ lý tự thuyết trình: đọc nội dung từng slide rồi chuyển tiếp ---------- */
+const PRESENT = { on: false, token: 0, moving: false };
+const ORDINALS = ['Thứ nhất', 'Thứ hai', 'Thứ ba', 'Thứ tư', 'Thứ năm', 'Thứ sáu'];
+function slideNarration(deck, i) {
+  const sl = deck.slides[i]; const b = (sl.bullets || []).map(x => String(x).trim()).filter(Boolean);
+  const parts = [];
+  if (sl.layout === 'title') parts.push(`${sl.title}.`, ...b.map(x => `${x}.`));
+  else if (sl.layout === 'quote') parts.push(`${sl.title}. ${b[0] || ''}${b[1] ? `, ${b[1]}` : ''}.`);
+  else if (sl.layout === 'metrics') {
+    parts.push(`${sl.title}.`);
+    b.forEach(x => { const k = x.indexOf(':'); parts.push(k > 0 ? `${x.slice(0, k).trim()} là ${x.slice(k + 1).trim()}.` : `${x}.`); });
+  } else {
+    parts.push(`${sl.title}.`);
+    b.forEach((x, k) => parts.push(b.length > 1 && k < ORDINALS.length ? `${ORDINALS[k]}, ${x}.` : `${x}.`));
+  }
+  if (sl.notes) parts.push(sl.notes.replace(/[.]*$/, '.'));
+  return parts.join(' ').replace(/\.\./g, '.');
+}
+function voiceIdle() {
+  return new Promise(resolve => { const tick = () => (!VOICE.current && !VOICE.queue.length) ? resolve() : setTimeout(tick, 150); tick(); });
+}
+async function startPresent(fromSlide) {
+  const R = S.room; const art = stageArtifact();
+  if (!R || !art || art.kind !== 'slides') { say('Chưa có bộ slide nào trên màn hình để em thuyết trình.', { mood: 'concerned' }); return; }
+  if (!STAGE.open) openStage(true);
+  stopVoice();
+  const token = ++PRESENT.token; PRESENT.on = true; renderStageFrame(false);
+  const deck = parseDeck(art.content);
+  let i = Number.isInteger(fromSlide) ? fromSlide : R.stage.slide;
+  for (; i < deck.slides.length && PRESENT.on && PRESENT.token === token; i++) {
+    if (R.stage.slide !== i) {
+      PRESENT.moving = true;
+      try { await stageAction('goto', { slide: i, auto: true }); } finally { PRESENT.moving = false; }
+      if (!PRESENT.on || PRESENT.token !== token) break;
+    }
+    say(slideNarration(deck, i), { mood: 'happy', bubble: `Slide ${i + 1}/${deck.slides.length}: ${deck.slides[i].title}` });
+    await voiceIdle();
+    if (!PRESENT.on || PRESENT.token !== token) break;
+    await new Promise(r => setTimeout(r, 900));          // ngắt nghỉ giữa hai slide, người nghe kịp xem
+  }
+  if (PRESENT.on && PRESENT.token === token) { PRESENT.on = false; renderStageFrame(false); say('Em đã trình bày hết bộ slide. Anh chị cần em quay lại slide nào không ạ?', { mood: 'happy' }); }
+}
+function stopPresent(message) {
+  if (!PRESENT.on) return;
+  PRESENT.on = false; PRESENT.token += 1;
+  stopVoice();
+  renderStageFrame(false);
+  if (message) showBubble(message);
 }
 $('#stage-ask').addEventListener('submit', e => {
   e.preventDefault();
@@ -2796,6 +2847,7 @@ document.addEventListener('click', async e => {
     case 'stage-goto': return stageAction('goto', { slide: parseInt(el.dataset.slide, 10) });
     case 'stage-show': { const sl = parseInt(el.dataset.slide, 10) || 0; openStage(true); return stageAction('show', { artifact_id: parseInt(el.dataset.aid, 10), slide: sl }); }
     case 'stage-prompter': return togglePrompter();
+    case 'stage-present': return PRESENT.on ? stopPresent('Dạ, em dừng thuyết trình.') : startPresent();
     case 'stage-follow': return stageAction('follow', { follow: !(S.room.stage && S.room.stage.follow !== false) });
     case 'stage-analyze': return analyzeNow();
     case 'voice-toggle': return toggleVoice();
@@ -2826,6 +2878,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     const hadOverlay = !$('#popover').classList.contains('hidden') || !!$('#modal-root').innerHTML;
     closeMenu(); if ($('#modal-root').innerHTML) closeModal();
+    if (!hadOverlay && PRESENT.on) return stopPresent('Dạ, em dừng thuyết trình.');
     if (!hadOverlay && STAGE.open && !document.fullscreenElement) closeStage();
   }
   const typing = e.target instanceof Element && e.target.matches('input, textarea, select, [contenteditable]');

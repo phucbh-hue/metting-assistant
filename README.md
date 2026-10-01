@@ -6,12 +6,42 @@ tra cứu dữ liệu nội bộ qua MCP, soạn và trình chiếu slide theo l
 vẽ sơ đồ, dựng dashboard số liệu, báo cáo nhanh và phác thảo trang web. Trợ lý nói bằng giọng tiếng Việt chạy
 ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
 
-- Phiên bản: 3.3 - cập nhật 01/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.4 - cập nhật 01/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
 
-## 1. Có gì mới ở bản 3.3
+## 1. Có gì mới ở bản 3.4
+
+### Trợ lý tự thuyết trình
+- "Thanh ơi, thuyết trình giúp anh" / "present slide" / "tự chuyển slide và nói nội dung bên trong": trợ lý đọc nội dung
+  từng slide (tiêu đề, các ý, ghi chú) rồi tự chuyển slide tiếp, nghỉ một nhịp giữa hai slide. Nút **Thuyết trình**
+  trên màn hình trình chiếu làm việc tương tự.
+- Dừng: nói "dừng thuyết trình" / "dừng lại", bấm **Dừng thuyết trình**, phím Esc, hoặc tự bấm chuyển slide.
+  Trong lúc trợ lý đang nói, mic gửi khoảng lặng nên lệnh bằng giọng chỉ được nghe ở quãng nghỉ giữa hai slide.
+
+### Nội dung bám sát cuộc họp
+- Slide, báo cáo, dashboard, sơ đồ đọc TOÀN BỘ transcript (trước đây chỉ 40 câu cuối) và không còn đưa thống kê
+  "ai nói nhiều, ai nói ít" vào trừ khi được hỏi đúng điều đó.
+- Bộ skill cho agent trong `meeting/skills/` (sơ đồ, slide, báo cáo, dashboard, cách làm việc của trợ lý) được nối
+  vào system prompt của từng loại sản phẩm. Muốn trợ lý làm khác đi, sửa file skill, không cần sửa code.
+- Sơ đồ: chọn loại theo câu hỏi cần trả lời (quy trình, trình tự gọi, trạng thái, kế hoạch), 5-12 nút, nhãn lấy từ
+  cuộc họp, tô màu có nghĩa; mã Mermaid được kiểm tra cú pháp cơ bản và tự sửa một lần nếu hỏng.
+
+### MCP data server thật (chuẩn bị cho kho tri thức)
+- `mcp_server/`: server MCP "urbox-meeting-data" (stdio hoặc streamable-http) với 5 tool dữ liệu cũ và 2 tool kho tri
+  thức `search_knowledge`, `read_document` trên tài liệu markdown trong `mcp_server/kb/` (6 tài liệu giả lập).
+- Trợ lý gọi qua MCP khi đặt `MCP_SERVER_CMD` hoặc `MCP_SERVER_URL` trong `.env`; không đặt thì dùng dữ liệu tại chỗ.
+  Kiểm tra: `python scripts/mcp_check.py` (stdio) và `python scripts/mcp_check.py --http`. Chi tiết: `mcp_server/README.md`.
+- Sau này nối KB thật: thay `mcp_server/kb_search.py` bằng vector store, giữ nguyên hợp đồng 2 tool.
+
+### Lời gọi và người nói
+- Lời gọi bị Soniox cắt giữa chừng ("Thanh ơi, em hãy" | "tổng kết lại...") được chờ nói nốt rồi xử lý một lần.
+- Người khác chen ngang nói dài dưới cùng nhãn Soniox: câu dài khác hẳn giọng hồ sơ đang nói (hồ sơ phải "chặt")
+  thành người nói mới ngay, không bị gộp vào người đang nói; câu ngắn theo người vừa được nhận ra bằng giọng.
+- Model trợ lý mặc định đổi sang `claude-opus-4-7` (`CLAUDE_MODEL` trong `.env`); muốn nhanh và rẻ hơn dùng `claude-sonnet-5-5`.
+
+## 2. Bản 3.3: slide theo lời trình bày, ghép lệnh bị cắt
 
 ### Slide tự chuyển theo lời trình bày
 
@@ -40,7 +70,7 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
 - Đo trên 5 cuộc họp thật có nhãn đúng gần đúng: 87,0% -> 89,2% câu (#37: 91% -> 100%, #36: 83% -> 86%), các
   cuộc họp khác không đổi.
 
-## 2. Bản 3.2: kết quả luôn hiện ra, dashboard, giọng đọc chạy trên máy
+## 3. Bản 3.2: kết quả luôn hiện ra, dashboard, giọng đọc chạy trên máy
 
 ### Trợ lý trả lời có nội dung thật và luôn hiện kết quả
 
@@ -87,7 +117,7 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
   Mô phỏng trên #31: bấm một lần ở câu đầu của khách mời thì đúng 95% câu.
 - Giới hạn: giọng phát qua loa máy tính bị kênh âm thanh làm giống nhau; họp trực tiếp với người thật tách tốt hơn.
 
-## 3. Bản 3.1: khuôn mặt, màn hình trình chiếu, tên gọi
+## 4. Bản 3.1: khuôn mặt, màn hình trình chiếu, tên gọi
 
 ### Trợ lý có khuôn mặt, giọng nói và màn hình trình chiếu
 
@@ -95,7 +125,7 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
   trình chiếu: bên trái là khuôn mặt trợ lý, bên phải là nội dung đang trình bày (slide, biên bản, sơ đồ, giao diện).
 - Khuôn mặt đổi theo trạng thái: **chờ**, **lắng nghe** (vòng sáng co giãn theo âm lượng mic), **suy nghĩ**
   (vòng nét đứt xoay, mắt nhìn lên), **nói** (miệng mấp máy theo lời). Nét mặt vui hoặc lo lắng theo nội dung.
-- Giọng nói: từ bản 3.2 dùng giọng Piper chạy trên máy chủ (xem mục 2); giọng của trình duyệt chỉ là dự phòng.
+- Giọng nói: từ bản 3.2 dùng giọng Piper chạy trên máy chủ (xem mục 3); giọng của trình duyệt chỉ là dự phòng.
   Giọng trực tuyến "Online (Natural)" của Microsoft Edge chỉ được dùng khi người dùng bấm cho phép (xem mục Lưu ý
   dữ liệu). Nút "Giọng nói" hoặc phím V để bật/tắt; bấm vào khuôn mặt để trợ lý dừng nói.
 - Khi trợ lý đang nói, mic gửi khoảng lặng thay cho âm thanh để giọng trợ lý không lọt vào transcript
@@ -118,6 +148,7 @@ chạy ngay, không gọi LLM:
 | "nhắc bài", "ý tiếp theo" | Mở khung nhắc bài và đọc ý tiếp theo chưa nói |
 | "mở màn hình trình bày", "thu nhỏ màn hình trình bày" | Mở hoặc thu nhỏ màn hình trình chiếu |
 | "bật tự chuyển slide", "tắt tự chuyển slide" | Bật/tắt slide tự chuyển theo lời trình bày (mặc định bật) |
+| "thuyết trình giúp anh", "present slide", "dừng thuyết trình" | Trợ lý tự đọc từng slide và chuyển tiếp / dừng |
 | "nhận xét nhanh về cuộc họp" | Trợ lý xem lại cuộc họp và nêu nhận xét |
 | "sửa slide này thêm số liệu doanh thu" | Sửa đúng slide đang chiếu (có gọi LLM), lưu thành phiên bản mới |
 
@@ -139,7 +170,7 @@ chờ câu yêu cầu tiếp theo trong 8 giây. Câu chỉ nhắc tới tên (v
 - Menu "..." của cuộc họp -> **Phân tích lại người nói**: chạy lại bộ phân vai trên toàn bộ câu đã lưu.
   Tên đã đặt được giữ cho người nói xuất hiện sớm nhất trong nhóm.
 
-## 4. Bản 3.0: sửa lỗi phân biệt người nói
+## 5. Bản 3.0: sửa lỗi phân biệt người nói
 
 | Vấn đề ở bản 2.5 | Nguyên nhân gốc | Cách sửa |
 |---|---|---|
@@ -157,7 +188,7 @@ Khác:
 - Nội dung do AI sinh ra được làm sạch (DOMPurify) và chạy trong iframe sandbox cô lập.
 - Kết thúc cuộc họp trả về ngay, biên bản lập ở chế độ nền.
 
-## 5. Cách phân biệt người nói
+## 6. Cách phân biệt người nói
 
 ```
 Soniox (nhãn người nói theo phiên)  ─┐
@@ -177,7 +208,7 @@ CAM++ (vector giọng 192D mỗi câu)  ──┘          │               │
 
 Ngưỡng được đo trên dữ liệu thật của model CAM++: cùng người câu ngắn 0.3-0.6, câu dài 0.6-0.87; khác người 0.0-0.4.
 
-## 6. Cấu trúc thư mục
+## 7. Cấu trúc thư mục
 
 ```
 meeting-assistant/
@@ -189,10 +220,13 @@ meeting-assistant/
 │   ├── llm.py          # Tên gọi trợ lý, lệnh trình chiếu, vòng tra cứu -> trả lời -> sản phẩm, câu "em tìm thấy..."
 │   ├── tts.py          # Giọng đọc tiếng Việt chạy trên máy (Piper qua sherpa-onnx) + chuẩn hóa số, ngày, tiền
 │   ├── follow.py       # Tự chuyển slide theo lời trình bày (so khớp lời nói với từng slide, chống nhảy)
+│   ├── mcp_client.py   # Client MCP thật (stdio / streamable-http), dùng khi đặt MCP_SERVER_CMD hoặc MCP_SERVER_URL
+│   ├── skills/         # Skill cho agent: diagram, slides, report, dashboard, assistant (nối vào system prompt)
 │   ├── artifacts.py    # Biên bản, báo cáo nhanh, dashboard, bộ slide, nhận xét, sơ đồ, trang web, co-design
 │   ├── mcp.py          # Mock MCP: danh bạ, Jira, kiến trúc, lịch sử họp
 │   ├── db.py           # MongoDB (hoặc in-memory khi MEETING_DB=mock)
 │   └── index.html      # Giao diện web (SPA), gồm màn hình trình chiếu và khuôn mặt trợ lý
+├── mcp_server/         # MCP data server "urbox-meeting-data" + kho tri thức mẫu (kb/*.md)
 ├── tests/              # Test offline (unittest), không gọi API ngoài
 ├── scripts/
 │   ├── demo_replay.py              # Server demo phát lại cuộc họp mẫu (có slide + dashboard mẫu), không cần mic
@@ -203,7 +237,7 @@ meeting-assistant/
 └── static/
 ```
 
-## 7. Chạy
+## 8. Chạy
 
 ```powershell
 cd "C:\work\cralwer with ai\ASR\meeting-assistant"
@@ -234,7 +268,7 @@ màu riêng -> bấm **Đặt tên** (hoặc xác nhận gợi ý của AI, tick
 Trình bày: nhờ trợ lý soạn slide (hoặc chọn tab **Slide**) -> bấm biểu tượng toàn màn hình ở khung AI ->
 nói "<tên gọi> ơi, chuyển slide", "nhắc bài"... Cần giọng Tiếng Việt cài trên Windows để trợ lý nói thành tiếng.
 
-## 8. Cấu hình
+## 9. Cấu hình
 
 Xem `.env.example`. Các biến quan trọng:
 
@@ -251,8 +285,9 @@ Xem `.env.example`. Các biến quan trọng:
 | `TTS_VOICE` | `vits-piper-vi_VN-vais1000-medium` | Giọng đọc trong `models/tts/` |
 | `TTS_SPEED` | `1.05` | Tốc độ đọc |
 | `TTS_MODEL_DIR` | | Đường dẫn thư mục giọng đọc nếu để ngoài `models/tts/` |
+| `MCP_SERVER_CMD` / `MCP_SERVER_URL` | | Trỏ trợ lý tới MCP server thật (stdio hoặc http); không đặt thì dùng dữ liệu tại chỗ |
 
-## 9. API chính
+## 10. API chính
 
 | Method | Đường dẫn | Mô tả |
 |---|---|---|
@@ -277,7 +312,7 @@ Xem `.env.example`. Các biến quan trọng:
 | WS | `/ws/meeting/{id}/audio` | PCM16 16kHz mono từ mic (một thiết bị ghi mỗi cuộc họp) |
 | WS | `/ws/meeting/{id}/events` | Sự kiện: `segment`, `segments_relabeled`, `speakers`, `speakers_split`, `interim`, `identity_suggestion`, `ai_progress`, `ai_say`, `ai_insights`, `stage_state`, `stage_command`, `stage_prompt`... |
 
-## 10. Lưu ý dữ liệu
+## 11. Lưu ý dữ liệu
 
 - Bộ test của bản 2.5 ghi vector **ngẫu nhiên** vào DB thật (hồ sơ có `consent_by` = `system_admin` hoặc
   `meeting_host`, 1-2 mẫu). Nếu từng chạy các test đó, hãy rà trang **Hồ sơ giọng nói**, xóa hồ sơ không đúng

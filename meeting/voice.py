@@ -306,6 +306,12 @@ class MeetingSpeakers:
     OVERRIDE_GAP = 0.15        # ... và phải hơn hồ sơ Soniox chỉ định ngần này
     SPLIT_MAX = 0.22           # Câu dài mà cosine với hồ sơ Soniox chỉ định thấp hơn mức này -> người mới
     SPLIT_MIN_W = 2.5          # ... chỉ xét khi câu có >= 2.5s tiếng nói
+    # Người khác chen ngang nói DÀI dưới cùng nhãn Soniox: câu càng dài, vector càng ổn định nên ngưỡng tách nới dần.
+    # Chỉ áp dụng khi hồ sơ đang nói "chặt" (các câu của họ giống centroid >= SPLIT_COHESION_MIN), tức câu lạ này
+    # thực sự lệch khỏi giọng quen chứ không phải người đó nói không đều.
+    SPLIT_MAX_LONG = 0.36      # câu >= 4s tiếng nói
+    SPLIT_MAX_XLONG = 0.42     # câu >= 8s tiếng nói
+    SPLIT_COHESION_MIN = 0.62
     RELIABLE_W = 4.0           # Hồ sơ có >= 4s tiếng nói thì centroid đủ tin cậy
     MERGE_T = 0.68             # Gộp 2 hồ sơ (cả hai đã đủ tin cậy)
     MERGE_T_WEAK = 0.74        # Gộp khi một hồ sơ còn ít dữ liệu
@@ -441,6 +447,27 @@ class MeetingSpeakers:
         self.raw_votes.setdefault(rk, {})
         self.raw_votes[rk][sid] = self.raw_votes[rk].get(sid, 0.0) + max(w, 0.3)
 
+    def _split_limit(self, p: "SpeakerProfile", w: float) -> float:
+        """Ngưỡng "khác hẳn giọng hồ sơ p" cho một câu dài w giây: nới theo độ dài câu nếu p là hồ sơ chặt."""
+        if w < 4.0 or self._cohesion(p) < self.SPLIT_COHESION_MIN:
+            return self.SPLIT_MAX
+        return self.SPLIT_MAX_XLONG if w >= 8.0 else self.SPLIT_MAX_LONG
+
+    def _cohesion(self, p: "SpeakerProfile", n: int = 8) -> float:
+        """Độ giống trung bình giữa các câu gần nhất của p và centroid của p (loại chính câu đó ra)."""
+        c = p.centroid()
+        if c is None or p.vsum is None:
+            return 0.0
+        vals = []
+        for s in reversed(self.segs):
+            if s["v"] is not None and s["w"] > 0 and self.profile(s["sid"]) is p:
+                rest = p.vsum - s["v"] * s["w"]
+                if float(np.linalg.norm(rest)) > 1e-6:
+                    vals.append(float(s["v"] @ unit(rest)))
+                if len(vals) >= n:
+                    break
+        return float(np.mean(vals)) if len(vals) >= 2 else 0.0
+
     def _t_join(self, w: float) -> float:
         if w < 2.0:
             return self.T_JOIN_SHORT
@@ -497,9 +524,14 @@ class MeetingSpeakers:
             if best_sid != mapped and best >= max(self.OVERRIDE_MIN, s_m + self.OVERRIDE_GAP):
                 return best_sid, "voice_override"
             p_m = self.profiles[mapped]
-            if (w >= self.SPLIT_MIN_W and s_m < self.SPLIT_MAX and p_m.weight >= self.RELIABLE_W
+            if (w >= self.SPLIT_MIN_W and s_m < self._split_limit(p_m, w) and p_m.weight >= self.RELIABLE_W
                     and best < self._t_join(w)):
                 return None, "voice_split"
+            if w < 2.0 and s_m < self._t_join(w):
+                # Câu ngắn, vector nhiễu, không giống người mà nhãn chỉ định: theo người vừa nói bằng nhãn này
+                recent = self._recent_voice_sid(rk)
+                if recent is not None and recent != mapped and sims.get(recent, -1.0) >= s_m:
+                    return recent, "soniox_recent"
             return mapped, "soniox"
 
         if not ranked:
@@ -669,7 +701,7 @@ class MeetingSpeakers:
         for s in reversed(self.segs[:-1]):
             if s["rk"] != seg["rk"] or seg["t"] - s["t"] > self.BACKFILL_S:
                 return
-            if s["v"] is not None or s["reason"] not in ("soniox", "soniox_recent"):
+            if s["v"] is not None or s["reason"] != "soniox":   # câu đã theo người vừa nói (soniox_recent) thì giữ
                 return
             old = self.profile(s["sid"])
             if old is not None and old is not p:

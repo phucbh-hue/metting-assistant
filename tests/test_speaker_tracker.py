@@ -144,6 +144,26 @@ class SonioxErrorRecoveryTests(unittest.TestCase):
         sp2.load_state(sp.export_profiles(), [])
         self.assertEqual(sp2.profile(q.sid).apart, [1])
 
+    def test_long_interruption_under_same_label_becomes_new_speaker(self):
+        """Người đang nói bị người khác chen ngang nói dài; Soniox vẫn dùng nhãn cũ. Câu dài của người chen phải
+        thành người nói mới ngay, và người cũ nói tiếp vẫn là người cũ."""
+        bank = VoiceBank(seed=47, n=2, channel=0.7)
+        sp = voice.MeetingSpeakers()
+        a1 = script_add(sp, bank, [(0, "1", v) for v in (5.0, 4.0, 6.0, 3.5, 5.0)])
+        b = script_add(sp, bank, [(1, "1", 6.0), (1, "1", 5.0), (1, "1", 0.4)], start_key=20, t0=40)
+        a2 = script_add(sp, bank, [(0, "1", 4.0), (0, "1", 0.5), (0, "1", 5.0)], start_key=30, t0=60)
+        self.assertEqual(set(labels_of(sp, a1)), {"Người nói 1"})
+        self.assertEqual(set(labels_of(sp, b)), {"Người nói 2"})
+        self.assertEqual(set(labels_of(sp, a2)), {"Người nói 1"})
+        self.assertEqual(len(sp.visible_profiles()), 2)
+
+    def test_uneven_speaker_is_not_split_by_long_utterance(self):
+        """Một người nói giọng không đều (hồ sơ không chặt) thì câu dài hơi lệch không được tách thành người mới."""
+        bank = VoiceBank(seed=48, n=1, channel=0.7)
+        sp = voice.MeetingSpeakers()
+        keys = script_add(sp, bank, [(0, "1", v) for v in (1.2, 1.5, 4.0, 1.1, 6.0, 1.3, 9.0, 1.4, 5.0)])
+        self.assertEqual(len(sp.visible_profiles()), 1, labels_of(sp, keys))
+
     def test_same_speaker_is_not_split(self):
         """Một người nói lâu, nhiều câu ngắn dài khác nhau: không được tự tách thành 2 người."""
         bank = VoiceBank(seed=16, n=2, channel=0.9)

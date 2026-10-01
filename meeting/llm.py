@@ -146,6 +146,11 @@ _STAGE_PATTERNS = [
     ("follow_off", re.compile(r"(tắt|ngừng|dừng|đừng|không|thôi)\s*(chế độ\s*)?(tự\s*(động\s*)?|tự\s*ý\s*)"
                               r"(chuyển|lật|theo|đổi)", re.I)),
     ("follow_on", re.compile(r"(bật|mở|cho)\s*(chế độ\s*)?tự\s*(động\s*)?(chuyển|lật|theo|đổi)", re.I)),
+    ("present_stop", re.compile(r"(dừng|ngừng|thôi|stop|tạm dừng)\s*(việc\s*)?(thuyết trình|trình bày|present|đọc|nói)|"
+                                r"(im|dừng|ngừng)\s*lại\s*(đi|nhé|đã)?$", re.I)),
+    ("present", re.compile(r"\bpresent\b|thuyết\s*trình|(tự\s*(động\s*)?chuyển\s*slide\s*(và|rồi)\s*(tự\s*)?(nói|đọc|trình bày))|"
+                           r"(trình bày|đọc|nói)\s*(giúp|cho|hộ|lại|qua|hết)?\s*(anh|chị|em|mình)?\s*(về\s*)?(cái\s*)?"
+                           r"(nội dung\s*)?(của\s*)?(bộ\s*|các\s*|mấy\s*)?(slide|bài này)", re.I)),
     ("open", re.compile(r"(mở|bật|vào|chuyển sang)\s*(chế độ\s*|màn hình\s*|màn\s*)?(toàn màn hình|sân khấu|trình chiếu|trình bày)"
                         r"|phóng to", re.I)),
     ("close", re.compile(r"(thoát|tắt|đóng)\s*(chế độ\s*|màn hình\s*|màn\s*)?(toàn màn hình|sân khấu|trình chiếu|trình bày)"
@@ -238,6 +243,8 @@ AGENT_TOOLS = {
     "query_employee_directory": "query_employee_directory(query, department?): nhân sự, kỹ năng, phòng ban, email",
     "query_system_architecture": "query_system_architecture(system_name): hệ thống, API, cơ sở dữ liệu",
     "query_meeting_history": "query_meeting_history(keyword): quyết định ở các cuộc họp trước",
+    "search_knowledge": "search_knowledge(query, top_k?): tìm trong kho tri thức nội bộ (quy trình, chính sách, tài liệu kỹ thuật)",
+    "read_document": "read_document(path): đọc toàn văn một tài liệu trong kho tri thức (path lấy từ search_knowledge)",
 }
 ARTIFACT_KINDS = ("dashboard", "report", "slides", "web_design", "diagram", "minutes")
 KIND_NAMES = {"dashboard": "dashboard", "report": "báo cáo nhanh", "slides": "bộ slide", "web_design": "trang web",
@@ -273,7 +280,9 @@ Quy tắc:
 - chat_response phải nói ra thông tin thật (con số, tên người, hạn chót, kết luận). Cấm câu chung chung như "em đã xử lý xong".
 - Có sản phẩm thì chat_response nêu 1-2 điểm chính trong đó. Hỏi thông tin/liệt kê thì điền report_markdown đầy đủ.
 - insights: tối đa 3 điều đáng chú ý em thấy khi phân tích (rủi ro, việc chưa có người nhận, điểm cần cải thiện, điểm tốt).
-- Chỉ dùng số liệu trong transcript, dữ liệu tra cứu, hoặc mục "Thống kê cuộc họp" (số liệu thật). Thiếu dữ liệu thì nói rõ.
+- Chỉ dùng số liệu trong transcript hoặc dữ liệu tra cứu. Thiếu dữ liệu thì nói rõ.
+- Mọi sản phẩm nói về NỘI DUNG đã bàn (chủ đề, số liệu, quyết định, việc cần làm); không thống kê ai nói nhiều hay ít
+  trừ khi được hỏi đúng điều đó.
 - Ngày dd/mm/yyyy, tiền dạng 1.000.000đ, không dùng gạch dài. Không lặp lại nguyên văn câu hỏi."""
 
 _GENERIC_REPLY = re.compile(r"(tiếp nhận|xử lý xong|hoàn thành)\s+(yêu cầu|xong)|đã xử lý xong", re.I)
@@ -440,9 +449,13 @@ def summarize_tool_result(tool: str, result: Any) -> str:
     return ""
 
 
-def _context_lines(segments: List[Dict[str, Any]], n: int = 40) -> str:
-    lines = [f"{s.get('speaker_label', 'Không rõ')}: {s.get('text', '')}" for s in segments[-n:]]
-    return "\n".join(lines) if lines else "(Chưa có nội dung)"
+def _context_lines(segments: List[Dict[str, Any]], n: int = 400, max_chars: int = 24000) -> str:
+    """Toàn bộ transcript (cắt bớt phần đầu nếu quá dài) để sản phẩm bám sát cả cuộc họp, không chỉ vài câu cuối."""
+    lines = [f"{s.get('speaker_label', 'Không rõ')}: {s.get('text', '')}" for s in segments[-n:] if (s.get('text') or '').strip()]
+    text = "\n".join(lines)
+    if len(text) > max_chars:
+        text = "(... phần đầu đã lược bớt ...)\n" + text[-max_chars:]
+    return text if text else "(Chưa có nội dung)"
 
 
 def _data_text(tool_results: List[Dict[str, Any]], limit: int = 9000) -> str:
@@ -460,8 +473,9 @@ def _data_text(tool_results: List[Dict[str, Any]], limit: int = 9000) -> str:
 
 def _agent_prompt(prompt: str, context_text: str, facts: Dict[str, Any], tool_results: List[Dict[str, Any]],
                   stage_art: Optional[Dict[str, Any]], final_only: bool) -> str:
-    parts = [f"## Thống kê cuộc họp (số liệu thật, tính tự động):\n{json.dumps(facts, ensure_ascii=False)}",
-             f"## Nội dung cuộc họp gần nhất:\n{context_text}"]
+    parts = [f"## Nội dung cuộc họp (toàn bộ, theo thứ tự thời gian):\n{context_text}"]
+    if artifacts.wants_stats(prompt):
+        parts.insert(0, f"## Thống kê phát biểu (người dùng có hỏi; số liệu thật):\n{json.dumps(facts, ensure_ascii=False)}")
     if stage_art:
         parts.append(f"## Đang chiếu trên màn hình: {KIND_NAMES.get(stage_art.get('kind'), stage_art.get('kind'))} "
                      f"\"{stage_art.get('title', '')}\"")
@@ -516,7 +530,7 @@ def _artifact_job(kind: str, meeting_id: int, art_prompt: str, context_text: str
     if kind == "web_design":
         return artifacts.generate_web_sandbox(meeting_id, art_prompt, context_text, data_text)
     if kind == "diagram":
-        return artifacts.generate_diagram(meeting_id, art_prompt, context_text)
+        return artifacts.generate_diagram(meeting_id, art_prompt, context_text, data_text)
     return artifacts.generate_meeting_minutes(meeting_id, segments, (meeting or {}).get("title") or "Biên bản cuộc họp",
                                               meeting=meeting)
 
@@ -559,8 +573,8 @@ async def think_and_act(meeting_id: int, prompt: str, segments: List[Dict[str, A
         if on_progress:
             await on_progress(text, kind)
 
-    system = (AGENT_SYSTEM.replace("{{NAME}}", assistant_config()["name"])
-              .replace("{{TOOLS}}", "\n".join(f"- {d}" for d in AGENT_TOOLS.values())))
+    system = artifacts.with_skill(AGENT_SYSTEM.replace("{{NAME}}", assistant_config()["name"])
+                                  .replace("{{TOOLS}}", "\n".join(f"- {d}" for d in AGENT_TOOLS.values())), "assistant")
     plan: Dict[str, Any] = {}
     plain = ""
     early_kind = guess_kind(prompt) if guess_kind(prompt) in EARLY_KINDS else None
@@ -583,7 +597,8 @@ async def think_and_act(meeting_id: int, prompt: str, segments: List[Dict[str, A
             await _thought(f"Em đang tra cứu {TOOL_LABELS.get(tool, tool)}...")
             if on_tool:
                 await on_tool({"tool": tool, "args": args})
-            res = await asyncio.to_thread(mcp.call_tool, tool, args)
+            call_async = getattr(mcp, "call_tool_async", None)      # qua MCP thật nếu đã cấu hình, không thì tại chỗ
+            res = await call_async(tool, args) if call_async else await asyncio.to_thread(mcp.call_tool, tool, args)
             tool_results.append({"tool": tool, "args": args, "result": res})
             finding = summarize_tool_result(tool, res)
             if finding:
