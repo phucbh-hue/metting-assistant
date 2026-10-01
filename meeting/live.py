@@ -1004,6 +1004,7 @@ class MeetingSession:
     async def _handle_ai_activation(self, command: str, full_sentence: str, name: str = "", source: str = "voice"):
         """Kích hoạt trợ lý khi được gọi tên: lệnh trình chiếu xử lý ngay, còn lại qua Thinking Engine."""
         prompt = command if len(command) > 5 else full_sentence
+        artifacts.set_meeting(self.id, "trợ lý")
         await self.emit({"type": "ai_activated", "wake_word": name or llm.assistant_config()["name"], "prompt": prompt,
                          "source": source})
         try:
@@ -1193,6 +1194,8 @@ class MeetingSession:
             return True
         if action == "open_file":
             return await self._open_deck_file(intent.get("query", ""))
+        if action == "web_search":
+            return await self._web_research(intent.get("query", ""))
         if action == "back" and intent.get("kind"):
             kind = intent["kind"]
             if await self._history_index(kind) is None:
@@ -1273,6 +1276,7 @@ class MeetingSession:
         deck = artifacts.normalize_deck(artifacts._json_from_text((art or {}).get("content", ""))) if art else None
         if not deck or artifacts.deck_has_scripts(deck) or not artifacts.llm_available():
             return
+        artifacts.set_meeting(self.id, "lời thuyết trình")
         await self._progress("Em soạn lời thuyết trình chi tiết cho từng slide trước, khoảng nửa phút ạ.", "status")
         try:
             new_deck = await artifacts.generate_scripts(deck, llm._context_lines(self.segments))
@@ -1285,6 +1289,27 @@ class MeetingSession:
         self._art_cache[aid] = new_art
         await self.emit({"type": "artifact_updated", "artifact": new_art})
         await self.stage_action("show", artifact_id=aid, slide=self.stage["slide"])
+
+    async def _web_research(self, query: str) -> bool:
+        """"Search giúp anh giá vàng hôm nay": tìm trên web, lưu thành báo cáo có nguồn, chiếu lên màn hình và đọc kết luận."""
+        await self._progress(f"Dạ, em tra cứu trên mạng về {query} ngay ạ.", "ack")
+        try:
+            art = await artifacts.web_research(self.id, query, llm._context_lines(self.segments, n=30))
+        except Exception as e:
+            log.warning("meeting.live: tra cứu web lỗi: %s", e)
+            await self._say(f"Em chưa tra cứu được: {e}", "concerned")
+            return True
+        self._art_cache[art["id"]] = art
+        await self.emit({"type": "artifact_created", "artifact": {k: v for k, v in art.items() if k != "sources"}})
+        await self.emit({"type": "stage_command", "action": "open"})
+        await self.stage_action("show", artifact_id=art["id"])
+        body = re.sub(r"^#.*$", "", art["content"], flags=re.M)
+        body = body.split("## Chi tiết")[0]
+        summary = re.sub(r"\s+", " ", re.sub(r"[*_`#\[\]()]", " ", body)).strip()
+        sents = re.split(r"(?<=[.!?])\s+", summary)
+        await self._say(" ".join(sents[:3])[:420] or "Em đã tra cứu xong, kết quả đang hiện trên màn hình.",
+                        "happy")
+        return True
 
     async def _open_deck_file(self, query: str) -> bool:
         """"Mở slide ở folder A": tìm trong thư viện slide trên máy, nhập vào cuộc họp và đưa lên màn hình."""
@@ -1331,6 +1356,7 @@ class MeetingSession:
 
     async def analyze_now(self, focus: str = "") -> List[Dict[str, str]]:
         """Trợ lý xem lại cuộc họp và nêu nhận xét (rủi ro, việc chưa có người nhận, điểm cần cải thiện)."""
+        artifacts.set_meeting(self.id, "nhận xét")
         await self.emit({"type": "ai_thinking", "text": "Em đang xem lại toàn bộ cuộc họp..."})
         items = await artifacts.meeting_insights(self.segments, self.meeting, focus)
         await self.emit({"type": "ai_insights", "items": items, "source": "analysis"})
@@ -1365,6 +1391,7 @@ class MeetingSession:
 
     async def _finalize_minutes(self):
         status = "failed"
+        artifacts.set_meeting(self.id, "biên bản")
         try:
             try:
                 await self.identity.run(force=True)

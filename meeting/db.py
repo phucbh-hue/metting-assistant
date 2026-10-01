@@ -348,7 +348,7 @@ def update_meeting(mid: int, updates: Dict[str, Any], internal: bool = False) ->
 def delete_meeting(mid: int) -> bool:
     """Xóa hoàn toàn cuộc họp và toàn bộ dữ liệu liên quan."""
     db = _get_db()
-    for col in ("meeting_segments", "meeting_speakers", "identity_inferences", "ai_artifacts", "ai_interactions"):
+    for col in ("meeting_segments", "meeting_speakers", "identity_inferences", "ai_artifacts", "ai_interactions", "llm_usage"):
         db[col].delete_many({"meeting_id": mid})
     return db["meetings"].delete_one({"id": mid}).deleted_count > 0
 
@@ -570,6 +570,65 @@ def get_artifact(artifact_id: int) -> Optional[Dict[str, Any]]:
 
 
 # --------------------------------------------------------- AI INTERACTIONS ---
+def record_llm_usage(meeting_id: Optional[int], provider: str, model: str, purpose: str,
+                     input_tokens: int, output_tokens: int, duration_s: float, ok: bool = True,
+                     cost_usd: float = 0.0, estimated: bool = False) -> None:
+    """Mỗi lần gọi LLM ghi một dòng: cuộc họp nào, việc gì, bao nhiêu token vào/ra, mất bao lâu, tốn khoảng bao nhiêu."""
+    _get_db()["llm_usage"].insert_one({
+        "meeting_id": meeting_id, "provider": provider, "model": model, "purpose": purpose,
+        "input_tokens": int(input_tokens or 0), "output_tokens": int(output_tokens or 0),
+        "duration_s": round(float(duration_s), 2), "ok": bool(ok), "cost_usd": round(float(cost_usd), 6),
+        "estimated": bool(estimated), "created_at": time.time(),
+    })
+
+
+def usage_summary() -> Dict[str, Any]:
+    """Tổng hợp số lần gọi, token vào/ra, chi phí ước tính: toàn bộ, theo cuộc họp, theo việc, theo model."""
+    db = _get_db()
+    rows = list(db["llm_usage"].find({}, {"_id": 0}))
+    titles = {m["id"]: m.get("title", "") for m in db["meetings"].find({}, {"_id": 0, "id": 1, "title": 1})}
+
+    def bucket(key_fn):
+        out: Dict[Any, Dict[str, Any]] = {}
+        for r in rows:
+            k = key_fn(r)
+            b = out.setdefault(k, {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0, "errors": 0,
+                                   "last_at": 0.0})
+            b["requests"] += 1
+            b["input_tokens"] += r.get("input_tokens", 0)
+            b["output_tokens"] += r.get("output_tokens", 0)
+            b["cost_usd"] += r.get("cost_usd", 0.0)
+            b["errors"] += 0 if r.get("ok", True) else 1
+            b["last_at"] = max(b["last_at"], r.get("created_at", 0.0))
+        for b in out.values():
+            b["cost_usd"] = round(b["cost_usd"], 4)
+        return out
+
+    total = bucket(lambda r: "all").get("all", {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0,
+                                                 "errors": 0, "last_at": 0.0})
+    by_meeting = [{"meeting_id": k, "title": titles.get(k, "") if k is not None else "(ngoài cuộc họp)", **v}
+                  for k, v in bucket(lambda r: r.get("meeting_id")).items()]
+    by_meeting.sort(key=lambda x: -x["last_at"])
+    by_purpose = [{"purpose": k or "khác", **v} for k, v in bucket(lambda r: r.get("purpose")).items()]
+    by_purpose.sort(key=lambda x: -x["requests"])
+    by_model = [{"model": k, **v} for k, v in bucket(lambda r: f"{r.get('provider')}/{r.get('model')}").items()]
+    return {"total": total, "by_meeting": by_meeting[:200], "by_purpose": by_purpose, "by_model": by_model,
+            "estimated_rows": sum(1 for r in rows if r.get("estimated"))}
+
+
+def export_meeting(mid: int) -> Optional[Dict[str, Any]]:
+    """Toàn bộ dữ liệu một cuộc họp (kể cả vector giọng) để lưu ra tệp hoặc phân tích ngoại tuyến."""
+    m = get_meeting(mid)
+    if not m:
+        return None
+    db = _get_db()
+    return {"meeting": m, "segments": get_segments(mid, with_embedding=True), "speakers": list_speakers(mid, with_vector=True),
+            "artifacts": get_artifacts(mid),
+            "interactions": list(db["ai_interactions"].find({"meeting_id": mid}, {"_id": 0})),
+            "llm_usage": list(db["llm_usage"].find({"meeting_id": mid}, {"_id": 0})),
+            "exported_at": time.time(), "format": "meeting-copilot-export-1"}
+
+
 def record_interaction(meeting_id: int, prompt: str, trigger: str = "voice_wake_word",
                        thinking: str = "", tool_calls: Optional[List[Dict[str, Any]]] = None,
                        response: Optional[Dict[str, Any]] = None, t: float = 0.0) -> int:

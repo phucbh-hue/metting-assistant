@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import time
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -73,9 +74,76 @@ def _gemini():
     return _gemini_client
 
 
+# ------------------------------------------------------------ cổng gọi LLM ---
+# Mọi lời gọi LLM đi qua đây để ghi lại: cuộc họp nào, việc gì, bao nhiêu token vào/ra, bao lâu, tốn khoảng bao nhiêu.
+CURRENT_MEETING: ContextVar[Optional[int]] = ContextVar("llm_meeting_id", default=None)
+CURRENT_PURPOSE: ContextVar[str] = ContextVar("llm_purpose", default="khác")
+# USD cho 1 triệu token (vào, ra); model không có trong bảng thì ghi 0
+PRICES_USD = {"claude-opus-4-7": (5.0, 25.0), "claude-opus-4-8": (5.0, 25.0), "claude-opus-5": (5.0, 25.0),
+              "claude-opus-5-5": (4.0, 20.0), "claude-sonnet-5": (2.0, 10.0), "claude-sonnet-5-5": (2.0, 10.0),
+              "claude-sonnet-4-6": (3.0, 15.0), "claude-haiku-4-5": (1.0, 5.0)}
+
+
+def set_meeting(meeting_id: Optional[int], purpose: Optional[str] = None) -> None:
+    """Đánh dấu các lời gọi LLM tiếp theo trong tác vụ hiện tại thuộc cuộc họp / việc nào."""
+    CURRENT_MEETING.set(meeting_id)
+    if purpose:
+        CURRENT_PURPOSE.set(purpose)
+
+
+def _cost_usd(model: str, inp: int, out: int) -> float:
+    pin, pout = PRICES_USD.get(model, (0.0, 0.0))
+    return (inp * pin + out * pout) / 1_000_000
+
+
+def _record(provider: str, model: str, inp: int, out: int, t0: float, ok: bool, estimated: bool = False) -> None:
+    try:
+        db.record_llm_usage(CURRENT_MEETING.get(), provider, model, CURRENT_PURPOSE.get(), inp, out, time.time() - t0,
+                            ok=ok, cost_usd=_cost_usd(model, inp, out), estimated=estimated)
+    except Exception as e:   # ghi nhật ký không được làm hỏng lời gọi chính
+        log.warning("meeting.artifacts: không ghi được nhật ký LLM: %s", e)
+
+
+def _usage_of(resp: Any, fallback_in: str = "", fallback_out: str = "") -> Tuple[int, int, bool]:
+    u = getattr(resp, "usage", None)
+    inp = getattr(u, "input_tokens", None) or getattr(u, "prompt_tokens", None) or getattr(u, "prompt_token_count", None)
+    out = getattr(u, "output_tokens", None) or getattr(u, "completion_tokens", None) or getattr(u, "candidates_token_count", None)
+    if inp is None or out is None:
+        return len(fallback_in) // 4, len(fallback_out) // 4, True
+    cached = getattr(u, "cache_read_input_tokens", 0) or 0
+    return int(inp) + int(cached), int(out), False
+
+
 async def _call_llm(system: str, prompt: str, max_tokens: int = 4000) -> str:
     """Gọi LLM (Claude hoặc Gemini theo LLM_PROVIDER) với fallback sang provider còn lại."""
     return (await _call_llm_raw(system, prompt, max_tokens) or "").replace(chr(0x2014), "-")   # quy ước nội dung: "-" thay cho gạch dài
+
+
+async def _claude_text(system: str, prompt: str, max_tokens: int) -> str:
+    t0 = time.time()
+    try:
+        resp = await _anthropic().messages.create(model=CLAUDE_MODEL, max_tokens=max_tokens, system=system,
+                                                  messages=[{"role": "user", "content": prompt}])
+    except Exception:
+        _record("claude", CLAUDE_MODEL, len(system + prompt) // 4, 0, t0, ok=False, estimated=True)
+        raise
+    text = "\n".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+    inp, out, est = _usage_of(resp, system + prompt, text)
+    _record("claude", CLAUDE_MODEL, inp, out, t0, ok=True, estimated=est)
+    return text
+
+
+async def _gemini_text(system: str, prompt: str) -> str:
+    t0 = time.time()
+    try:
+        resp = await asyncio.to_thread(_gemini().interactions.create, model=AGENT_MODEL, system_instruction=system, input=prompt)
+    except Exception:
+        _record("gemini", AGENT_MODEL, len(system + prompt) // 4, 0, t0, ok=False, estimated=True)
+        raise
+    text = resp.output_text
+    inp, out, est = _usage_of(resp, system + prompt, text or "")
+    _record("gemini", AGENT_MODEL, inp, out, t0, ok=True, estimated=est)
+    return text
 
 
 async def _call_llm_raw(system: str, prompt: str, max_tokens: int = 4000) -> str:
@@ -85,36 +153,86 @@ async def _call_llm_raw(system: str, prompt: str, max_tokens: int = 4000) -> str
     errors = []
     if use_claude_first and os.getenv("ANTHROPIC_API_KEY"):
         try:
-            resp = await _anthropic().messages.create(
-                model=CLAUDE_MODEL,
-                max_tokens=max_tokens,
-                system=system,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            return "\n".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+            return await _claude_text(system, prompt, max_tokens)
         except Exception as e:
             errors.append(f"Claude: {e}")
             log.warning("meeting.artifacts: Claude error (%s), fallback to Gemini", e)
 
     if os.getenv("GEMINI_API_KEY"):
         try:
-            resp = await asyncio.to_thread(
-                _gemini().interactions.create,
-                model=AGENT_MODEL,
-                system_instruction=system,
-                input=prompt
-            )
-            return resp.output_text
+            return await _gemini_text(system, prompt)
         except Exception as e:
             errors.append(f"Gemini: {e}")
             log.warning("meeting.artifacts: Gemini error (%s)", e)
 
     if not use_claude_first and os.getenv("ANTHROPIC_API_KEY"):
-        resp = await _anthropic().messages.create(
-            model=CLAUDE_MODEL, max_tokens=max_tokens, system=system,
-            messages=[{"role": "user", "content": prompt}])
-        return "\n".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+        return await _claude_text(system, prompt, max_tokens)
     raise RuntimeError("; ".join(errors) or "Không gọi được LLM")
+
+
+# ------------------------------------------------------------ tra cứu web ---
+WEB_SYSTEM_PROMPT = """Bạn là trợ lý nghiên cứu cho cuộc họp nội bộ UrBox. Hãy tìm trên web để trả lời câu hỏi, rồi viết
+báo cáo ngắn bằng tiếng Việt (markdown): "# Tra cứu: <câu hỏi>", một đoạn KẾT LUẬN 2-3 câu trả lời thẳng (có con số,
+ngày cập nhật dd/mm/yyyy), rồi "## Chi tiết" với 3-6 gạch đầu dòng (số liệu, bối cảnh, lưu ý), và "## Liên quan đến
+cuộc họp" 1-2 câu nếu nội dung họp có liên quan. Ưu tiên nguồn chính thống, mới nhất; ghi rõ thời điểm số liệu. Giá
+tiền Việt Nam ghi dạng 1.000.000đ. Không dùng gạch dài. Không tự thêm mục Nguồn (hệ thống tự thêm từ trích dẫn)."""
+
+
+async def web_research(meeting_id: int, query: str, context_text: str = "") -> Dict[str, Any]:
+    """Tìm trên web bằng công cụ web_search của Claude, lưu kết quả thành báo cáo (kèm nguồn) để chiếu lên màn hình."""
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        raise RuntimeError("Tra cứu web cần ANTHROPIC_API_KEY (công cụ web_search của Claude)")
+    set_meeting(meeting_id, "tra cứu web")
+    t0 = time.time()
+    prompt = f"Câu hỏi cần tra cứu: {query}\n\nNội dung cuộc họp gần đây (để liên hệ, không bắt buộc):\n{context_text[-3000:] or '(không có)'}"
+    try:
+        resp = await _anthropic().messages.create(
+            model=CLAUDE_MODEL, max_tokens=4000, system=WEB_SYSTEM_PROMPT,
+            tools=[{"type": "web_search_20260209", "name": "web_search", "max_uses": 5}],
+            messages=[{"role": "user", "content": prompt}])
+    except Exception:
+        _record("claude", CLAUDE_MODEL, len(prompt) // 4, 0, t0, ok=False, estimated=True)
+        raise
+    texts, sources, searches = [], [], 0
+
+    def _add_source(url, title):
+        if url and url not in [x["url"] for x in sources]:
+            sources.append({"url": url, "title": (title or url).strip()})
+
+    for b in resp.content:
+        bt = getattr(b, "type", None)
+        if bt == "text":
+            texts.append(b.text)
+            for c in getattr(b, "citations", None) or []:
+                _add_source(getattr(c, "url", None), getattr(c, "title", None))
+        elif bt == "server_tool_use":
+            searches += 1
+        elif bt == "web_search_tool_result":
+            content = getattr(b, "content", None)
+            for r in (content if isinstance(content, list) else []):
+                if getattr(r, "type", None) == "web_search_result":
+                    _add_source(getattr(r, "url", None), getattr(r, "title", None))
+    inp, out, est = _usage_of(resp, prompt, "".join(texts))
+    _record("claude", CLAUDE_MODEL, inp, out, t0, ok=True, estimated=est)
+    # Các khối text bị trích dẫn cắt giữa câu: nối liền, bỏ phần dạo đầu trước báo cáo thật
+    body = "".join(texts).replace(chr(0x2014), "-").replace(chr(0x2013), "-")
+    body = re.sub(r"[ \t]*\n[ \t]*\n[ \t]*\.", ".", body)
+    heads = [m.start() for m in re.finditer(r"^#\s", body, re.M)]
+    if heads:
+        body = body[heads[-1] if len(heads) > 1 and body[heads[-1]:].count("\n## ") >= 1 else heads[0]:]
+    body = re.sub(r"\n{3,}", "\n\n", body).strip()
+    if not body:
+        raise RuntimeError("Không nhận được kết quả tra cứu")
+    if not re.match(r"^\s*#", body):
+        body = f"# Tra cứu: {query}\n\n{body}"
+    if sources:
+        body += "\n\n## Nguồn\n" + "\n".join(f"- [{s['title'][:90]}]({s['url']})" for s in sources[:8])
+    body += f"\n\n*Yêu cầu: \"{query}\" - tra cứu lúc {time.strftime('%H:%M %d/%m/%Y')}, {searches} lượt tìm.*"
+    aid = db.save_artifact(meeting_id=meeting_id, kind="report", title=f"Tra cứu web: {query[:60]}", content=body,
+                           prompt_trigger=query)
+    art = db.get_artifact(aid)
+    art["sources"] = sources
+    return art
 
 
 # ==============================================================================
@@ -155,6 +273,7 @@ def _fmt_date(ts: Any) -> str:
 async def generate_meeting_minutes(meeting_id: int, segments: List[Dict[str, Any]],
                                    title: str = "Cuộc họp nội bộ", meeting: Optional[Dict[str, Any]] = None,
                                    speakers: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    set_meeting(meeting_id, "biên bản")
     lines = [f"{s.get('speaker_label', 'Không rõ')}: {s.get('text', '')}" for s in segments]
     transcript_text = "\n".join(lines) if lines else "(Chưa có nội dung)"
     meeting = meeting or {}
@@ -239,6 +358,7 @@ def diagram_title(code: str) -> str:
 
 async def generate_diagram(meeting_id: int, prompt_request: str,
                            context_text: str = "", data_text: str = "") -> Dict[str, Any]:
+    set_meeting(meeting_id, "sơ đồ")
     user_prompt = (f"Yêu cầu vẽ sơ đồ: {prompt_request}\n\nDữ liệu tra cứu nội bộ:\n{data_text or '(không có)'}\n\n"
                    f"Nội dung cuộc họp:\n{context_text}")
     system = with_skill(DIAGRAM_SYSTEM, "diagram")
@@ -286,6 +406,7 @@ Quy tắc kỹ thuật BẮT BUỘC:
 
 async def generate_web_sandbox(meeting_id: int, prompt_request: str,
                                context_text: str = "", data_text: str = "") -> Dict[str, Any]:
+    set_meeting(meeting_id, "trang web")
     user_prompt = (f"Yêu cầu thiết kế giao diện web: {prompt_request}\n\n"
                    f"Dữ liệu tra cứu nội bộ (dùng số liệu thật này nếu liên quan):\n{data_text or '(không có)'}\n\n"
                    f"Ý tưởng & dữ liệu trong cuộc họp:\n{context_text}")
@@ -424,6 +545,7 @@ def import_deck(meeting_id: int, path: str) -> Dict[str, Any]:
 
 async def generate_slides(meeting_id: int, prompt_request: str, context_text: str = "",
                           data_text: str = "") -> Dict[str, Any]:
+    set_meeting(meeting_id, "slide")
     user_prompt = (f"Yêu cầu: {prompt_request}\n\nDữ liệu tra cứu (nếu có):\n{data_text or '(không có)'}\n\n"
                    f"Nội dung cuộc họp gần nhất:\n{context_text or '(chưa có)'}")
     deck = normalize_deck(_json_from_text(await _call_llm(with_skill(SLIDES_SYSTEM, "slides"), user_prompt, max_tokens=9000)))
@@ -629,6 +751,7 @@ def _data_prompt(prompt_request: str, context_text: str, data_text: str, facts: 
 
 async def generate_dashboard(meeting_id: int, prompt_request: str, context_text: str = "", data_text: str = "",
                              facts: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    set_meeting(meeting_id, "dashboard")
     raw = await _call_llm(with_skill(DASHBOARD_SYSTEM, "dashboard"), _data_prompt(prompt_request, context_text, data_text, facts),
                           max_tokens=4000)
     dash = normalize_dashboard(_json_from_text(raw))
@@ -678,6 +801,7 @@ def save_report(meeting_id: int, markdown: str, prompt_request: str = "", title:
 
 async def generate_report(meeting_id: int, prompt_request: str, context_text: str = "", data_text: str = "",
                           facts: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    set_meeting(meeting_id, "báo cáo")
     raw = await _call_llm(with_skill(REPORT_SYSTEM, "report"), _data_prompt(prompt_request, context_text, data_text, facts),
                           max_tokens=2500)
     md = re.sub(r"^```(?:markdown|md)?\s*|\s*```$", "", (raw or "").strip())
@@ -728,6 +852,7 @@ async def _refine_slides(meeting_id: int, art: Dict[str, Any], user_feedback: st
 async def co_design_refine(meeting_id: int, artifact_id: int, user_feedback: str,
                            slide_index: Optional[int] = None) -> Dict[str, Any]:
     """Cập nhật bản thiết kế theo đàm thoại trực tiếp với người dùng (Co-Design Loop)."""
+    set_meeting(meeting_id, "sửa sản phẩm")
     art = db.get_artifact(artifact_id)
     if not art:
         raise ValueError(f"Không tìm thấy artifact id={artifact_id}")

@@ -458,6 +458,26 @@ class TtsReq(BaseModel):
     speed: Optional[float] = Field(None, ge=0.6, le=1.6)
 
 
+@app.get("/api/usage")
+async def llm_usage():
+    """Số lần gọi LLM, token vào/ra, chi phí ước tính: toàn bộ, theo cuộc họp, theo việc, theo model."""
+    return await asyncio.to_thread(db.usage_summary)
+
+
+@app.get("/api/meetings/{mid}/export")
+async def export_meeting(mid: int):
+    """Toàn bộ dữ liệu cuộc họp (kể cả vector giọng) dạng JSON để lưu ra tệp hoặc phân tích ngoại tuyến."""
+    data = await asyncio.to_thread(db.export_meeting, mid)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Cuộc họp không tồn tại")
+    ls = live.SESSIONS.get(mid)
+    if ls is not None:   # phiên đang mở: lấy luôn các câu vừa xử lý nhưng DB chưa kịp ghi
+        await ls.drain()
+        data["segments"] = await asyncio.to_thread(db.get_segments, mid, True)
+    return Response(content=json.dumps(data, ensure_ascii=False, default=str), media_type="application/json",
+                    headers={"Content-Disposition": f'attachment; filename="meeting-{mid}.json"'})
+
+
 @app.get("/api/tts/status")
 async def tts_status():
     """Giọng đọc tiếng Việt chạy trên máy (Piper) đã sẵn sàng chưa."""

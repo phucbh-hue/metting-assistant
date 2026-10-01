@@ -146,6 +146,10 @@ KIND_WORDS = {"slide": "slides", "bộ slide": "slides", "sơ đồ": "diagram",
               "biên bản": "minutes", "trang web": "web_design", "giao diện": "web_design"}
 _BACK_KIND = re.compile(r"(quay|trở|mở|chiếu|bật)\s*(lại|về)\s*(cái\s*)?(bộ\s*)?(slide|sơ đồ|dashboard|báo cáo|biên bản|trang web|giao diện)"
                         r"\s*(cũ|khi nãy|hồi nãy|lúc nãy|ban nãy|(mà\s*)?(em\s*)?(đã|vừa|mới)\s*(present|trình bày|chiếu|làm|soạn|tạo|vẽ|dựng))", re.I)
+_WEB_SEARCH = re.compile(r"\b(search|sớt|xớt|research|google)\b|(tra cứu|tìm kiếm|tìm|kiểm tra|xem)\s*(giúp|giùm|hộ|cho)?\s*(anh|chị|em|mình|tôi)?\s*"
+                         r"(coi|xem|thử)?\s*(trên\s*)?(mạng|internet|google|web|online)", re.I)
+_WEB_FILLER = re.compile(r"^(em\s+)?(hãy\s+)?(search|sớt|xớt|research|tra cứu|tìm kiếm|tìm|kiểm tra|xem|google)\s*(trên\s*)?(mạng|internet|google|web|online)?"
+                         r"\s*(giúp|giùm|hộ|cho)?\s*(anh|chị|em|mình|tôi)?\s*(coi|xem|thử|là|về)?\s*", re.I)
 _OPEN_FILE = re.compile(r"(mở|lấy|tìm|chiếu|trình chiếu|load)\b.*\b(slide|bộ slide|bài|file|tệp)\b.*\b(folder|thư mục|tệp|file|trên máy|ổ)\b|"
                         r"(mở|lấy|tìm)\s*(file|tệp)\s*slide", re.I)
 _STAGE_PATTERNS = [
@@ -180,6 +184,10 @@ def stage_intent(command: str) -> Optional[Dict[str, Any]]:
         return {"action": "back", "kind": KIND_WORDS.get(m.group(5), "slides")}
     if _OPEN_FILE.search(c):
         return {"action": "open_file", "query": c}
+    if _WEB_SEARCH.search(c):
+        q = _WEB_FILLER.sub("", c).strip(" ?.!,") or c
+        q = re.sub(r"\s*(nhé|nha|nhá|đi|ạ|với|giúp anh|giúp em|cho anh)\s*$", "", q).strip(" ?.!,")
+        return {"action": "web_search", "query": q or c}
     for action, pat in _STAGE_PATTERNS:
         if pat.search(c):
             return {"action": action}
@@ -568,6 +576,7 @@ async def think_and_act(meeting_id: int, prompt: str, segments: List[Dict[str, A
 
     Trong lúc chờ, báo tiến độ bằng lời qua on_progress ("em tìm thấy 6 ticket, 1 cái quá hạn...")."""
     from meeting.artifacts import _call_llm
+    artifacts.set_meeting(meeting_id, "trợ lý")
     context_text = _context_lines(segments)
     facts = artifacts.meeting_facts(segments, meeting)
     thinking_trace: List[str] = []

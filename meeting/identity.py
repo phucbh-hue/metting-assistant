@@ -146,6 +146,7 @@ Người tham dự dự kiến: {expected}
 {json.dumps(target_labels, ensure_ascii=False)}
 
 Trả về JSON {{"predictions": [...]}} với một phần tử cho mỗi nhãn ở trên."""
+    artifacts.set_meeting(meeting.get("id"), "đoán tên")
     raw = await artifacts._call_llm(SYSTEM_PROMPT, prompt, max_tokens=1500)
     data = llm._extract_json(raw)
     items = data.get("predictions", []) if isinstance(data, dict) else []

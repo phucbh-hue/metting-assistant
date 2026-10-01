@@ -2726,8 +2726,13 @@ function openSettings() {
       </div>
       <p class="text-[12px] text-muted">Tên mới có hiệu lực ngay. Nếu mic đang bật, hãy tắt rồi bật lại để hệ thống nhận dạng tên chính xác hơn.</p>
       <div class="flex justify-end gap-2"><button type="button" class="btn btn-ghost" data-act="modal-close">Hủy</button><button class="btn btn-primary" type="submit">Lưu tên gọi</button></div>
-    </form>`, {
+    </form>
+    <div class="mt-5 pt-4 border-t divider">
+      <div class="flex items-center justify-between gap-2 mb-2"><h4 class="font-semibold">Sử dụng AI</h4><span class="text-[12px] text-muted">Số lần gọi model, số token vào/ra, chi phí ước tính</span></div>
+      <div id="usage-box" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang tải...</div></div>
+    </div>`, {
     onMount(m) {
+      renderUsage($('#usage-box', m));
       const preview = () => { const n = $('#as-name', m).value.trim() || 'Bông'; $('#as-preview', m).textContent = `"${n} ơi, tóm tắt giúp anh các quyết định" hoặc "${n}, tra cứu ticket của Tuấn"`; };
       $('#as-name', m).addEventListener('input', preview); preview();
       $('#as-form', m).addEventListener('submit', async e => {
@@ -2744,6 +2749,41 @@ function openSettings() {
       });
     }
   });
+}
+const fmtTok = n => new Intl.NumberFormat('vi-VN').format(Math.round(n || 0));
+const fmtUsd = v => (v >= 0.01 ? `$${v.toFixed(2)}` : v > 0 ? `$${v.toFixed(4)}` : '$0');
+async function renderUsage(box) {
+  if (!box) return;
+  try {
+    const u = await GET('/api/usage');
+    const t = u.total || {};
+    const row = (cells, cls = '') => `<tr class="${cls}">${cells.map((c, i) => `<td class="${i ? 'n' : ''}">${c}</td>`).join('')}</tr>`;
+    const head = (cols) => `<thead><tr>${cols.map((c, i) => `<th scope="col" class="${i ? 'n' : ''}" style="text-align:${i ? 'right' : 'left'}">${c}</th>`).join('')}</tr></thead>`;
+    const meetings = (u.by_meeting || []).slice(0, 15).map(m => row([
+      `${m.meeting_id != null ? `<a class="link" href="#/m/${m.meeting_id}" data-act="modal-close">#${m.meeting_id}</a> ` : ''}${esc(m.title || '')}`,
+      fmtTok(m.requests), fmtTok(m.input_tokens), fmtTok(m.output_tokens), fmtUsd(m.cost_usd)])).join('');
+    const purposes = (u.by_purpose || []).map(p => row([esc(p.purpose), fmtTok(p.requests), fmtTok(p.input_tokens), fmtTok(p.output_tokens), fmtUsd(p.cost_usd)])).join('');
+    box.innerHTML = `
+      <div class="kpis mb-3" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+        <div class="kpi"><div class="kpi-l">Lần gọi</div><div class="kpi-v" style="font-size:18px;overflow-wrap:normal">${fmtTok(t.requests)}</div>${t.errors ? `<div class="kpi-n">${fmtTok(t.errors)} lỗi</div>` : ''}</div>
+        <div class="kpi"><div class="kpi-l">Token vào</div><div class="kpi-v" style="font-size:18px;overflow-wrap:normal">${fmtTok(t.input_tokens)}</div></div>
+        <div class="kpi"><div class="kpi-l">Token ra</div><div class="kpi-v" style="font-size:18px;overflow-wrap:normal">${fmtTok(t.output_tokens)}</div></div>
+        <div class="kpi"><div class="kpi-l">Chi phí ước tính</div><div class="kpi-v" style="font-size:18px;overflow-wrap:normal">${fmtUsd(t.cost_usd || 0)}</div><div class="kpi-n">theo giá niêm yết của model</div></div>
+      </div>
+      ${meetings ? `<div class="dtable-wrap mb-3"><table class="dtable">${head(['Cuộc họp', 'Lần gọi', 'Token vào', 'Token ra', 'Chi phí'])}<tbody>${meetings}</tbody></table></div>` : '<p class="text-muted mb-3">Chưa có lời gọi AI nào được ghi.</p>'}
+      ${purposes ? `<details><summary class="cursor-pointer text-muted">Theo loại việc</summary><div class="dtable-wrap mt-2"><table class="dtable">${head(['Việc', 'Lần gọi', 'Token vào', 'Token ra', 'Chi phí'])}<tbody>${purposes}</tbody></table></div></details>` : ''}
+      ${u.estimated_rows ? `<p class="text-[12px] text-muted mt-2">${fmtTok(u.estimated_rows)} lần gọi không trả về số token (hoặc lỗi), số liệu ước tính theo độ dài chữ.</p>` : ''}`;
+  } catch (e) { box.innerHTML = `<p style="color:rgb(var(--danger))">${esc(e.message)}</p>`; }
+}
+async function exportMeetingData(mid) {
+  try {
+    const res = await fetch(`/api/meetings/${mid}/export`);
+    if (!res.ok) throw new Error(`Không xuất được (${res.status})`);
+    const blob = await res.blob();
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `meeting-${mid}.json`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    toast('Đã xuất dữ liệu phân tích (kèm vector giọng).');
+  } catch (e) { toast(e.message, 'err'); }
 }
 async function reanalyzeMeeting() {
   const R = S.room; if (!R) return;
@@ -2817,9 +2857,10 @@ document.addEventListener('click', async e => {
     }
     case 'room-menu': {
       const R = S.room; if (!R) return;
-      const c = await openMenu(el, [{ id: 'reanalyze', text: 'Phân tích lại người nói' }, { id: 'export', text: 'Xuất Markdown' },
+      const c = await openMenu(el, [{ id: 'reanalyze', text: 'Phân tích lại người nói' }, { id: 'export', text: 'Xuất Markdown' }, { id: 'export-data', text: 'Xuất dữ liệu phân tích (JSON)' },
                                     { id: 'delete', text: 'Xóa cuộc họp', danger: true }]);
       if (c === 'reanalyze') reanalyzeMeeting();
+      if (c === 'export-data') exportMeetingData(S.room.id);
       if (c === 'export') exportMarkdown(R.id);
       if (c === 'delete') deleteMeeting(R.id);
       return;

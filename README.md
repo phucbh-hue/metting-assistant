@@ -6,12 +6,31 @@ tra cứu dữ liệu nội bộ qua MCP, soạn và trình chiếu slide theo l
 vẽ sơ đồ, dựng dashboard số liệu, báo cáo nhanh và phác thảo trang web. Trợ lý nói bằng giọng tiếng Việt chạy
 ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
 
-- Phiên bản: 3.4 - cập nhật 01/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.6 - cập nhật 01/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
 
-## 1. Có gì mới ở bản 3.4
+## 1. Có gì mới ở bản 3.6
+
+### Tra cứu trên mạng
+- "UrBox ơi, em search giúp anh coi giá vàng đang bao nhiêu": trợ lý tìm trên web (công cụ web_search của Claude, tối đa
+  5 lượt tìm), viết báo cáo "Tra cứu: ..." gồm kết luận, chi tiết, liên hệ với cuộc họp và danh sách nguồn, chiếu lên
+  màn hình, đọc kết luận. Yêu cầu và thời điểm tra cứu được ghi ở cuối báo cáo. Cần `ANTHROPIC_API_KEY`.
+- Một lần tra cứu tốn khoảng 25.000-30.000 token vào (kết quả web tính vào input), tức khoảng 0,15-0,20 USD với Opus 4.7.
+
+### Cổng gọi AI: đếm lần gọi và token
+- Mọi lời gọi LLM (Claude, Gemini) đi qua một cổng ghi lại: cuộc họp nào, việc gì (slide, báo cáo, dashboard, sơ đồ,
+  biên bản, nhận xét, đoán tên, tra cứu web, trợ lý...), token vào/ra, thời gian, lỗi, chi phí ước tính theo giá niêm yết.
+- Xem ở **Cài đặt** (biểu tượng bánh răng) mục "Sử dụng AI": tổng, theo từng cuộc họp, theo loại việc. API: `GET /api/usage`.
+  Dữ liệu lưu ở collection `llm_usage`.
+
+### Xuất dữ liệu phân tích
+- Menu "..." của cuộc họp -> **Xuất dữ liệu phân tích (JSON)** (`GET /api/meetings/{id}/export`): toàn bộ câu, vector giọng,
+  hồ sơ người nói, sản phẩm AI, nhật ký gọi AI. Dùng khi server đang chạy DB tạm (in-memory) để không mất dữ liệu, hoặc để
+  gửi cho người phân tích lỗi nhận diện người nói.
+
+## 2. Bản 3.4: trợ lý thuyết trình, nội dung bám sát, MCP data server
 
 ### Trợ lý tự thuyết trình
 - "Thanh ơi, thuyết trình giúp anh" / "present slide" / "tự chuyển slide và nói nội dung bên trong": trợ lý đọc nội dung
@@ -51,7 +70,7 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
   thành người nói mới ngay, không bị gộp vào người đang nói; câu ngắn theo người vừa được nhận ra bằng giọng.
 - Model trợ lý mặc định đổi sang `claude-opus-4-7` (`CLAUDE_MODEL` trong `.env`); muốn nhanh và rẻ hơn dùng `claude-sonnet-5-5`.
 
-## 2. Bản 3.3: slide theo lời trình bày, ghép lệnh bị cắt
+## 3. Bản 3.3: slide theo lời trình bày, ghép lệnh bị cắt
 
 ### Slide tự chuyển theo lời trình bày
 
@@ -80,7 +99,7 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
 - Đo trên 5 cuộc họp thật có nhãn đúng gần đúng: 87,0% -> 89,2% câu (#37: 91% -> 100%, #36: 83% -> 86%), các
   cuộc họp khác không đổi.
 
-## 3. Bản 3.2: kết quả luôn hiện ra, dashboard, giọng đọc chạy trên máy
+## 4. Bản 3.2: kết quả luôn hiện ra, dashboard, giọng đọc chạy trên máy
 
 ### Trợ lý trả lời có nội dung thật và luôn hiện kết quả
 
@@ -127,7 +146,7 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
   Mô phỏng trên #31: bấm một lần ở câu đầu của khách mời thì đúng 95% câu.
 - Giới hạn: giọng phát qua loa máy tính bị kênh âm thanh làm giống nhau; họp trực tiếp với người thật tách tốt hơn.
 
-## 4. Bản 3.1: khuôn mặt, màn hình trình chiếu, tên gọi
+## 5. Bản 3.1: khuôn mặt, màn hình trình chiếu, tên gọi
 
 ### Trợ lý có khuôn mặt, giọng nói và màn hình trình chiếu
 
@@ -135,7 +154,7 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
   trình chiếu: bên trái là khuôn mặt trợ lý, bên phải là nội dung đang trình bày (slide, biên bản, sơ đồ, giao diện).
 - Khuôn mặt đổi theo trạng thái: **chờ**, **lắng nghe** (vòng sáng co giãn theo âm lượng mic), **suy nghĩ**
   (vòng nét đứt xoay, mắt nhìn lên), **nói** (miệng mấp máy theo lời). Nét mặt vui hoặc lo lắng theo nội dung.
-- Giọng nói: từ bản 3.2 dùng giọng Piper chạy trên máy chủ (xem mục 3); giọng của trình duyệt chỉ là dự phòng.
+- Giọng nói: từ bản 3.2 dùng giọng Piper chạy trên máy chủ (xem mục 4); giọng của trình duyệt chỉ là dự phòng.
   Giọng trực tuyến "Online (Natural)" của Microsoft Edge chỉ được dùng khi người dùng bấm cho phép (xem mục Lưu ý
   dữ liệu). Nút "Giọng nói" hoặc phím V để bật/tắt; bấm vào khuôn mặt để trợ lý dừng nói.
 - Khi trợ lý đang nói, mic gửi khoảng lặng thay cho âm thanh để giọng trợ lý không lọt vào transcript
@@ -160,6 +179,7 @@ chạy ngay, không gọi LLM:
 | "bật tự chuyển slide", "tắt tự chuyển slide" | Bật/tắt slide tự chuyển theo lời trình bày (mặc định bật) |
 | "thuyết trình giúp anh", "present slide", "dừng thuyết trình" | Trợ lý tự đọc từng slide và chuyển tiếp / dừng |
 | "mở slide ở folder mega sale" | Mở bộ slide từ thư viện trên máy (`slides/`) |
+| "search giúp anh giá vàng hôm nay", "tra cứu trên mạng tỷ giá USD" | Tìm trên web, báo cáo có nguồn, chiếu lên màn hình |
 | "quay lại slide cũ khi nãy em đã present", "quay lại dashboard lúc nãy" | Về nội dung đã trình bày gần nhất của loại đó |
 | "nhận xét nhanh về cuộc họp" | Trợ lý xem lại cuộc họp và nêu nhận xét |
 | "sửa slide này thêm số liệu doanh thu" | Sửa đúng slide đang chiếu (có gọi LLM), lưu thành phiên bản mới |
@@ -182,7 +202,7 @@ chờ câu yêu cầu tiếp theo trong 8 giây. Câu chỉ nhắc tới tên (v
 - Menu "..." của cuộc họp -> **Phân tích lại người nói**: chạy lại bộ phân vai trên toàn bộ câu đã lưu.
   Tên đã đặt được giữ cho người nói xuất hiện sớm nhất trong nhóm.
 
-## 5. Bản 3.0: sửa lỗi phân biệt người nói
+## 6. Bản 3.0: sửa lỗi phân biệt người nói
 
 | Vấn đề ở bản 2.5 | Nguyên nhân gốc | Cách sửa |
 |---|---|---|
@@ -200,7 +220,7 @@ Khác:
 - Nội dung do AI sinh ra được làm sạch (DOMPurify) và chạy trong iframe sandbox cô lập.
 - Kết thúc cuộc họp trả về ngay, biên bản lập ở chế độ nền.
 
-## 6. Cách phân biệt người nói
+## 7. Cách phân biệt người nói
 
 ```
 Soniox (nhãn người nói theo phiên)  ─┐
@@ -220,7 +240,7 @@ CAM++ (vector giọng 192D mỗi câu)  ──┘          │               │
 
 Ngưỡng được đo trên dữ liệu thật của model CAM++: cùng người câu ngắn 0.3-0.6, câu dài 0.6-0.87; khác người 0.0-0.4.
 
-## 7. Cấu trúc thư mục
+## 8. Cấu trúc thư mục
 
 ```
 meeting-assistant/
@@ -250,7 +270,7 @@ meeting-assistant/
 └── static/
 ```
 
-## 8. Chạy
+## 9. Chạy
 
 Cách nhanh nhất: bấm đúp **`run.cmd`** (hoặc gõ `run` trong terminal) -> server chạy ở http://127.0.0.1:8080 và tự mở
 trình duyệt; lần đầu tự tải giọng đọc tiếng Việt nếu chưa có. `run.cmd demo` chạy bản demo dữ liệu giả lập ở cổng 8090.
@@ -285,7 +305,7 @@ màu riêng -> bấm **Đặt tên** (hoặc xác nhận gợi ý của AI, tick
 Trình bày: nhờ trợ lý soạn slide (hoặc chọn tab **Slide**) -> bấm biểu tượng toàn màn hình ở khung AI ->
 nói "<tên gọi> ơi, chuyển slide", "nhắc bài"... Cần giọng Tiếng Việt cài trên Windows để trợ lý nói thành tiếng.
 
-## 9. Cấu hình
+## 10. Cấu hình
 
 Xem `.env.example`. Các biến quan trọng:
 
@@ -305,7 +325,7 @@ Xem `.env.example`. Các biến quan trọng:
 | `SLIDES_DIR` | `slides/` | Thư viện slide trên máy cho lệnh "mở slide ở folder ..." |
 | `MCP_SERVER_CMD` / `MCP_SERVER_URL` | | Trỏ trợ lý tới MCP server thật (stdio hoặc http); không đặt thì dùng dữ liệu tại chỗ |
 
-## 10. API chính
+## 11. API chính
 
 | Method | Đường dẫn | Mô tả |
 |---|---|---|
@@ -319,6 +339,8 @@ Xem `.env.example`. Các biến quan trọng:
 | POST | `/api/meetings/{id}/infer-speakers` | AI đoán tên ngay |
 | POST | `/api/meetings/{id}/reanalyze` | Phân tích lại người nói trên toàn bộ câu đã lưu |
 | POST | `/api/meetings/{id}/segments/{seq}/split-after` | Từ câu này trở đi là người nói mới |
+| GET | `/api/usage` | Thống kê gọi AI: lần gọi, token vào/ra, chi phí ước tính theo cuộc họp / việc / model |
+| GET | `/api/meetings/{id}/export` | Xuất toàn bộ dữ liệu cuộc họp (kèm vector giọng) dạng JSON |
 | GET / POST | `/api/tts/status`, `/api/tts` | Trạng thái giọng đọc / đọc văn bản thành WAV (chạy trên máy) |
 | POST | `/api/meetings/{id}/command` | Câu lệnh cho trợ lý, xử lý như khi gọi bằng giọng nói; trả về danh sách sự kiện |
 | POST | `/api/meetings/{id}/stage` | Điều khiển màn hình trình chiếu: `show`, `next`, `prev`, `goto`, `topic`, `back`, `follow` (kèm `follow: true/false`) |
@@ -330,7 +352,7 @@ Xem `.env.example`. Các biến quan trọng:
 | WS | `/ws/meeting/{id}/audio` | PCM16 16kHz mono từ mic (một thiết bị ghi mỗi cuộc họp) |
 | WS | `/ws/meeting/{id}/events` | Sự kiện: `segment`, `segments_relabeled`, `speakers`, `speakers_split`, `interim`, `identity_suggestion`, `ai_progress`, `ai_say`, `ai_insights`, `stage_state`, `stage_command`, `stage_prompt`... |
 
-## 11. Lưu ý dữ liệu
+## 12. Lưu ý dữ liệu
 
 - Bộ test của bản 2.5 ghi vector **ngẫu nhiên** vào DB thật (hồ sơ có `consent_by` = `system_admin` hoặc
   `meeting_host`, 1-2 mẫu). Nếu từng chạy các test đó, hãy rà trang **Hồ sơ giọng nói**, xóa hồ sơ không đúng
