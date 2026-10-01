@@ -248,6 +248,10 @@
     .slide cite { display: block; margin-top: 2cqw; font-size: 2cqw; color: rgb(var(--muted)); font-style: normal; }
     .sl-foot { display: flex; justify-content: space-between; gap: 2cqw; padding: 0 7cqw 2.4cqw; font-size: 1.45cqw; color: rgb(var(--muted)); font-variant-numeric: tabular-nums; }
     .slide-enter { animation: slideIn .35s ease-out; }
+    .slide.has-now li { opacity: .6; transition: opacity .25s; }
+    .slide.has-now li.sl-now { opacity: 1; }
+    .slide li.sl-now::before { box-shadow: 0 0 0 .55cqw rgb(var(--accent) / .28); }
+    .num.flash { color: rgb(var(--accent)); font-weight: 600; }
     @keyframes slideIn { from { opacity: 0; transform: translateY(10px) scale(.992); } to { opacity: 1; transform: none; } }
     .no-scrollbar { scrollbar-width: none; }
     .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -2079,8 +2083,12 @@ async function analyzeNow() {
 /* ---------- khuôn mặt phản ứng theo sự kiện cuộc họp ---------- */
 function avatarEvent(R, ev) {
   switch (ev.type) {
-    case 'interim': if (ev.text) AV.heardAt = performance.now(); setLive(ev); break;
-    case 'segment': setLive(null, ev.segment); if (STAGE.open) renderPrompter(); break;
+    case 'interim':
+      if (ev.text) AV.heardAt = performance.now();
+      setLive(ev);
+      if (STAGE.open && ev.text && performance.now() - focusTimer > 400) { focusTimer = performance.now(); focusBullet(ev.text); }
+      break;
+    case 'segment': setLive(null, ev.segment); if (STAGE.open) { renderPrompter(); focusBullet(ev.segment.text); } break;
     case 'ai_listening': avSet('listening', 'happy'); showBubble('Dạ, em nghe đây, anh chị cứ nói yêu cầu.'); break;
     case 'ai_listening_end': avSet('idle', 'neutral'); showBubble(`Em chưa nghe thấy yêu cầu. Thử nói "${ev.name} ơi, vẽ dashboard tiến độ".`); break;
     case 'ai_progress': if (AV.state !== 'thinking') avSet('thinking'); say(ev.text, { mood: ev.kind === 'ack' ? 'happy' : 'neutral', stale: ev.kind === 'status' }); break;
@@ -2097,7 +2105,7 @@ function avatarEvent(R, ev) {
     }
     case 'ai_say': avSet('idle', ev.mood || 'happy'); if (ev.quiet) showBubble(ev.text); else say(ev.text, { mood: ev.mood || 'happy' }); break;
     case 'ai_error': avSet('idle', 'concerned'); say('Em chưa làm được yêu cầu này.', { mood: 'concerned', caption: ev.text }); break;
-    case 'stage_state': applyStage(ev.stage); break;
+    case 'stage_state': applyStage(ev.stage, ev.auto); break;
     case 'stage_command': avSet('idle', 'happy'); if (ev.action === 'open') openStage(); else closeStage(); break;
     case 'stage_prompt': avSet('idle', 'happy'); break;
     case 'meeting_status':
@@ -2321,7 +2329,7 @@ function renderStage() {
   const m = R.meeting;
   $('#stage-title').textContent = m.title;
   $('#stage-sub').innerHTML = m.status === 'ended' ? `Đã kết thúc ${esc(fmt.date(m.ended_at))}`
-    : `<span class="num" data-since="${m.started_at}">${fmt.clock(Date.now() / 1000 - m.started_at)}</span> - nói "${esc(AN())} ơi, chuyển slide" hoặc dùng phím mũi tên`;
+    : `<span class="num" data-since="${m.started_at}">${fmt.clock(Date.now() / 1000 - m.started_at)}</span> - slide tự chuyển theo lời trình bày, hoặc nói "${esc(AN())} ơi, chuyển slide"`;
   renderStageMic();
   $('#stage-input').placeholder = `Gõ cho ${AN()}: "chuyển slide", "nhắc bài", "làm slide báo cáo"...`;
   updateVoiceUi();
@@ -2366,13 +2374,14 @@ async function renderStageFrame(animate) {
     frame.innerHTML = `<div class="slide-wrap">${slideHtml(deck, i, animate)}</div>`;
     fitSlide();
     const prompterOn = !$('#stage-prompter').classList.contains('hidden');
+    const followOn = R.stage.follow !== false;
     nav.innerHTML = `<div class="flex flex-wrap items-center justify-between gap-2">
         <div class="flex items-center gap-2">
           <button class="btn btn-ghost btn-sm" data-act="stage-prev" ${i <= 0 ? 'disabled' : ''} aria-label="Slide trước"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>Trước</button>
           <span class="num text-muted text-[13px]">${i + 1} / ${deck.slides.length}</span>
           <button class="btn btn-ghost btn-sm" data-act="stage-next" ${i >= deck.slides.length - 1 ? 'disabled' : ''} aria-label="Slide sau">Sau<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg></button>
         </div>
-        <div class="flex flex-wrap items-center gap-2">${back}<button class="btn btn-ghost btn-sm" data-act="stage-prompter" aria-pressed="${prompterOn}" title="Phím N">Nhắc bài</button>${picker}</div>
+        <div class="flex flex-wrap items-center gap-2">${back}<button class="btn btn-ghost btn-sm" data-act="stage-follow" aria-pressed="${followOn}" title="Slide tự chuyển theo nội dung đang trình bày">Tự chuyển: ${followOn ? 'bật' : 'tắt'}</button><button class="btn btn-ghost btn-sm" data-act="stage-prompter" aria-pressed="${prompterOn}" title="Phím N">Nhắc bài</button>${picker}</div>
       </div>
       <div class="thumbs" aria-label="Danh sách slide">${deck.slides.map((sl, k) => `<button class="thumb" data-act="stage-goto" data-slide="${k}" aria-current="${k === i}">${k + 1}. ${esc(sl.title)}</button>`).join('')}</div>`;
     const cur = $('.thumb[aria-current="true"]', nav); if (cur) cur.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -2407,7 +2416,7 @@ async function stageAction(action, extra = {}) {
   try { await applyStage(await POST(`/api/meetings/${R.id}/stage`, { action, ...extra })); }
   catch (e) { toast(e.message, 'err'); }
 }
-async function applyStage(st) {
+async function applyStage(st, auto) {
   const R = S.room; if (!R || !st) return;
   const prev = R.stage || {};
   const changed = prev.artifact_id !== st.artifact_id || prev.slide !== st.slide;
@@ -2416,9 +2425,33 @@ async function applyStage(st) {
     try { const art = await GET(`/api/artifacts/${st.artifact_id}`); if (S.room === R && !R.artifacts.some(a => a.id === art.id)) R.artifacts.push(art); renderTabs(); } catch (e) { /* bỏ qua */ }
   }
   if (S.room !== R) return;
-  if (STAGE.open) renderStageFrame(changed);
+  if (STAGE.open) {
+    renderStageFrame(changed);
+    if (auto && changed) {      // slide tự chuyển theo lời trình bày: số slide sáng lên một lúc
+      const c = $('#stage-nav .num'); if (c) { c.classList.add('flash'); setTimeout(() => c.classList.remove('flash'), 1500); }
+    }
+  }
   if (R.tab === 'slides' && changed) renderArtifactPane();
 }
+/** Tô sáng ý (bullet) của slide đang chiếu khớp nhất với lời vừa nói. */
+function focusBullet(text) {
+  const sl = STAGE.open ? currentSlide() : null; const el = $('#stage-frame .slide');
+  if (!sl || !el) return;
+  const said = tokensOf(text).filter(w => w.length > 1 && !STOPWORDS.has(w));
+  if (!said.length) return;
+  const saidSet = new Set(said), pairs = new Set(said.slice(1).map((w, i) => said[i] + ' ' + w));
+  let best = -1, bestScore = 0;
+  (sl.bullets || []).forEach((b, i) => {
+    const ws = tokensOf(b).filter(w => w.length > 1 && !STOPWORDS.has(w));
+    let sc = ws.filter(w => saidSet.has(w)).length;
+    sc += 1.5 * ws.slice(1).filter((w, k) => pairs.has(ws[k] + ' ' + w)).length;
+    if (sc > bestScore) { best = i; bestScore = sc; }
+  });
+  if (bestScore < 2) return;
+  el.classList.add('has-now');
+  $$('li', el).forEach((li, i) => li.classList.toggle('sl-now', i === best));
+}
+let focusTimer = 0;
 
 /* ---------- nhắc bài: ý nào đã nói, ý nào chưa ---------- */
 const STOPWORDS = new Set('và của cho các những là có được trong với này đã sẽ một để từ theo khi thì mà ở về ra vào lên như cũng rất nhiều không chưa đang bị hay hoặc nên phải thêm đến tại do vì nếu'.split(' '));
@@ -2763,6 +2796,7 @@ document.addEventListener('click', async e => {
     case 'stage-goto': return stageAction('goto', { slide: parseInt(el.dataset.slide, 10) });
     case 'stage-show': { const sl = parseInt(el.dataset.slide, 10) || 0; openStage(true); return stageAction('show', { artifact_id: parseInt(el.dataset.aid, 10), slide: sl }); }
     case 'stage-prompter': return togglePrompter();
+    case 'stage-follow': return stageAction('follow', { follow: !(S.room.stage && S.room.stage.follow !== false) });
     case 'stage-analyze': return analyzeNow();
     case 'voice-toggle': return toggleVoice();
     case 'voice-stop': return stopVoice();

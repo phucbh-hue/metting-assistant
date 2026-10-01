@@ -255,18 +255,43 @@ class AssistantCallTests(SessionTestCase):
         self.s._handle_ai_activation = fake_activation
 
     async def test_call_with_request_in_same_sentence(self):
-        await self.feed(self.s, [(0, "1", 3.0, "Bông ơi, tóm tắt giúp anh các quyết định")])
+        await self.feed(self.s, [(0, "1", 3.0, "Bông ơi, tóm tắt giúp anh các quyết định.")])
         await asyncio.sleep(0)
-        self.assertEqual(self.calls, [("Bông", "tóm tắt giúp anh các quyết định")])
+        self.assertEqual(self.calls, [("Bông", "tóm tắt giúp anh các quyết định.")])
 
     async def test_call_then_pause_waits_for_next_sentence(self):
         """Lỗi cũ: "Jarvis ơi." rồi ngừng một nhịp thì yêu cầu ở câu sau bị mất."""
         q = await self.s.subscribe()
         await self.feed(self.s, [(0, "1", 1.0, "Bông ơi.")])
         self.assertIn("ai_listening", [e["type"] for e in self.events(q)])
-        await self.feed(self.s, [(0, "1", 3.0, "Tra cứu giúp anh ticket của Tuấn")], t0=5)
+        await self.feed(self.s, [(0, "1", 3.0, "Tra cứu giúp anh ticket của Tuấn.")], t0=5)
         await asyncio.sleep(0)
-        self.assertEqual(self.calls, [("Bông", "Tra cứu giúp anh ticket của Tuấn")])
+        self.assertEqual(self.calls, [("Bông", "Tra cứu giúp anh ticket của Tuấn.")])
+
+    async def test_call_cut_mid_sentence_is_joined(self):
+        """Lỗi thật (#37): Soniox cắt "Thanh ơi, em hãy" | "tổng kết lại... báo cáo nhanh cho anh." -> trợ lý từng
+        làm theo "em hãy". Phải chờ người gọi nói nốt rồi xử lý cả câu, một lần."""
+        q = await self.s.subscribe()
+        await self.feed(self.s, [(0, "1", 1.5, "Rồi, ok, Bông ơi, em hãy")])
+        self.assertEqual(self.calls, [])
+        self.assertIn("ai_listening", [e["type"] for e in self.events(q)])
+        await self.feed(self.s, [(0, "1", 4.0, "tổng kết lại cuộc họp và báo cáo nhanh cho anh.")], t0=3)
+        await asyncio.sleep(0)
+        self.assertEqual(self.calls, [("Bông", "em hãy tổng kết lại cuộc họp và báo cáo nhanh cho anh.")])
+
+    async def test_unpunctuated_call_runs_once_speaker_stops(self):
+        with mock.patch.object(live, "CMD_SETTLE_S", 0.05):
+            await self.feed(self.s, [(0, "1", 3.0, "Bông ơi, chuyển slide sang slide 3")])
+            self.assertEqual(self.calls, [])
+            await asyncio.sleep(0.5)
+        self.assertEqual(self.calls, [("Bông", "chuyển slide sang slide 3")])
+
+    async def test_unfinished_call_survives_someone_else_talking(self):
+        with mock.patch.object(live, "CMD_SETTLE_S", 0.3):
+            await self.feed(self.s, [(0, "1", 1.5, "Bông ơi, em hãy tạo một cái"), (1, "2", 1.0, "Ừ.")])
+            await self.feed(self.s, [(0, "1", 3.5, "slide báo cáo tiến độ cho anh.")], t0=4)
+            await asyncio.sleep(0)
+        self.assertEqual(self.calls, [("Bông", "em hãy tạo một cái slide báo cáo tiến độ cho anh.")])
 
     async def test_call_then_silence_times_out(self):
         q = await self.s.subscribe()

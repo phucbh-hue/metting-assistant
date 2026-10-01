@@ -6,12 +6,41 @@ tra cứu dữ liệu nội bộ qua MCP, soạn và trình chiếu slide theo l
 vẽ sơ đồ, dựng dashboard số liệu, báo cáo nhanh và phác thảo trang web. Trợ lý nói bằng giọng tiếng Việt chạy
 ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
 
-- Phiên bản: 3.2 - cập nhật 01/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.3 - cập nhật 01/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
 
-## 1. Có gì mới ở bản 3.2
+## 1. Có gì mới ở bản 3.3
+
+### Slide tự chuyển theo lời trình bày
+
+- Đang chiếu bộ slide mà người trình bày nói sang ý của slide khác thì slide tự chuyển theo, trợ lý hiện phụ đề
+  "Theo lời trình bày: slide 3 - ..." (không đọc to để không cắt lời). Ý đang được nói tới trên slide được tô sáng,
+  các ý khác mờ đi.
+- Cách so: lời vừa nói so với tiêu đề, các ý và ghi chú của từng slide; từ chỉ có ở một slide được tính nặng hơn,
+  cụm hai từ ("ngân sách", "tiến độ") nặng hơn từ đơn.
+- Chống nhảy lung tung: phải khớp rõ hơn slide hiện tại mới chuyển; sang slide kế tiếp thì chuyển ngay, nhảy xa hoặc
+  lùi lại phải khớp hai câu liên tiếp; chờ 6 giây sau mỗi lần đổi slide và 12 giây sau khi người dùng tự chuyển.
+- Slide vừa tự chuyển mà người trình bày nói "chuyển slide" trong 10 giây thì trợ lý hiểu là đúng slide đó, không
+  nhảy thêm.
+- Nút **Tự chuyển: bật/tắt** trên màn hình trình chiếu, hoặc nói "bật / tắt tự chuyển slide".
+
+### Lời gọi trợ lý bị cắt giữa chừng
+
+- Lỗi thật ở #37: Soniox cắt "Thanh ơi, em hãy" | "tổng kết lại các cuộc gọi... báo cáo nhanh cho anh", trợ lý làm
+  theo "em hãy" nên ra báo cáo không đúng yêu cầu. Bây giờ câu gọi chưa có dấu kết câu thì trợ lý chờ người đó nói
+  nốt (hết chữ tạm 1,2 giây), ghép lại rồi mới xử lý một lần. Câu gọi trọn vẹn vẫn xử lý ngay.
+
+### Phân biệt người nói
+
+- Câu quá ngắn chưa đủ tính giọng ("Ồ, trời ơi", "Ok em.", "Chuyển slide.") theo người vừa được xác định bằng giọng gần
+  nhất của cùng nhãn Soniox, không theo tổng phiếu cả buổi; câu có giọng xác định được người nói thì các câu ngắn cùng
+  nhãn ngay trước đó theo luôn. Soniox hay dùng chung một nhãn cho người dẫn podcast, khách mời và người trong phòng.
+- Đo trên 5 cuộc họp thật có nhãn đúng gần đúng: 87,0% -> 89,2% câu (#37: 91% -> 100%, #36: 83% -> 86%), các
+  cuộc họp khác không đổi.
+
+## 2. Bản 3.2: kết quả luôn hiện ra, dashboard, giọng đọc chạy trên máy
 
 ### Trợ lý trả lời có nội dung thật và luôn hiện kết quả
 
@@ -58,7 +87,7 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
   Mô phỏng trên #31: bấm một lần ở câu đầu của khách mời thì đúng 95% câu.
 - Giới hạn: giọng phát qua loa máy tính bị kênh âm thanh làm giống nhau; họp trực tiếp với người thật tách tốt hơn.
 
-## 2. Bản 3.1: khuôn mặt, màn hình trình chiếu, tên gọi
+## 3. Bản 3.1: khuôn mặt, màn hình trình chiếu, tên gọi
 
 ### Trợ lý có khuôn mặt, giọng nói và màn hình trình chiếu
 
@@ -66,7 +95,7 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
   trình chiếu: bên trái là khuôn mặt trợ lý, bên phải là nội dung đang trình bày (slide, biên bản, sơ đồ, giao diện).
 - Khuôn mặt đổi theo trạng thái: **chờ**, **lắng nghe** (vòng sáng co giãn theo âm lượng mic), **suy nghĩ**
   (vòng nét đứt xoay, mắt nhìn lên), **nói** (miệng mấp máy theo lời). Nét mặt vui hoặc lo lắng theo nội dung.
-- Giọng nói: từ bản 3.2 dùng giọng Piper chạy trên máy chủ (xem mục 1); giọng của trình duyệt chỉ là dự phòng.
+- Giọng nói: từ bản 3.2 dùng giọng Piper chạy trên máy chủ (xem mục 2); giọng của trình duyệt chỉ là dự phòng.
   Giọng trực tuyến "Online (Natural)" của Microsoft Edge chỉ được dùng khi người dùng bấm cho phép (xem mục Lưu ý
   dữ liệu). Nút "Giọng nói" hoặc phím V để bật/tắt; bấm vào khuôn mặt để trợ lý dừng nói.
 - Khi trợ lý đang nói, mic gửi khoảng lặng thay cho âm thanh để giọng trợ lý không lọt vào transcript
@@ -88,6 +117,7 @@ chạy ngay, không gọi LLM:
 | "quay lại phần trình bày lúc nãy" | Về nội dung trình bày trước đó, ví dụ từ biên bản về bộ slide |
 | "nhắc bài", "ý tiếp theo" | Mở khung nhắc bài và đọc ý tiếp theo chưa nói |
 | "mở màn hình trình bày", "thu nhỏ màn hình trình bày" | Mở hoặc thu nhỏ màn hình trình chiếu |
+| "bật tự chuyển slide", "tắt tự chuyển slide" | Bật/tắt slide tự chuyển theo lời trình bày (mặc định bật) |
 | "nhận xét nhanh về cuộc họp" | Trợ lý xem lại cuộc họp và nêu nhận xét |
 | "sửa slide này thêm số liệu doanh thu" | Sửa đúng slide đang chiếu (có gọi LLM), lưu thành phiên bản mới |
 
@@ -109,7 +139,7 @@ chờ câu yêu cầu tiếp theo trong 8 giây. Câu chỉ nhắc tới tên (v
 - Menu "..." của cuộc họp -> **Phân tích lại người nói**: chạy lại bộ phân vai trên toàn bộ câu đã lưu.
   Tên đã đặt được giữ cho người nói xuất hiện sớm nhất trong nhóm.
 
-## 3. Bản 3.0: sửa lỗi phân biệt người nói
+## 4. Bản 3.0: sửa lỗi phân biệt người nói
 
 | Vấn đề ở bản 2.5 | Nguyên nhân gốc | Cách sửa |
 |---|---|---|
@@ -127,7 +157,7 @@ Khác:
 - Nội dung do AI sinh ra được làm sạch (DOMPurify) và chạy trong iframe sandbox cô lập.
 - Kết thúc cuộc họp trả về ngay, biên bản lập ở chế độ nền.
 
-## 4. Cách phân biệt người nói
+## 5. Cách phân biệt người nói
 
 ```
 Soniox (nhãn người nói theo phiên)  ─┐
@@ -147,7 +177,7 @@ CAM++ (vector giọng 192D mỗi câu)  ──┘          │               │
 
 Ngưỡng được đo trên dữ liệu thật của model CAM++: cùng người câu ngắn 0.3-0.6, câu dài 0.6-0.87; khác người 0.0-0.4.
 
-## 5. Cấu trúc thư mục
+## 6. Cấu trúc thư mục
 
 ```
 meeting-assistant/
@@ -158,6 +188,7 @@ meeting-assistant/
 │   ├── identity.py     # IdentityEngine: AI đoán tên người nói (debounce, gợi ý xác nhận)
 │   ├── llm.py          # Tên gọi trợ lý, lệnh trình chiếu, vòng tra cứu -> trả lời -> sản phẩm, câu "em tìm thấy..."
 │   ├── tts.py          # Giọng đọc tiếng Việt chạy trên máy (Piper qua sherpa-onnx) + chuẩn hóa số, ngày, tiền
+│   ├── follow.py       # Tự chuyển slide theo lời trình bày (so khớp lời nói với từng slide, chống nhảy)
 │   ├── artifacts.py    # Biên bản, báo cáo nhanh, dashboard, bộ slide, nhận xét, sơ đồ, trang web, co-design
 │   ├── mcp.py          # Mock MCP: danh bạ, Jira, kiến trúc, lịch sử họp
 │   ├── db.py           # MongoDB (hoặc in-memory khi MEETING_DB=mock)
@@ -172,7 +203,7 @@ meeting-assistant/
 └── static/
 ```
 
-## 6. Chạy
+## 7. Chạy
 
 ```powershell
 cd "C:\work\cralwer with ai\ASR\meeting-assistant"
@@ -203,7 +234,7 @@ màu riêng -> bấm **Đặt tên** (hoặc xác nhận gợi ý của AI, tick
 Trình bày: nhờ trợ lý soạn slide (hoặc chọn tab **Slide**) -> bấm biểu tượng toàn màn hình ở khung AI ->
 nói "<tên gọi> ơi, chuyển slide", "nhắc bài"... Cần giọng Tiếng Việt cài trên Windows để trợ lý nói thành tiếng.
 
-## 7. Cấu hình
+## 8. Cấu hình
 
 Xem `.env.example`. Các biến quan trọng:
 
@@ -221,7 +252,7 @@ Xem `.env.example`. Các biến quan trọng:
 | `TTS_SPEED` | `1.05` | Tốc độ đọc |
 | `TTS_MODEL_DIR` | | Đường dẫn thư mục giọng đọc nếu để ngoài `models/tts/` |
 
-## 8. API chính
+## 9. API chính
 
 | Method | Đường dẫn | Mô tả |
 |---|---|---|
@@ -237,7 +268,7 @@ Xem `.env.example`. Các biến quan trọng:
 | POST | `/api/meetings/{id}/segments/{seq}/split-after` | Từ câu này trở đi là người nói mới |
 | GET / POST | `/api/tts/status`, `/api/tts` | Trạng thái giọng đọc / đọc văn bản thành WAV (chạy trên máy) |
 | POST | `/api/meetings/{id}/command` | Câu lệnh cho trợ lý, xử lý như khi gọi bằng giọng nói; trả về danh sách sự kiện |
-| POST | `/api/meetings/{id}/stage` | Điều khiển màn hình trình chiếu: `show`, `next`, `prev`, `goto`, `topic`, `back` |
+| POST | `/api/meetings/{id}/stage` | Điều khiển màn hình trình chiếu: `show`, `next`, `prev`, `goto`, `topic`, `back`, `follow` (kèm `follow: true/false`) |
 | POST | `/api/meetings/{id}/insights` | Trợ lý nêu nhận xét về cuộc họp |
 | POST | `/api/meetings/{id}/co-design` | Sửa một sản phẩm AI (slide đang chiếu được ưu tiên) |
 | GET/PUT | `/api/settings/assistant` | Tên gọi trợ lý và các tên gọi khác |
@@ -246,7 +277,7 @@ Xem `.env.example`. Các biến quan trọng:
 | WS | `/ws/meeting/{id}/audio` | PCM16 16kHz mono từ mic (một thiết bị ghi mỗi cuộc họp) |
 | WS | `/ws/meeting/{id}/events` | Sự kiện: `segment`, `segments_relabeled`, `speakers`, `speakers_split`, `interim`, `identity_suggestion`, `ai_progress`, `ai_say`, `ai_insights`, `stage_state`, `stage_command`, `stage_prompt`... |
 
-## 9. Lưu ý dữ liệu
+## 10. Lưu ý dữ liệu
 
 - Bộ test của bản 2.5 ghi vector **ngẫu nhiên** vào DB thật (hồ sơ có `consent_by` = `system_admin` hoặc
   `meeting_host`, 1-2 mẫu). Nếu từng chạy các test đó, hãy rà trang **Hồ sơ giọng nói**, xóa hồ sơ không đúng

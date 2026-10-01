@@ -328,6 +328,10 @@ class MeetingSpeakers:
     # Đo trên 3 cuộc họp thật có người nói trực tiếp + podcast phát qua loa: đúng 82% -> 87% câu,
     # không đổi kết quả ở các cuộc họp khác (#15, #26, #30).
     MAX_W = 8.0                # Trọng số tối đa của một câu khi cộng vào centroid
+    # Soniox dùng lại một nhãn cho nhiều người (podcast phát qua loa + người trong phòng). Câu quá ngắn không có
+    # vector thì theo NGƯỜI VỪA ĐƯỢC XÁC ĐỊNH BẰNG GIỌNG gần nhất của nhãn đó, không theo tổng phiếu cả buổi.
+    RECENT_LABEL_S = 60.0      # ... nếu câu có vector đó cách không quá ngần này giây
+    BACKFILL_S = 20.0          # Câu có vector vừa xác định người nói -> các câu ngắn cùng nhãn ngay trước đó theo luôn
     MAX_HISTORY = 2000         # Số câu tối đa giữ trong RAM
 
     def __init__(self, anchors: Optional[Dict[int, Dict[str, Any]]] = None,
@@ -350,6 +354,7 @@ class MeetingSpeakers:
         self.epoch_fresh: Dict[Tuple[str, int], bool] = {}
         # Câu ngắn của nhãn Soniox chưa xác định trong phiên "fresh": gán tạm, chờ câu có vector để chốt
         self.pending_raw: Dict[Tuple[str, int, str], List[Any]] = {}
+        self._now = 0.0                      # thời điểm (giây) của câu đang xử lý
 
     # ------------------------------------------------------------- anchors ---
     def update_anchors(self, new_anchors: Dict[int, Dict[str, Any]], rebind: bool = True):
@@ -457,6 +462,9 @@ class MeetingSpeakers:
         mapped = self._mapped_sid(rk)
         fresh = self._is_fresh(rk)
         if v is None:
+            recent = self._recent_voice_sid(rk)
+            if recent is not None:
+                return recent, "soniox_recent"
             if mapped is not None:
                 return mapped, "soniox"
             if rk is not None and fresh:
@@ -531,6 +539,7 @@ class MeetingSpeakers:
         raw = None if raw_label is None or str(raw_label) in ("", "None") else str(raw_label)
         rk = self._rkey(stream, epoch, raw)
         before = {s["key"]: self._label_of(s) for s in self.segs}
+        self._now = float(t)
 
         sid, reason = self._decide(v, w, rk)
         p = self.profile(sid) if sid is not None else None
@@ -561,6 +570,8 @@ class MeetingSpeakers:
                         self._attach(s, p)
                     if s is not None:
                         self._vote(rk, p.sid, 0.3)
+        if v is not None and rk is not None:
+            self._backfill_short(seg, p)
         self.last_sid = p.sid
         log.debug("meeting.voice: seg %s raw=%s -> %s (%s)", key, raw, p.label, reason)
 
@@ -640,6 +651,35 @@ class MeetingSpeakers:
         log.info("meeting.voice: hồ sơ %d khớp mẫu giọng '%s' (cos=%.2f)", p.sid, p.name, best)
 
     # -------------------------------------------------------------- split ---
+    def _recent_voice_sid(self, rk) -> Optional[int]:
+        """Hồ sơ của câu có vector gần nhất mang nhãn Soniox rk (trong RECENT_LABEL_S giây)."""
+        if rk is None:
+            return None
+        for s in reversed(self.segs):
+            if self._now - s["t"] > self.RECENT_LABEL_S:
+                return None
+            if s["rk"] == rk and s["v"] is not None:
+                prof = self.profile(s["sid"])
+                return prof.sid if prof is not None else None
+        return None
+
+    def _backfill_short(self, seg: Dict[str, Any], p: "SpeakerProfile") -> None:
+        """Câu có vector vừa xác định là người p: các câu ngắn liền trước cùng nhãn Soniox (đã gán theo nhãn,
+        chưa có giọng) là cùng một lượt nói -> chuyển sang p."""
+        for s in reversed(self.segs[:-1]):
+            if s["rk"] != seg["rk"] or seg["t"] - s["t"] > self.BACKFILL_S:
+                return
+            if s["v"] is not None or s["reason"] not in ("soniox", "soniox_recent"):
+                return
+            old = self.profile(s["sid"])
+            if old is not None and old is not p:
+                self._detach(s, old)
+                votes = self.raw_votes.get(s["rk"], {})
+                votes[old.sid] = max(0.0, votes.get(old.sid, 0.0) - 0.5)
+                s["sid"] = p.sid
+                self._attach(s, p)
+                self._vote(s["rk"], p.sid, 0.5)
+
     @staticmethod
     def _vote_w(seg: Dict[str, Any]) -> float:
         return max(seg["w"], 0.3) if seg["w"] > 0 else 0.5

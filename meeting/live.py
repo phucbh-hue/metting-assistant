@@ -18,12 +18,13 @@ import logging
 import os
 import re
 import time
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from collections import deque
+from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import websockets
 
-from meeting import artifacts, db, identity, llm, voice
+from meeting import artifacts, db, follow, identity, llm, voice
 
 log = logging.getLogger("meeting.live")
 
@@ -34,6 +35,16 @@ SHORT_SEG_S = 1.2               # Câu ngắn hơn ngần này (hoặc dưới 3
 SHORT_JOIN_GAP_S = 2.5          # ... nếu cùng người nói tiếp trong vòng ngần này giây
 SHORT_HOLD_S = 2.5              # Chờ tối đa (giây thực) trước khi chốt câu ngắn
 WAKE_FOLLOWUP_S = 8.0           # Chỉ gọi tên trợ lý rồi ngừng: chờ câu yêu cầu trong ngần này giây
+# Lời gọi chưa nói hết câu (Soniox cắt ở chỗ ngập ngừng: "Thanh ơi, em hãy" | "tổng kết cuộc họp..."):
+# chờ người đó nói tiếp, ngừng nói (không còn chữ tạm) ngần này giây thì mới xử lý cả câu
+CMD_SETTLE_S = 1.2
+AUTO_CONFIRM_S = 10.0           # Slide vừa tự chuyển theo lời nói: "chuyển slide" trong ngần này giây = xác nhận, không nhảy thêm
+CMD_MAX_WAIT_S = 15.0
+_SENTENCE_END = re.compile(r"[.?!…]\W*$")
+# Câu dừng ở những từ này chắc chắn chưa nói xong ("em hãy", "tạo một cái", "chuyển sang")
+_UNFINISHED_TAIL = {"hãy", "giúp", "cho", "một", "cái", "các", "những", "về", "là", "của", "và", "với", "để", "thì",
+                    "mà", "tạo", "làm", "vẽ", "lập", "viết", "dựng", "xem", "sang", "tới", "đến", "qua", "thêm", "này"}
+
 MAX_SEGMENT_S = 20.0            # Câu dài hơn: cắt tại dấu câu để transcript cập nhật đều
 AUDIO_KEEP_S = 180              # Giữ tối đa ngần này giây audio để cắt clip / phát lại
 REPLAY_MAX_S = 15.0             # Tối đa số giây audio phát lại sau khi nối lại Soniox
@@ -44,6 +55,11 @@ AUTO_ENROLL_AI = os.getenv("AUTO_ENROLL_VOICES", "0").strip().lower() in ("1", "
 SESSIONS: Dict[int, "MeetingSession"] = {}
 LIVE_MEETINGS = SESSIONS        # Tên cũ (tương thích)
 _session_locks: Dict[int, asyncio.Lock] = {}
+
+
+def _unfinished(command: str) -> bool:
+    words = re.findall(r"\w+", (command or "").lower())
+    return len(words) < 3 or words[-1] in _UNFINISHED_TAIL
 
 
 # ==============================================================================
@@ -357,6 +373,8 @@ class MeetingStream:
             return
         self._last_interim = key
         prof = self.session.speakers.peek(raw, epoch, self.name) if raw is not None else None
+        if text:
+            self.session.note_interim()
         await self.session.emit({
             "type": "interim", "stream": self.name, "text": text,
             "speaker_key": prof.sid if prof else None,
@@ -478,9 +496,15 @@ class MeetingSession:
         self._epoch = max([int(s.get("epoch") or 0) for s in segments] + [-1]) + 1
         self._pending_enroll: Dict[int, Dict[str, Any]] = {}
         self._pending_wake: Optional[Dict[str, Any]] = None
+        self._pending_cmd: Optional[Dict[str, Any]] = None   # lời gọi trợ lý đang chờ nói hết câu
+        self._speech_at = 0.0                                  # lần cuối chữ tạm (interim) thay đổi
         self._lock = asyncio.Lock()
         # Màn hình trình bày: nội dung đang chiếu, slide hiện tại, lịch sử để "quay lại phần trước"
-        self.stage: Dict[str, Any] = {"artifact_id": None, "slide": 0, "history": [], "shown_at_seq": 0}
+        self.stage: Dict[str, Any] = {"artifact_id": None, "slide": 0, "history": [], "shown_at_seq": 0,
+                                      "follow": True, "changed_at": 0.0, "manual_at": 0.0, "auto_at": 0.0}
+        self._follower = follow.SlideFollower()     # tự chuyển slide theo lời trình bày
+        self._matchers: Dict[int, Any] = {}          # artifact_id -> (slides, SlideMatcher)
+        self._follow_texts: Deque[str] = deque(maxlen=2)
         self._art_cache: Dict[int, Dict[str, Any]] = {}
         self._queue: asyncio.Queue = asyncio.Queue()
         self._db_queue: asyncio.Queue = asyncio.Queue()
@@ -657,18 +681,43 @@ class MeetingSession:
         await self._sync_speakers()
 
         await self._check_wake(seg)
+        await self._follow_slide(seg)
         self.identity.notify(seg)
 
+    def note_interim(self):
+        self._speech_at = time.monotonic()
+
     async def _check_wake(self, seg: Dict[str, Any]):
-        """Phát hiện lời gọi trợ lý. Chỉ gọi tên rồi ngừng ("Jarvis ơi.") -> chờ câu yêu cầu tiếp theo."""
+        """Phát hiện lời gọi trợ lý.
+
+        - Câu gọi đã trọn ("Jarvis ơi, tóm tắt giúp anh.") -> xử lý ngay.
+        - Câu gọi bị cắt giữa chừng ("Jarvis ơi, em hãy") -> chờ người đó nói nốt rồi xử lý cả câu.
+        - Chỉ gọi tên rồi ngừng ("Jarvis ơi.") -> chờ câu yêu cầu tiếp theo."""
         text, now = seg["text"], time.monotonic()
+        pc = self._pending_cmd
+        if pc is not None:
+            if seg["speaker_key"] == pc["sid"] or (pc["raw"] is not None and seg.get("raw_speaker") == pc["raw"]):
+                pc["parts"].append(text)
+                pc["last"] = now
+                if _SENTENCE_END.search(text):
+                    self._release_cmd(pc)
+                return
+            if not _unfinished(" ".join(pc["parts"])):
+                self._release_cmd(pc)      # người khác nói tiếp: lời gọi trước coi như đã xong
         wake = llm.detect_wake_word(text)
         if wake:
             name, command = wake
-            if len(re.findall(r"\w+", command)) >= 2:
+            n_words = len(re.findall(r"\w+", command))
+            if n_words >= 2 and _SENTENCE_END.search(text):
                 self._pending_wake = None
                 log.info("meeting.live: gọi trợ lý '%s' với yêu cầu '%s'", name, command)
                 asyncio.create_task(self._handle_ai_activation(command, text, name))
+            elif n_words >= 1:
+                self._pending_wake = None
+                self._pending_cmd = {"name": name, "parts": [command], "first": text, "sid": seg["speaker_key"],
+                                     "raw": seg.get("raw_speaker"), "start": now, "last": now, "token": object()}
+                await self.emit({"type": "ai_listening", "name": name, "sid": seg["speaker_key"]})
+                asyncio.create_task(self._settle_cmd(self._pending_cmd["token"]))
             else:
                 token = object()
                 self._pending_wake = {"name": name, "until": now + WAKE_FOLLOWUP_S, "token": token}
@@ -678,7 +727,34 @@ class MeetingSession:
         pw = self._pending_wake
         if pw is not None and now <= pw["until"] and re.search(r"\w", text):
             self._pending_wake = None
-            asyncio.create_task(self._handle_ai_activation(text, text, pw["name"]))
+            if _SENTENCE_END.search(text):
+                asyncio.create_task(self._handle_ai_activation(text, text, pw["name"]))
+            else:                              # câu yêu cầu cũng có thể bị cắt giữa chừng: chờ nói nốt
+                self._pending_cmd = {"name": pw["name"], "parts": [text], "first": text, "sid": seg["speaker_key"],
+                                     "raw": seg.get("raw_speaker"), "start": now, "last": now, "token": object()}
+                asyncio.create_task(self._settle_cmd(self._pending_cmd["token"]))
+
+    def _release_cmd(self, pc: Dict[str, Any]):
+        """Người gọi đã nói hết câu: ghép các đoạn và xử lý một lần."""
+        if self._pending_cmd is not pc:
+            return
+        self._pending_cmd = None
+        command = re.sub(r"\s+", " ", " ".join(pc["parts"])).strip()
+        full = re.sub(r"\s+", " ", " ".join([pc["first"]] + pc["parts"][1:])).strip()
+        log.info("meeting.live: gọi trợ lý '%s' với yêu cầu '%s'", pc["name"], command)
+        asyncio.create_task(self._handle_ai_activation(command, full, pc["name"]))
+
+    async def _settle_cmd(self, token: object):
+        while True:
+            await asyncio.sleep(0.2)
+            pc = self._pending_cmd
+            if pc is None or pc["token"] is not token:
+                return
+            now = time.monotonic()
+            idle = now - max(pc["last"], self._speech_at)
+            if idle >= CMD_SETTLE_S or now - pc["start"] >= CMD_MAX_WAIT_S:
+                self._release_cmd(pc)
+                return
 
     async def _expire_wake(self, token: object):
         await asyncio.sleep(WAKE_FOLLOWUP_S + 0.5)
@@ -966,12 +1042,12 @@ class MeetingSession:
             await self.emit({"type": "ai_error", "text": f"Trợ lý AI lỗi: {e}"})
 
     # ------------------------------------------------- màn hình trình bày ---
-    STAGE_ACTIONS = ("show", "next", "prev", "goto", "topic", "back")
+    STAGE_ACTIONS = ("show", "next", "prev", "goto", "topic", "back", "follow")
 
     def stage_public(self) -> Dict[str, Any]:
         st = self.stage
         return {"artifact_id": st["artifact_id"], "slide": st["slide"], "can_back": bool(st["history"]),
-                "shown_at_seq": st["shown_at_seq"]}
+                "shown_at_seq": st["shown_at_seq"], "follow": bool(st["follow"])}
 
     async def _get_artifact(self, aid: Optional[int]) -> Optional[Dict[str, Any]]:
         if aid is None:
@@ -1002,11 +1078,16 @@ class MeetingSession:
         return best if best_score >= 0.5 else None
 
     async def stage_action(self, action: str, artifact_id: Optional[int] = None, slide: Optional[int] = None,
-                           query: Optional[str] = None) -> Dict[str, Any]:
-        """Điều khiển màn hình trình bày: show (đưa nội dung lên), next/prev/goto/topic (chuyển slide), back."""
+                           query: Optional[str] = None, follow: Optional[bool] = None,
+                           auto: bool = False) -> Dict[str, Any]:
+        """Điều khiển màn hình trình bày: show (đưa nội dung lên), next/prev/goto/topic (chuyển slide), back,
+        follow (bật/tắt tự chuyển slide theo lời trình bày). auto=True: do hệ thống tự chuyển theo lời nói."""
         st = self.stage
         before = (st["artifact_id"], st["slide"])
-        if action == "show":
+        if action == "follow":
+            st["follow"] = bool(follow) if follow is not None else not st["follow"]
+            self._follower.pending = None
+        elif action == "show":
             art = await self._get_artifact(artifact_id)
             if art is None:
                 raise KeyError(f"Không tìm thấy nội dung {artifact_id}")
@@ -1034,8 +1115,41 @@ class MeetingSession:
                     st["slide"] = idx
         if (st["artifact_id"], st["slide"]) != before:
             st["shown_at_seq"] = self.next_seq - 1
-        await self.emit({"type": "stage_state", "stage": self.stage_public()})
+            st["changed_at"] = time.monotonic()
+            st["auto_at" if auto else "manual_at"] = st["changed_at"]
+            self._follow_texts.clear()
+        await self.emit({"type": "stage_state", "stage": self.stage_public(), "auto": auto})
         return self.stage_public()
+
+    def _deck_matcher(self) -> Optional[Any]:
+        art = self._art_cache.get(self.stage["artifact_id"]) if self.stage["artifact_id"] is not None else None
+        if not art or art.get("kind") != "slides":
+            return None
+        if art["id"] not in self._matchers:
+            slides = self._slides_of(art)
+            self._matchers[art["id"]] = (slides, follow.SlideMatcher(slides)) if len(slides) > 1 else None
+        return self._matchers[art["id"]]
+
+    async def _follow_slide(self, seg: Dict[str, Any]):
+        """Đang chiếu bộ slide: lời trình bày chuyển sang ý của slide khác thì tự chuyển slide theo."""
+        st = self.stage
+        if not st["follow"] or not re.search(r"\w", seg.get("text") or ""):
+            return
+        if self._pending_cmd is not None or llm.detect_wake_word(seg["text"]):
+            return                                   # câu gọi trợ lý, không phải lời trình bày
+        deck = self._deck_matcher()
+        if deck is None:
+            return
+        slides, matcher = deck
+        self._follow_texts.append(seg["text"])
+        # So bằng câu vừa nói (câu trước còn nói về slide cũ sẽ níu lại); câu quá ngắn thì ghép với câu trước
+        spoken = seg["text"] if len(follow.tokens(seg["text"])) >= 6 else " ".join(self._follow_texts)
+        idx = self._follower.decide(matcher.scores(spoken), st["slide"], time.monotonic(),
+                                    st["changed_at"], st["manual_at"])
+        if idx is None:
+            return
+        await self.stage_action("goto", slide=idx, auto=True)
+        await self._say(f"Theo lời trình bày: slide {idx + 1} - {slides[idx]['title']}.", quiet=True)
 
     async def _progress(self, text: str, kind: str = "progress"):
         """Trợ lý báo tiến độ bằng lời trong lúc xử lý (không kết thúc lượt trả lời)."""
@@ -1059,9 +1173,23 @@ class MeetingSession:
         if action == "prompt":
             await self.emit({"type": "stage_prompt"})
             return True
+        if action in ("follow_on", "follow_off"):
+            await self.stage_action("follow", follow=action == "follow_on")
+            await self._say("Dạ, em sẽ tự chuyển slide theo nội dung anh chị đang trình bày." if action == "follow_on"
+                            else "Dạ, em tắt tự chuyển slide, anh chị chuyển bằng lời hoặc phím mũi tên nhé.")
+            return True
         if action == "analyze":
             await self.analyze_now()
             return True
+        if action == "next" and time.monotonic() - self.stage["auto_at"] < AUTO_CONFIRM_S:
+            # Slide vừa tự chuyển theo lời nói; người trình bày bảo "chuyển slide" là muốn đúng slide này
+            self.stage["auto_at"] = 0.0
+            self.stage["manual_at"] = time.monotonic()
+            slides = self._slides_of(await self._get_artifact(self.stage["artifact_id"]))
+            if slides:
+                i = self.stage["slide"]
+                await self._say(f"Đang ở slide {i + 1}: {slides[i]['title']} rồi ạ.", quiet=True)
+                return True
         if self.stage["artifact_id"] is None:
             if action == "topic":
                 return False

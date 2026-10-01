@@ -143,6 +143,9 @@ _SLIDE = r"(?:slide|slides|slai|xlai|trang)"
 _NUM_WORDS = {"một": 1, "hai": 2, "ba": 3, "bốn": 4, "tư": 4, "năm": 5, "sáu": 6, "bảy": 7, "tám": 8,
               "chín": 9, "mười": 10}
 _STAGE_PATTERNS = [
+    ("follow_off", re.compile(r"(tắt|ngừng|dừng|đừng|không|thôi)\s*(chế độ\s*)?(tự\s*(động\s*)?|tự\s*ý\s*)"
+                              r"(chuyển|lật|theo|đổi)", re.I)),
+    ("follow_on", re.compile(r"(bật|mở|cho)\s*(chế độ\s*)?tự\s*(động\s*)?(chuyển|lật|theo|đổi)", re.I)),
     ("open", re.compile(r"(mở|bật|vào|chuyển sang)\s*(chế độ\s*|màn hình\s*|màn\s*)?(toàn màn hình|sân khấu|trình chiếu|trình bày)"
                         r"|phóng to", re.I)),
     ("close", re.compile(r"(thoát|tắt|đóng)\s*(chế độ\s*|màn hình\s*|màn\s*)?(toàn màn hình|sân khấu|trình chiếu|trình bày)"
