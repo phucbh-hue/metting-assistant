@@ -1,0 +1,2104 @@
+<!DOCTYPE html>
+<html lang="vi" class="h-full bg-black text-slate-100">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Meeting Assistant AI — Autonomous Meeting Copilot</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%234ade80'%3E%3Cpath d='M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z'/%3E%3Cpath d='M19 10v2a7 7 0 0 1-14 0v-2' stroke='%234ade80' stroke-width='2' stroke-linecap='round' fill='none'/%3E%3Cline x1='12' y1='19' x2='12' y2='22' stroke='%234ade80' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+
+  <!-- Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS & Mermaid.js -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            lime: {
+              400: '#a3e635',
+              500: '#84cc16',
+            },
+            emerald: {
+              400: '#34d399',
+              500: '#10b981',
+              950: '#022c22'
+            }
+          }
+        }
+      }
+    };
+    mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+  </script>
+
+  <style>
+    /* Force true dark */
+    html, body {
+      background: #090b0e !important;
+      color: #ffffff;
+      font-family: 'Inter', sans-serif;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .hidden { display: none !important; }
+
+    /* Custom scrollbars */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.4); }
+    ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(74, 222, 128, 0.4); }
+
+    /* Glassmorphism Card Style matching image.webp */
+    .glass-card {
+      background: rgba(18, 22, 28, 0.72);
+      backdrop-filter: blur(24px) saturate(190%);
+      -webkit-backdrop-filter: blur(24px) saturate(190%);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      border-radius: 20px;
+    }
+    .glass-card:hover {
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .glass-pill {
+      background: rgba(255, 255, 255, 0.07);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    }
+    .glass-pill:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.25);
+    }
+
+    /* Ambient Hero Backdrop */
+    .ambient-bg {
+      position: fixed;
+      inset: 0;
+      background-image: url('/static/wealth-bg.webp');
+      background-size: cover;
+      background-position: center top;
+      opacity: 0.38;
+      pointer-events: none;
+      z-index: 0;
+      filter: blur(1px);
+    }
+
+    .ambient-gradient {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(circle at 50% 25%, rgba(16, 185, 129, 0.08) 0%, transparent 60%),
+                  linear-gradient(to bottom, rgba(9, 11, 14, 0.3) 0%, rgba(9, 11, 14, 0.85) 60%, #090b0e 100%);
+      pointer-events: none;
+      z-index: 1;
+    }
+  </style>
+</head>
+<body class="h-full flex select-none overflow-hidden relative">
+
+  <!-- Background Imagery & Ambient Gradients -->
+  <div class="ambient-bg"></div>
+  <div class="ambient-gradient"></div>
+
+  <!-- =========================================================================
+       1. FAR-LEFT FLOATING DOCK (NAVIGATION CAPSULE)
+       ========================================================================= -->
+  <aside class="w-16 h-full flex flex-col items-center justify-between py-5 z-40 shrink-0 relative pl-2">
+    <!-- Top App Icon -->
+    <div class="flex flex-col items-center gap-4">
+      <div onclick="navigateTab('dashboard')" class="w-11 h-11 rounded-2xl bg-gradient-to-tr from-emerald-500 to-lime-400 p-0.5 shadow-lg shadow-emerald-500/25 cursor-pointer active:scale-95 transition">
+        <div class="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center font-extrabold text-white text-base">
+          <svg class="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        </div>
+      </div>
+
+      <!-- Dock Capsule -->
+      <div class="glass-pill rounded-full p-1.5 flex flex-col items-center gap-2">
+        <!-- 1. Home / Overview -->
+        <button onclick="navigateTab('dashboard')" id="dock-btn-dashboard" class="w-9 h-9 rounded-full bg-white text-black flex items-center justify-center transition shadow-md" title="Tổng quan Dashboard">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+        </button>
+
+        <!-- 2. Live Meeting Room -->
+        <button onclick="navigateTab('live')" id="dock-btn-live" class="w-9 h-9 rounded-full text-slate-400 hover:text-white hover:bg-white/10 flex items-center justify-center transition" title="Phòng Họp Trực Tiếp">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 100-6 3 3 0 000 6z"/></svg>
+        </button>
+
+        <!-- 3. Meetings Hub / Archive -->
+        <button onclick="navigateTab('meetings')" id="dock-btn-meetings" class="w-9 h-9 rounded-full text-slate-400 hover:text-white hover:bg-white/10 flex items-center justify-center transition" title="Danh Sách & Lưu Trữ Cuộc Họp">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        </button>
+
+        <!-- 4. Voice Biometrics Profiles -->
+        <button onclick="navigateTab('voices')" id="dock-btn-voices" class="w-9 h-9 rounded-full text-slate-400 hover:text-white hover:bg-white/10 flex items-center justify-center transition" title="Hồ Sơ Giọng Nói (CAM++ 192D)">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Bottom Actions -->
+    <div class="flex flex-col items-center gap-2">
+      <button onclick="openDiagnosticsModal()" class="w-9 h-9 rounded-full text-slate-400 hover:text-emerald-400 hover:bg-white/10 flex items-center justify-center transition" title="Trạng Thái Hệ Thống (Diagnostics)">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+      </button>
+      <button onclick="openVoiceStudioModal()" class="w-9 h-9 rounded-full text-purple-400 hover:bg-purple-900/30 flex items-center justify-center transition" title="Phòng Thu Mẫu Giọng (10s)">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <!-- =========================================================================
+       2. MAIN APPLICATION WORKSPACE
+       ========================================================================= -->
+  <div class="flex-1 flex flex-col h-full overflow-hidden z-20 pr-4 py-3">
+    
+    <!-- TOP APP BAR -->
+    <header class="flex items-center justify-between pb-3 px-2 shrink-0">
+      <!-- Left: Logo & Subtitle -->
+      <div class="flex items-center gap-3">
+        <div>
+          <h1 class="text-base font-bold text-white tracking-tight flex items-center gap-2">
+            Meeting Assistant
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-mono">v2.5 AI Copilot</span>
+          </h1>
+          <p class="text-[11px] text-slate-400">Autonomous Meeting Intelligence & Voice Biometrics</p>
+        </div>
+      </div>
+
+      <!-- Center Ambient Title (matching image.webp) -->
+      <div class="hidden md:flex flex-col items-center text-center">
+        <div class="flex items-center gap-1.5 text-[11px] text-slate-300 font-medium">
+          <span>Hey, Need help?</span>
+          <span class="text-sm">🙋‍♂️</span>
+        </div>
+        <div class="text-xl lg:text-2xl font-light text-white tracking-wide">
+          Just ask me anything
+        </div>
+      </div>
+
+      <!-- Right: User Profile & Quick Actions (matching image.webp) -->
+      <div class="flex items-center gap-3">
+        <!-- Date pill -->
+        <div class="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-xl glass-pill text-xs text-slate-200">
+          <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          <span id="header-date">30 Sep, 2026</span>
+        </div>
+
+        <!-- + New Meeting Button -->
+        <button onclick="openCreateMeetingModal()" class="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 text-black font-semibold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 active:scale-95 transition">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+          <span>Tạo Cuộc Họp</span>
+        </button>
+
+        <!-- User Profile Avatar Pill -->
+        <div class="flex items-center gap-2.5 pl-2 py-1 pr-3 rounded-full glass-pill">
+          <div class="w-7 h-7 rounded-full bg-gradient-to-tr from-brand-500 to-purple-600 flex items-center justify-center font-bold text-white text-xs">
+            P
+          </div>
+          <div class="text-left hidden sm:block">
+            <div class="text-xs font-bold text-white leading-tight">Bùi Hồng Phúc</div>
+            <div class="text-[10px] text-slate-400 leading-tight">CTO / Lead Architect</div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- CONTENT BODY CONTAINER -->
+    <div class="flex-1 overflow-hidden relative">
+
+      <!-- =====================================================================
+           VIEW 1: BENTO DASHBOARD (EXACT IMAGE.WEBP AESTHETIC)
+           ===================================================================== -->
+      <section id="view-dashboard" class="h-full flex flex-col gap-4 overflow-y-auto pb-4 pr-1">
+        
+        <!-- Quick Action / Filter Row -->
+        <div class="flex items-center justify-between shrink-0 px-1">
+          <div class="flex items-center gap-2">
+            <div class="relative w-64">
+              <input type="text" id="quick-jarvis-input" onkeydown="if(event.key==='Enter')askAIQuick(this.value)" placeholder="Hỏi Jarvis hoặc tìm kiếm..." class="w-full pl-8 pr-3 py-1.5 rounded-xl glass-pill text-xs text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500">
+              <svg class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            </div>
+            <button onclick="askAIQuick(document.getElementById('quick-jarvis-input').value)" class="p-1.5 rounded-xl glass-pill text-slate-300 hover:text-white" title="Gửi câu hỏi">
+              <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+            </button>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button onclick="navigateTab('meetings')" class="px-3 py-1.5 rounded-xl glass-pill text-xs text-slate-300 hover:text-white flex items-center gap-1.5 transition">
+              <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              <span>Xem Tất Cả Cuộc Họp</span>
+            </button>
+            <button onclick="openVoiceStudioModal()" class="px-3 py-1.5 rounded-xl glass-pill text-xs text-purple-300 hover:text-white flex items-center gap-1.5 transition">
+              <svg class="w-3.5 h-3.5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 100-6 3 3 0 000 6z"/></svg>
+              <span>+ Thu Mẫu Giọng</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 6-CARD BENTO GRID (MATCHING IMAGE.WEBP) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 flex-1 min-h-0">
+
+          <!-- CARD 1 (Top Left): Live Speech & Diarization (matches "Spending") -->
+          <div class="glass-card p-5 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2.5">
+                  <div class="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 100-6 3 3 0 000 6z"/></svg>
+                  </div>
+                  <div>
+                    <h3 class="text-sm font-bold text-white">Speech Stream</h3>
+                    <p class="text-[10px] text-slate-400">Soniox Token Diarization</p>
+                  </div>
+                </div>
+                <span class="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">Active</span>
+              </div>
+
+              <!-- Progress Bars -->
+              <div class="space-y-2.5 mt-2" id="dash-speaking-bars">
+                <div>
+                  <div class="flex justify-between text-[11px] text-slate-300 mb-1">
+                    <span>Bùi Hồng Phúc (Host)</span>
+                    <span class="font-mono text-emerald-400">70%</span>
+                  </div>
+                  <div class="w-full bg-white/5 rounded-full h-2 overflow-hidden">
+                    <div class="bg-gradient-to-r from-emerald-500 to-lime-400 h-2 rounded-full" style="width: 70%"></div>
+                  </div>
+                </div>
+                <div>
+                  <div class="flex justify-between text-[11px] text-slate-300 mb-1">
+                    <span>Lê Văn Tuấn (DevOps)</span>
+                    <span class="font-mono text-lime-400">20%</span>
+                  </div>
+                  <div class="w-full bg-white/5 rounded-full h-2 overflow-hidden">
+                    <div class="bg-lime-400 h-2 rounded-full" style="width: 20%"></div>
+                  </div>
+                </div>
+                <div>
+                  <div class="flex justify-between text-[11px] text-slate-300 mb-1">
+                    <span>Đỗ Minh Quân (Backend)</span>
+                    <span class="font-mono text-teal-400">10%</span>
+                  </div>
+                  <div class="w-full bg-white/5 rounded-full h-2 overflow-hidden">
+                    <div class="bg-teal-400 h-2 rounded-full" style="width: 10%"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Bottom Big Stat -->
+            <div class="mt-4 pt-3 border-t border-white/5 flex items-baseline justify-between">
+              <div>
+                <div class="text-2xl font-bold text-white font-mono tracking-tight" id="dash-total-utterances">72</div>
+                <div class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
+                  <svg class="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
+                  <span>Câu Thoại Thu Được (Live Segments)</span>
+                </div>
+              </div>
+              <button onclick="navigateTab('live')" class="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-medium">
+                <span>Vào phòng</span>
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- CARD 2 (Top Center 1): Voice Memory & Accuracy -->
+          <div class="glass-card p-5 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2.5">
+                  <div class="w-9 h-9 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4"/></svg>
+                  </div>
+                  <div>
+                    <h3 class="text-sm font-bold text-white">Voice Biometrics</h3>
+                    <p class="text-[10px] text-slate-400">Độ Nhận Diện CAM++ 192D</p>
+                  </div>
+                </div>
+                <span class="text-[10px] text-slate-400 font-mono">Realtime DB</span>
+              </div>
+
+              <!-- Bar Chart Columns -->
+              <div class="flex items-end justify-center gap-5 h-24 my-2">
+                <div class="flex flex-col items-center gap-1.5">
+                  <div class="w-8 rounded-lg bg-emerald-500/40 h-10"></div>
+                  <span class="text-[10px] text-slate-300 font-mono" id="dash-bar1-lbl">10 Mtgs</span>
+                </div>
+                <div class="flex flex-col items-center gap-1.5">
+                  <div class="w-8 rounded-lg bg-emerald-500/70 h-16"></div>
+                  <span class="text-[10px] text-slate-300 font-mono" id="dash-bar2-lbl">2 Spks</span>
+                </div>
+                <div class="flex flex-col items-center gap-1.5">
+                  <div class="w-8 rounded-lg bg-gradient-to-t from-emerald-500 to-lime-400 h-22"></div>
+                  <span class="text-[10px] text-slate-200 font-mono font-bold" id="dash-bar3-lbl">98.0%</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-3 pt-3 border-t border-white/5 flex items-baseline justify-between">
+              <div>
+                <div class="text-2xl font-bold text-white font-mono tracking-tight" id="dash-precision-val">98.0%</div>
+                <div class="text-[10px] text-emerald-400 flex items-center gap-0.5 mt-0.5">
+                  <span>↑ Độ chính xác nhận diện giọng</span>
+                </div>
+              </div>
+              <button onclick="navigateTab('voices')" class="text-xs text-purple-400 hover:text-purple-300 flex items-center gap-1 font-medium">
+                <span>Hồ sơ</span>
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- CARD 3 (Top Center 2): Sprint Decisions -->
+          <div class="glass-card p-5 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2.5">
+                  <div class="w-9 h-9 rounded-xl bg-lime-500/10 border border-lime-500/20 flex items-center justify-center text-lime-400">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"/></svg>
+                  </div>
+                  <div>
+                    <h3 class="text-sm font-bold text-white">Sprint Decisions</h3>
+                    <p class="text-[10px] text-slate-400">Jira Sprint 38 Backlog</p>
+                  </div>
+                </div>
+                <span class="text-[10px] text-slate-400 font-mono">Sprint 38</span>
+              </div>
+
+              <!-- Segmented Horizontal Bar -->
+              <div class="w-full h-4 rounded-full bg-white/5 flex overflow-hidden my-4 p-0.5 gap-0.5">
+                <div id="dash-tasks-seg-done" class="bg-gradient-to-r from-lime-400 to-emerald-400 h-full rounded-l-full transition-all duration-500" style="width: 20%"></div>
+                <div id="dash-tasks-seg-review" class="bg-emerald-600 h-full transition-all duration-500" style="width: 60%"></div>
+                <div id="dash-tasks-seg-todo" class="bg-slate-700 h-full rounded-r-full transition-all duration-500" style="width: 20%"></div>
+              </div>
+
+              <div class="grid grid-cols-3 gap-2 text-center text-[10px] text-slate-300 mb-2">
+                <div>
+                  <div class="text-white font-bold font-mono" id="dash-tasks-pct-done">0%</div>
+                  <div>Done</div>
+                </div>
+                <div>
+                  <div class="text-white font-bold font-mono" id="dash-tasks-pct-review">67%</div>
+                  <div>In Review</div>
+                </div>
+                <div>
+                  <div class="text-white font-bold font-mono" id="dash-tasks-pct-todo">33%</div>
+                  <div>To Do</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-3 pt-3 border-t border-white/5 flex items-baseline justify-between">
+              <div>
+                <div class="text-2xl font-bold text-white font-mono tracking-tight" id="dash-tasks-val">6 Tasks</div>
+                <div class="text-[10px] text-emerald-400 flex items-center gap-0.5 mt-0.5">
+                  <span>↑ Đã đồng bộ với Jira MCP</span>
+                </div>
+              </div>
+              <button onclick="askAIQuick('Jarvis, tóm tắt các action items sprint 38')" class="text-xs text-lime-400 hover:text-lime-300 flex items-center gap-1 font-medium">
+                <span>Tra Jira</span>
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- CARD 4 (Far Right Tall Card): AI Co-Pilot Canvas -->
+          <div class="glass-card p-5 row-span-2 flex flex-col justify-between">
+            <div>
+              <!-- Micro Icon Row -->
+              <div class="flex items-center justify-between pb-3 border-b border-white/10 text-slate-400">
+                <div class="flex items-center gap-3">
+                  <button onclick="switchTab('web'); navigateTab('live')" class="hover:text-emerald-400 transition" title="Web Sandbox">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                  </button>
+                  <button onclick="switchTab('diagram'); navigateTab('live')" class="hover:text-purple-400 transition" title="Diagram Sơ Đồ">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/></svg>
+                  </button>
+                  <button onclick="switchTab('minutes'); navigateTab('live')" class="hover:text-amber-400 transition" title="Biên Bản Họp">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                  </button>
+                  <button onclick="switchTab('thinking'); navigateTab('live')" class="hover:text-emerald-400 transition" title="Thinking & MCP">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                  </button>
+                </div>
+                <span class="text-[10px] text-emerald-400 font-mono font-semibold">● LIVE CO-PILOT</span>
+              </div>
+
+              <!-- Circular Growth Ring Meter -->
+              <div class="flex flex-col items-center justify-center my-4">
+                <div class="text-xs text-slate-400 mb-2 font-medium">Meeting Intelligence</div>
+                <div class="relative w-36 h-36 flex items-center justify-center">
+                  <svg class="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="40" stroke="rgba(255,255,255,0.08)" stroke-width="9" fill="none"/>
+                    <circle id="dash-ring-circle" cx="50" cy="50" r="40" stroke="url(#growthGradient)" stroke-width="9" stroke-dasharray="251.2" stroke-dashoffset="65" stroke-linecap="round" fill="none" class="transition-all duration-700"/>
+                    <defs>
+                      <linearGradient id="growthGradient" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0%" stop-color="#34d399"/>
+                        <stop offset="100%" stop-color="#a3e635"/>
+                      </linearGradient>
+                    </defs>
+                  </svg>
+                  <div class="absolute inset-0 flex flex-col items-center justify-center">
+                    <span class="text-3xl font-extrabold text-white font-mono tracking-tight" id="dash-ring-val">87%</span>
+                    <span class="text-[9px] text-slate-400 uppercase tracking-widest mt-0.5">INDEX</span>
+                  </div>
+                </div>
+
+                <div class="flex items-center gap-4 text-[10px] mt-2">
+                  <div class="flex items-center gap-1.5 text-emerald-400">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                    <span>Transcript</span>
+                  </div>
+                  <div class="flex items-center gap-1.5 text-lime-400">
+                    <span class="w-2 h-2 rounded-full bg-lime-400"></span>
+                    <span>AI Canvas</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Live Mini Sandbox Frame -->
+              <div class="w-full h-44 rounded-xl border border-white/10 overflow-hidden bg-black/80 relative my-2">
+                <iframe id="dashboard-mini-sandbox" class="w-full h-full border-none pointer-events-none transform scale-90" srcdoc="<html style='background:#000;color:#fff;display:flex;align-items:center;justify-content:center;font-family:sans-serif;'><body style='margin:0;padding:20px;text-align:center;'><div><div style='font-size:18px;font-weight:bold;color:#4ade80;'>Web Sandbox Live</div><div style='font-size:11px;color:#9ca3af;margin-top:6px;'>Ready to render landing pages & dashboards on demand.</div></div></body></html>"></iframe>
+                <div class="absolute bottom-2 right-2 flex gap-1">
+                  <button onclick="navigateTab('live'); switchTab('web');" class="px-2 py-1 rounded bg-white/20 hover:bg-white/30 text-[10px] text-white backdrop-blur font-medium transition">
+                    Phóng To ↗
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-2 pt-3 border-t border-white/5">
+              <div class="text-xs font-bold text-white mb-0.5">Balanced AI Co-Design</div>
+              <div class="text-[10px] text-slate-400">Overall Autonomous Health & Workflow Automation</div>
+            </div>
+          </div>
+
+          <!-- CARD 5 (Bottom Left): Meeting Score -->
+          <div class="glass-card p-5 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="text-sm font-bold text-white">Meeting Health</h3>
+                <div class="flex items-baseline gap-1 text-right">
+                  <span class="text-2xl font-extrabold text-white font-mono" id="dash-health-val">88</span>
+                  <span class="text-[10px] text-emerald-400 font-semibold" id="dash-health-label">Strong</span>
+                </div>
+              </div>
+              <p class="text-[10px] text-slate-400">+5 điểm so với trung bình tuần</p>
+
+              <!-- Green Glowing Dots -->
+              <div class="flex items-center gap-1.5 my-4" id="dash-health-dots">
+                <div class="flex-1 h-3 rounded-md bg-emerald-500"></div>
+                <div class="flex-1 h-3 rounded-md bg-emerald-500"></div>
+                <div class="flex-1 h-3 rounded-md bg-emerald-500"></div>
+                <div class="flex-1 h-3 rounded-md bg-emerald-500"></div>
+                <div class="flex-1 h-3 rounded-md bg-emerald-500"></div>
+                <div class="flex-1 h-3 rounded-md bg-lime-400"></div>
+                <div class="flex-1 h-3 rounded-md bg-lime-400/80"></div>
+                <div class="flex-1 h-3 rounded-md bg-white/10"></div>
+              </div>
+            </div>
+
+            <div class="pt-3 border-t border-white/5 flex items-center justify-between text-xs">
+              <div>
+                <span class="text-[10px] text-slate-400 block">Thời Lượng TB</span>
+                <span class="font-bold text-white font-mono" id="dash-health-dur">42m</span>
+              </div>
+              <div class="text-right">
+                <span class="text-[10px] text-slate-400 block">Mức Tương Tác</span>
+                <span class="font-bold text-emerald-400 font-mono" id="dash-health-eng">90%</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- CARD 6 (Bottom Center): Live Transcript & Context Feed -->
+          <div class="glass-card p-5 col-span-1 md:col-span-2 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                  <h3 class="text-sm font-bold text-white">Live Transcript Feed</h3>
+                  <span class="px-2 py-0.5 rounded text-[9px] font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-mono">Auto 1-Click Rename</span>
+                </div>
+                <div class="flex items-baseline gap-1">
+                  <span class="text-xl font-bold text-white font-mono" id="dash-synthesis-val">74%</span>
+                  <span class="text-[10px] text-emerald-400 font-semibold" id="dash-synthesis-sub">Deep Synthesis</span>
+                </div>
+              </div>
+
+              <!-- In/Out Flow Progress Bars -->
+              <div class="space-y-2 my-2 text-[11px]">
+                <div class="flex items-center gap-3">
+                  <span class="w-16 text-slate-400">Lời nói</span>
+                  <div class="flex-1 bg-white/5 h-2 rounded-full overflow-hidden">
+                    <div id="dash-words-in-bar" class="bg-gradient-to-r from-emerald-500 to-lime-400 h-full rounded-full transition-all duration-500" style="width: 85%"></div>
+                  </div>
+                  <span class="font-mono text-white text-[10px]" id="dash-words-in-lbl">1,580 w</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="w-16 text-slate-400">Biên bản</span>
+                  <div class="flex-1 bg-white/5 h-2 rounded-full overflow-hidden">
+                    <div id="dash-words-out-bar" class="bg-lime-400 h-full rounded-full transition-all duration-500" style="width: 45%"></div>
+                  </div>
+                  <span class="font-mono text-white text-[10px]" id="dash-words-out-lbl">1,039 w</span>
+                </div>
+              </div>
+
+              <!-- Micro Transcript Feed Preview (Real data from DB) -->
+              <div class="p-2.5 rounded-xl bg-black/40 border border-white/5 space-y-1.5 max-h-24 overflow-y-auto mt-2 text-xs" id="dashboard-transcript-mini">
+                <div class="flex items-center justify-between text-[11px] text-slate-400">
+                  <span class="font-bold text-emerald-400">Bùi Hồng Phúc:</span>
+                  <span class="font-mono text-[9px]">00:12</span>
+                </div>
+                <p class="text-slate-300 text-xs">Chào anh em, cuộc họp bắt đầu! Jarvis đã sẵn sàng hỗ trợ ghi biên bản và thiết kế UI.</p>
+              </div>
+            </div>
+
+            <div class="mt-3 pt-2.5 border-t border-white/5 flex items-center justify-between">
+              <div class="flex items-center gap-1.5 text-[11px]">
+                <button onclick="askAIQuick('Jarvis ơi, tóm tắt các quyết định cuộc họp')" class="px-2 py-0.5 rounded-lg glass-pill text-slate-300 hover:text-white text-[10px] transition">
+                  📝 Biên bản
+                </button>
+                <button onclick="askAIQuick('Jarvis, tra cứu ticket Jira')" class="px-2 py-0.5 rounded-lg glass-pill text-slate-300 hover:text-white text-[10px] transition">
+                  🔍 Jira MCP
+                </button>
+                <button onclick="askAIQuick('Jarvis, vẽ sequence diagram')" class="px-2 py-0.5 rounded-lg glass-pill text-slate-300 hover:text-white text-[10px] transition">
+                  📊 Sơ đồ
+                </button>
+              </div>
+              <button onclick="navigateTab('live')" class="btn btn-solid" style="height: 28px; padding: 0 12px; font-size: 11px;">
+                Vào Phòng Họp Ngay 🎙️
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- =====================================================================
+           VIEW 2: MEETINGS HUB (LIST & ARCHIVE)
+           ===================================================================== -->
+      <section id="view-meetings-hub" class="h-full overflow-y-auto px-6 py-4 max-w-7xl mx-auto w-full hidden">
+        <div class="flex items-center justify-between mb-4 pb-3 border-b border-white/10">
+          <div>
+            <h2 class="text-lg font-bold text-white tracking-tight">Active & Archived Meetings</h2>
+            <p class="text-xs text-slate-400 mt-0.5">Dữ liệu được lưu trữ độc lập trên MongoDB Atlas Cloud cluster.</p>
+          </div>
+          <button onclick="openCreateMeetingModal()" class="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 text-black font-semibold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 active:scale-95 transition">
+            + Tạo Cuộc Họp Mới
+          </button>
+        </div>
+
+        <!-- Meeting Grid Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="meetings-grid-container">
+          <!-- Rendered dynamically -->
+        </div>
+      </section>
+
+      <!-- =====================================================================
+           VIEW 3: VOICE BIOMETRICS DIRECTORY
+           ===================================================================== -->
+      <section id="view-voices-directory" class="h-full overflow-y-auto px-6 py-4 max-w-7xl mx-auto w-full hidden">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4 pb-3 border-b border-white/10">
+          <div>
+            <h2 class="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+              <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+              Hồ Sơ Giọng Nói & Sinh Trắc Học (Voice Profiles)
+            </h2>
+            <p class="text-xs text-slate-400 mt-0.5">Lưu trữ vector đặc trưng CAM++ 192D trên MongoDB Atlas Cloud (`voices`), tuân thủ NĐ 13/2023.</p>
+          </div>
+          <button onclick="openVoiceStudioModal()" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs flex items-center gap-1.5 shadow-lg shadow-purple-500/20 active:scale-95 transition">
+            🎙️ Thu Mẫu Giọng Mới
+          </button>
+        </div>
+
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4 text-xs text-slate-400">
+          <span id="voices-count-badge" class="font-mono text-purple-300">Đang tải hồ sơ giọng nói...</span>
+          <div class="relative w-full sm:w-72">
+            <input type="text" id="voices-search-input" oninput="searchVoices(this.value)" placeholder="Tìm kiếm theo tên, chức vụ, email..." class="w-full px-3 py-1.5 rounded-lg bg-white/5 border border-white/15 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-400">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="voices-grid-container">
+          <!-- Rendered dynamically -->
+        </div>
+      </section>
+
+      <!-- =====================================================================
+           VIEW 4: LIVE WORKSPACE (EXPANSIVE HIGH-FOCUS MEETING COCKPIT)
+           ===================================================================== -->
+      <section id="view-live-workspace" class="h-full flex overflow-hidden glass-card border border-white/10 hidden">
+        <!-- Left Sidebar: Attendees & Analytics -->
+        <aside class="w-72 border-r border-white/10 p-3.5 flex flex-col justify-between shrink-0 bg-black/50">
+          <div>
+            <!-- Navigation Header: Exit room & Quick Switcher -->
+            <div class="flex items-center justify-between pb-2 mb-2.5 border-b border-white/10">
+              <button onclick="leaveMeetingRoom()" class="flex items-center gap-1.5 text-[11px] text-slate-300 hover:text-white transition group" title="Rời phòng họp (cuộc họp vẫn tiếp tục chạy ngầm, không kết thúc)">
+                <svg class="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-400 transition transform group-hover:-translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+                <span class="font-medium">← Rời Phòng</span>
+              </button>
+
+              <!-- Meeting Switcher Dropdown -->
+              <select id="meeting-quick-switcher" onchange="switchMeetingDirectly(this.value)" class="bg-black/80 border border-white/20 text-[11px] text-emerald-400 font-semibold rounded-lg px-2 py-0.5 max-w-[125px] truncate focus:outline-none cursor-pointer" title="Chuyển nhanh sang cuộc họp khác">
+                <option value="">Đổi phòng...</option>
+              </select>
+            </div>
+
+            <div class="flex items-center justify-between mb-2">
+              <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" id="live-meeting-type">Review</span>
+              <span class="text-xs font-mono text-emerald-400 font-bold" id="live-clock">00:00</span>
+            </div>
+            <h3 class="text-sm font-bold text-white truncate" id="live-title">Meeting Title</h3>
+            <p class="text-[11px] text-slate-400 mt-1 line-clamp-2" id="live-desc">Agenda description</p>
+
+            <!-- Zero Voices Alert Banner -->
+            <div id="zero-voices-banner" class="mt-2.5 p-2.5 bg-white/5 border border-white/15 rounded-xl text-xs space-y-1 hidden">
+              <div class="flex items-center gap-1 text-white font-semibold text-[11px]">
+                <span>ℹ️ Chưa có mẫu giọng</span>
+              </div>
+              <p class="text-[10px] text-slate-400 leading-tight">AI sẽ tự nhận diện người nói và suy luận tên qua đối thoại.</p>
+              <button onclick="openVoiceStudioModal()" class="w-full py-1 rounded-lg bg-white/15 hover:bg-white/25 text-white font-medium text-[10px] transition">
+                🎤 Thu mẫu giọng (10s)
+              </button>
+            </div>
+
+            <!-- Mic Control Button -->
+            <button id="btn-mic-toggle" onclick="toggleMic()" class="mt-3 w-full py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center justify-center gap-2 transition shadow-lg shadow-emerald-500/25 active:scale-95">
+              <svg id="mic-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 100-6 3 3 0 000 6z"/></svg>
+              <span id="mic-label">Bật Mic Phòng</span>
+            </button>
+
+            <!-- End & Archive button -->
+            <button id="btn-end-archive" onclick="endAndArchiveCurrentMeeting()" class="mt-2 w-full py-1.5 rounded-xl bg-white/5 hover:bg-red-950/60 border border-white/10 hover:border-red-700/60 text-slate-300 hover:text-red-300 text-xs font-medium transition">
+              Kết Thúc & Lưu Trữ
+            </button>
+
+            <button onclick="deleteMeeting(currentMeetingId)" class="mt-1.5 w-full py-1 rounded-xl bg-white/5 hover:bg-red-950/40 border border-white/10 text-slate-400 hover:text-red-300 text-[10px] font-medium transition flex items-center justify-center gap-1">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+              <span>Xóa Cuộc Họp Này</span>
+            </button>
+
+            <!-- Speaking Analytics -->
+            <div class="mt-3.5 pt-2.5 border-t border-white/10">
+              <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">Thời Lượng Nói</span>
+              <div id="speaking-analytics-container" class="space-y-1"></div>
+            </div>
+
+            <!-- Attendees -->
+            <div class="mt-2.5 pt-2 border-t border-white/10">
+              <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">Người Tham Gia (<span id="attendee-count">0</span>)</span>
+              <div class="space-y-1 max-h-28 overflow-y-auto" id="attendees-container"></div>
+            </div>
+          </div>
+
+          <div id="inference-alerts" class="mt-1 pt-1 border-t border-white/10"></div>
+        </aside>
+
+        <!-- Center: Live Transcript Stream -->
+        <main class="w-80 lg:w-[380px] xl:w-[420px] shrink-0 flex flex-col min-w-0 bg-black/40 border-r border-white/10">
+          <div class="h-9 px-3 border-b border-white/10 flex items-center justify-between bg-black/30 shrink-0">
+            <span class="text-xs text-slate-300 flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+              Bóc Băng & Gán Vai CAM++
+            </span>
+            <div class="flex items-center gap-2">
+              <span id="interim-text" class="text-xs text-emerald-400 italic truncate max-w-[120px]"></span>
+              <button id="btn-auto-infer-names" onclick="triggerAiInferSpeakers()" class="px-2 py-0.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-[10px] text-emerald-300 font-medium flex items-center gap-1 transition shadow-sm active:scale-95" title="Kích hoạt AI đọc toàn bộ đối thoại để tự động suy luận và gán tên người nói">
+                <span>🧠 AI Đoán Tên</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="flex-1 overflow-y-auto p-3 space-y-2.5" id="transcript-feed">
+            <!-- Bubbles appear here -->
+          </div>
+
+          <!-- Quick Jarvis Prompts -->
+          <div class="p-2 border-t border-white/10 bg-black/60 flex items-center gap-1 overflow-x-auto text-[10px] shrink-0">
+            <span class="text-slate-400 font-medium shrink-0">Jarvis:</span>
+            <button onclick="askAI('Jarvis ơi, tóm tắt các quyết định và action items từ đầu buổi đến giờ')" class="px-2 py-0.5 rounded-lg glass-pill text-slate-300 whitespace-nowrap">
+              📝 Biên bản
+            </button>
+            <button onclick="askAI('Jarvis, tra cứu ticket của Tuấn và Quân trên Jira rồi kiểm tra tiến độ')" class="px-2 py-0.5 rounded-lg glass-pill text-slate-300 whitespace-nowrap">
+              🔍 Jira
+            </button>
+            <button onclick="askAI('Jarvis, vẽ sơ đồ sequence flow xử lý thanh toán và webhook')" class="px-2 py-0.5 rounded-lg glass-pill text-slate-300 whitespace-nowrap">
+              📊 Sơ đồ
+            </button>
+            <button onclick="askAI('Jarvis, thiết kế trang landing page chiến dịch Mega Sale 10.10 bằng Tailwind CSS')" class="px-2 py-0.5 rounded-lg glass-pill text-slate-300 whitespace-nowrap">
+              🎨 Web UI
+            </button>
+          </div>
+        </main>
+
+        <!-- Right: Multi-Modal Artifacts & Co-Design Workspace (Expansive flex-1) -->
+        <section id="workspace-right-pane" class="flex-1 flex flex-col bg-black/30 min-w-0 relative">
+          <!-- Header with Viewport & Maximize Tools -->
+          <div class="h-9 border-b border-white/10 px-3 flex items-center justify-between shrink-0 bg-black/40">
+            <div class="flex items-center gap-1">
+              <button onclick="switchTab('web')" id="tab-btn-web" class="px-2.5 py-0.5 rounded text-xs font-semibold text-white bg-white/20 transition">Web Sandbox</button>
+              <button onclick="switchTab('diagram')" id="tab-btn-diagram" class="px-2.5 py-0.5 rounded text-xs font-semibold text-slate-400 hover:text-white transition">Diagram</button>
+              <button onclick="switchTab('minutes')" id="tab-btn-minutes" class="px-2.5 py-0.5 rounded text-xs font-semibold text-slate-400 hover:text-white transition">Minutes</button>
+              <button onclick="switchTab('thinking')" id="tab-btn-thinking" class="px-2.5 py-0.5 rounded text-xs font-semibold text-slate-400 hover:text-white transition">Thinking</button>
+            </div>
+
+            <!-- Viewport & Maximize Tools -->
+            <div class="flex items-center gap-2 text-slate-400">
+              <div id="sandbox-tools" class="flex items-center gap-1 border-r border-white/10 pr-2">
+                <button onclick="setSandboxViewport('desktop')" class="p-1 hover:text-white transition" title="Desktop View (100%)">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                </button>
+                <button onclick="setSandboxViewport('mobile')" class="p-1 hover:text-white transition" title="Mobile View (375px)">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                </button>
+                <button onclick="toggleScaleFit()" id="btn-scale-fit" class="p-1 hover:text-white transition" title="Co giãn vừa vặn (Zoom Fit)">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7"/></svg>
+                </button>
+                <button onclick="openSandboxInNewTab()" class="p-1 hover:text-white transition" title="Mở trang web trong tab mới riêng biệt">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                </button>
+              </div>
+
+              <!-- Maximize Fullscreen Toggle -->
+              <button onclick="toggleMaximizeWorkspace()" id="btn-maximize" class="p-1 hover:text-white transition" title="Phóng to toàn màn hình">
+                <svg id="maximize-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+              </button>
+
+              <span class="text-[10px] text-slate-400 font-mono" id="artifact-version-badge">v1</span>
+            </div>
+          </div>
+
+          <div class="flex-1 relative overflow-hidden bg-black/80 flex flex-col">
+            <!-- Web Sandbox -->
+            <div id="pane-web" class="flex-1 flex flex-col relative p-2 overflow-hidden items-center justify-center">
+              <iframe id="web-sandbox-frame" class="w-full h-full border border-white/10 rounded-xl bg-white shadow-2xl transition-all duration-300" sandbox="allow-scripts allow-modals"></iframe>
+            </div>
+            <!-- Diagram -->
+            <div id="pane-diagram" class="flex-1 overflow-auto p-4 flex items-center justify-center hidden">
+              <div id="diagram-container"></div>
+            </div>
+            <!-- Minutes -->
+            <div id="pane-minutes" class="flex-1 overflow-auto p-5 hidden prose prose-invert prose-sm max-w-none">
+              <div id="minutes-content">
+                <p class="text-xs text-slate-500 italic">Chưa có biên bản. Hãy yêu cầu Jarvis "lập biên bản cuộc họp".</p>
+              </div>
+            </div>
+            <!-- Thinking -->
+            <div id="pane-thinking" class="flex-1 overflow-auto p-4 space-y-1.5 font-mono text-xs hidden" id="thinking-logs">
+              <p class="text-slate-500 italic">Sẵn sàng nhận lệnh...</p>
+            </div>
+          </div>
+
+          <!-- Co-Design Input Bar -->
+          <div class="p-2.5 border-t border-white/10 bg-black/70 flex flex-col gap-1.5 shrink-0">
+            <div id="co-design-reply" class="text-xs text-emerald-300 px-2 py-1 rounded-lg bg-emerald-950/40 border border-emerald-800/40 hidden"></div>
+            <form onsubmit="handleCoDesignSubmit(event)" class="flex items-center gap-2">
+              <input type="text" id="co-design-input" placeholder="Co-design với Jarvis: 'Đổi nút sang tím gradient', 'Thêm bảng doanh thu'..." class="flex-1 px-3 py-1.5 rounded-lg bg-white/5 border border-white/15 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500">
+              <button type="submit" class="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-lime-400 text-black font-semibold text-xs shadow-md">Gửi</button>
+            </form>
+          </div>
+        </section>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       3. MODALS (CREATE MEETING, RENAME SPEAKER, VOICE STUDIO, DIAGNOSTICS)
+       ========================================================================= -->
+
+  <!-- Modal: Create Meeting -->
+  <div id="create-meeting-modal" class="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
+    <div class="glass-card bg-slate-950/95 border border-white/20 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between pb-3 border-b border-white/10">
+        <h3 class="text-sm font-bold text-white tracking-tight flex items-center gap-2">
+          <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          Thiết Lập & Tạo Cuộc Họp Mới
+        </h3>
+        <button onclick="closeCreateMeetingModal()" class="text-slate-400 hover:text-white">✕</button>
+      </div>
+
+      <form onsubmit="handleCreateMeetingSubmit(event)" class="space-y-3.5 text-xs">
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">Tiêu đề cuộc họp *</label>
+          <input type="text" id="new-meeting-title" required placeholder="e.g. Architecture Review & Sprint 38 Planning" class="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white focus:outline-none focus:border-emerald-500">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-300 font-medium mb-1">Loại cuộc họp</label>
+            <select id="new-meeting-type" class="w-full px-3 py-2 rounded-lg bg-black border border-white/15 text-white focus:outline-none focus:border-emerald-500">
+              <option value="Technical Review">Technical Review</option>
+              <option value="Sprint Planning">Sprint Planning</option>
+              <option value="Daily Standup">Daily Standup</option>
+              <option value="Brainstorming">Brainstorming</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-slate-300 font-medium mb-1">Chủ trì (Host)</label>
+            <select id="new-meeting-host" class="w-full px-3 py-2 rounded-lg bg-black border border-white/15 text-white focus:outline-none focus:border-emerald-500"></select>
+          </div>
+        </div>
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">Mục tiêu & Chương trình (Agenda)</label>
+          <textarea id="new-meeting-agenda" rows="2" placeholder="- Đánh giá tiến độ migrate Postgres v18&#10;- Chốt release Mega Sale 10.10" class="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white focus:outline-none focus:border-emerald-500"></textarea>
+        </div>
+        <div class="pt-2 flex justify-end gap-2">
+          <button type="button" onclick="closeCreateMeetingModal()" class="px-3 py-1.5 rounded-lg glass-pill text-slate-300 text-xs">Hủy</button>
+          <button type="submit" class="px-4 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-lime-400 text-black font-semibold text-xs shadow-md">Tạo & Vào Họp 🎙️</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: 1-Click Inline Rename Speaker -->
+  <div id="rename-speaker-modal" class="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
+    <div class="glass-card bg-slate-950/95 border border-white/20 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between pb-3 border-b border-white/10">
+        <h3 class="text-sm font-bold text-white flex items-center gap-2">
+          <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+          Gán Danh Tính & Đổi Tên Người Nói
+        </h3>
+        <button onclick="closeRenameModal()" class="text-slate-400 hover:text-white">✕</button>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-400 text-[11px] mb-1">Nhãn đang chọn trong cuộc họp:</label>
+          <div id="rename-current-label" class="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 font-mono text-emerald-400 text-xs font-semibold">Người lạ #1</div>
+        </div>
+
+        <div>
+          <label class="block text-slate-400 text-[11px] mb-1">Chọn nhanh từ danh bạ nhân sự UrBox:</label>
+          <select id="rename-quick-select" onchange="onQuickSelectEmployee(this.value)" class="w-full px-3 py-2 rounded-lg bg-black border border-white/20 text-white text-xs focus:outline-none focus:border-emerald-500">
+            <option value="">-- Hoặc nhập họ tên bên dưới --</option>
+            <option value="Bùi Hồng Phúc|CTO / Lead Architect|phuc.bh@urbox.vn">Bùi Hồng Phúc — CTO / Lead Architect</option>
+            <option value="Nguyễn Hoàng Nam|Tech Lead Backend|nam.nh@urbox.vn">Nguyễn Hoàng Nam — Tech Lead Backend</option>
+            <option value="Trần Thu Hằng|QA Lead|hang.tt@urbox.vn">Trần Thu Hằng — QA Lead</option>
+            <option value="Lê Văn Tuấn|Senior DevOps / SRE|tuan.lv@urbox.vn">Lê Văn Tuấn — Senior DevOps / SRE</option>
+            <option value="Đỗ Minh Quân|Senior Backend Developer|quan.dm@urbox.vn">Đỗ Minh Quân — Senior Backend Developer</option>
+            <option value="Phạm Thùy Linh|Lead Frontend & UI/UX|linh.pt@urbox.vn">Phạm Thùy Linh — Lead Frontend & UI/UX</option>
+            <option value="Nguyễn Thu Trang|Product Manager|trang.nt@urbox.vn">Nguyễn Thu Trang — Product Manager</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-slate-400 text-[11px] mb-1">Họ và tên mới *</label>
+          <input type="text" id="rename-new-name" required placeholder="Ví dụ: Lê Văn Tuấn" class="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-xs focus:outline-none focus:border-emerald-500">
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-slate-400 text-[11px] mb-1">Chức danh / Vai trò</label>
+            <input type="text" id="rename-role" placeholder="Ví dụ: Senior DevOps" class="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-xs focus:outline-none focus:border-emerald-500">
+          </div>
+          <div>
+            <label class="block text-slate-400 text-[11px] mb-1">Email</label>
+            <input type="email" id="rename-email" placeholder="tuan.lv@urbox.vn" class="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white text-xs focus:outline-none focus:border-emerald-500">
+          </div>
+        </div>
+
+        <div class="p-2.5 rounded-lg bg-white/5 border border-white/10 text-[11px] text-slate-300 space-y-1">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" id="rename-retroactive" checked class="rounded border-white/20 accent-emerald-500">
+            <span>Cập nhật lùi toàn bộ câu trong buổi họp</span>
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" id="rename-save-voice" checked class="rounded border-white/20 accent-emerald-500">
+            <span>Lưu vào MongoDB Atlas để tự động nhận diện lần sau</span>
+          </label>
+        </div>
+
+        <div class="pt-2 flex justify-end gap-2 border-t border-white/10">
+          <button type="button" onclick="closeRenameModal()" class="px-3 py-1.5 rounded-lg glass-pill text-slate-300 text-xs">Hủy</button>
+          <button type="button" onclick="submitRenameSpeaker()" class="px-4 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-lime-400 text-black font-semibold text-xs shadow-md">Xác Nhận & Lưu</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Diagnostics -->
+  <div id="diagnostics-modal" class="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
+    <div class="glass-card bg-slate-950/95 border border-white/20 rounded-2xl w-full max-w-lg p-5 space-y-3.5 shadow-2xl">
+      <div class="flex items-center justify-between pb-2 border-b border-white/10">
+        <h3 class="text-sm font-bold text-white flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          Bảng Chẩn Đoán Trạng Thái Hệ Thống
+        </h3>
+        <button onclick="closeDiagnosticsModal()" class="text-slate-400 hover:text-white">✕</button>
+      </div>
+      <div class="space-y-2 text-xs" id="diag-cards-container"></div>
+    </div>
+  </div>
+
+  <!-- Modal: Voice Studio -->
+  <div id="voice-studio-modal" class="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
+    <div class="glass-card bg-slate-950/95 border border-white/20 rounded-2xl w-full max-w-md p-6 space-y-3.5 shadow-2xl">
+      <div class="flex items-center justify-between pb-2 border-b border-white/10">
+        <h3 class="text-sm font-bold text-white flex items-center gap-2">
+          <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 100-6 3 3 0 000 6z"/></svg>
+          Phòng Thu Mẫu Giọng Nói Trực Tiếp (10s)
+        </h3>
+        <button onclick="closeVoiceStudioModal()" class="text-slate-400 hover:text-white">✕</button>
+      </div>
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">Họ và tên *</label>
+          <input type="text" id="studio-name" placeholder="e.g. Bùi Hồng Phúc" class="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white">
+        </div>
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">Chức danh / Vai trò</label>
+          <input type="text" id="studio-role" placeholder="e.g. CTO / Lead Architect" class="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white">
+        </div>
+        <div class="p-3 rounded-xl bg-purple-950/30 border border-purple-800/40 text-slate-300 italic text-[11px] leading-relaxed">
+          "Xin chào, tôi là thành viên của UrBox. Tôi đồng ý đăng ký vector đặc trưng giọng nói để hệ thống tự động nhận diện và gọi tên trong các cuộc họp nội bộ."
+        </div>
+        <div class="flex flex-col items-center justify-center py-2 space-y-2">
+          <div class="text-xl font-mono font-bold text-emerald-400" id="studio-countdown">10.0s</div>
+          <div class="w-36 h-2 bg-white/10 rounded-full overflow-hidden">
+            <div id="studio-audio-meter" class="h-full bg-gradient-to-r from-emerald-500 to-lime-400 rounded-full transition-all duration-75" style="width: 0%"></div>
+          </div>
+          <button type="button" id="btn-studio-record" onclick="toggleStudioRecording()" class="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 text-black font-bold text-xs shadow-lg active:scale-95 transition">
+            🎙️ Bắt Đầu Đọc (10s)
+          </button>
+        </div>
+        <div id="studio-result-box" class="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs hidden"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- APPLICATION CORE LOGIC -->
+  <script>
+    let activeTab = 'dashboard'; // 'dashboard' | 'live' | 'meetings' | 'voices'
+    let currentMeetingId = null;
+    let currentMeetingData = null;
+    let wsEvents = null;
+    let wsAudio = null;
+    let audioContext = null;
+    let micStream = null;
+    let isRecording = false;
+    let currentArtifactId = null;
+    let attendees = new Map();
+    let voicesList = [];
+    let allMeetings = [];
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      await loadVoices();
+      await loadMeetings();
+      await loadDashboardStats();
+      // Set date on header
+      const d = new Date();
+      document.getElementById('header-date').textContent = `${d.getDate()} ${d.toLocaleString('en', {month:'short'})}, ${d.getFullYear()} • Live`;
+    });
+
+    // Navigation between Dock tabs
+    function navigateTab(tabName) {
+      activeTab = tabName;
+      ['dashboard', 'live', 'meetings', 'voices'].forEach(t => {
+        const btn = document.getElementById(`dock-btn-${t}`);
+        if (btn) {
+          if (t === tabName) {
+            btn.className = 'w-9 h-9 rounded-full bg-white text-black flex items-center justify-center transition shadow-md';
+          } else {
+            btn.className = 'w-9 h-9 rounded-full text-slate-400 hover:text-white hover:bg-white/10 flex items-center justify-center transition';
+          }
+        }
+      });
+
+      document.getElementById('view-dashboard').classList.toggle('hidden', tabName !== 'dashboard');
+      document.getElementById('view-live-workspace').classList.toggle('hidden', tabName !== 'live');
+      document.getElementById('view-meetings-hub').classList.toggle('hidden', tabName !== 'meetings');
+      document.getElementById('view-voices-directory').classList.toggle('hidden', tabName !== 'voices');
+
+      // Adjust background ambient opacity
+      const ambient = document.querySelector('.ambient-bg');
+      if (ambient) {
+        ambient.style.opacity = (tabName === 'live') ? '0.04' : '0.35';
+      }
+
+      if (tabName === 'dashboard') {
+        loadDashboardStats();
+      } else if (tabName === 'live') {
+        if (!currentMeetingId && allMeetings.length > 0) {
+          joinMeetingRoom(allMeetings[0].id);
+        } else if (!currentMeetingId) {
+          openCreateMeetingModal();
+        }
+      } else if (tabName === 'meetings') {
+        loadMeetings();
+      } else if (tabName === 'voices') {
+        renderVoicesDirectory();
+      }
+    }
+
+    async function loadDashboardStats() {
+      try {
+        const res = await fetch('/api/dashboard/stats');
+        const d = await res.json();
+
+        // 1. Card 1 (Speech Diarization)
+        const totalUtt = document.getElementById('dash-total-utterances');
+        if (totalUtt) totalUtt.textContent = d.total_utterances.toLocaleString();
+
+        const barsContainer = document.getElementById('dash-speaking-bars');
+        if (barsContainer && d.speakers_distribution) {
+          barsContainer.innerHTML = '';
+          d.speakers_distribution.forEach(s => {
+            const row = document.createElement('div');
+            row.innerHTML = `
+              <div class="flex justify-between text-[11px] text-slate-300 mb-1">
+                <span class="truncate max-w-[150px] font-medium">${escapeHtml(s.name)}</span>
+                <span class="font-mono text-emerald-400 font-bold">${s.pct}%</span>
+              </div>
+              <div class="w-full bg-white/5 rounded-full h-2 overflow-hidden">
+                <div class="bg-gradient-to-r ${s.bar_class} h-2 rounded-full transition-all duration-500" style="width: ${s.pct}%"></div>
+              </div>
+            `;
+            barsContainer.appendChild(row);
+          });
+        }
+
+        // 2. Card 2 (Voice Biometrics)
+        const precVal = document.getElementById('dash-precision-val');
+        if (precVal) precVal.textContent = d.precision_pct.toFixed(1) + '%';
+        const b1 = document.getElementById('dash-bar1-lbl');
+        if (b1) b1.textContent = `${d.meetings_count} Mtgs`;
+        const b2 = document.getElementById('dash-bar2-lbl');
+        if (b2) b2.textContent = `${d.voices_count} Spks`;
+        const b3 = document.getElementById('dash-bar3-lbl');
+        if (b3) b3.textContent = `${d.precision_pct.toFixed(1)}%`;
+
+        // 3. Card 3 (Sprint 38 Tasks)
+        const tasksVal = document.getElementById('dash-tasks-val');
+        if (tasksVal) tasksVal.textContent = `${d.total_tasks} Tasks`;
+        const segDone = document.getElementById('dash-tasks-seg-done');
+        if (segDone) segDone.style.width = `${Math.max(5, d.tasks_done_pct)}%`;
+        const segReview = document.getElementById('dash-tasks-seg-review');
+        if (segReview) segReview.style.width = `${Math.max(10, d.tasks_review_pct)}%`;
+        const segTodo = document.getElementById('dash-tasks-seg-todo');
+        if (segTodo) segTodo.style.width = `${Math.max(10, d.tasks_todo_pct)}%`;
+
+        const pDone = document.getElementById('dash-tasks-pct-done');
+        if (pDone) pDone.textContent = `${d.tasks_done_pct}%`;
+        const pReview = document.getElementById('dash-tasks-pct-review');
+        if (pReview) pReview.textContent = `${d.tasks_review_pct}%`;
+        const pTodo = document.getElementById('dash-tasks-pct-todo');
+        if (pTodo) pTodo.textContent = `${d.tasks_todo_pct}%`;
+
+        // 4. Card 4 (Meeting Intelligence Index Ring)
+        const ringVal = document.getElementById('dash-ring-val');
+        if (ringVal) ringVal.textContent = `${d.intelligence_index}%`;
+        const circle = document.getElementById('dash-ring-circle');
+        if (circle) {
+          const offset = 251.2 * (1 - d.intelligence_index / 100);
+          circle.style.strokeDashoffset = offset;
+        }
+
+        // 5. Card 5 (Meeting Health)
+        const healthVal = document.getElementById('dash-health-val');
+        if (healthVal) healthVal.textContent = d.health_score;
+        const healthLbl = document.getElementById('dash-health-label');
+        if (healthLbl) healthLbl.textContent = d.health_label;
+        const healthDur = document.getElementById('dash-health-dur');
+        if (healthDur) healthDur.textContent = `${d.avg_duration_min}m`;
+        const healthEng = document.getElementById('dash-health-eng');
+        if (healthEng) healthEng.textContent = `${d.engagement_pct}%`;
+
+        const dotsContainer = document.getElementById('dash-health-dots');
+        if (dotsContainer) {
+          dotsContainer.innerHTML = '';
+          const activeDots = Math.round((d.health_score / 100) * 8);
+          for (let i = 0; i < 8; i++) {
+            const dot = document.createElement('div');
+            dot.className = `flex-1 h-3 rounded-md transition-all duration-300 ${i < activeDots ? (i < 5 ? 'bg-emerald-500' : 'bg-lime-400') : 'bg-white/10'}`;
+            dotsContainer.appendChild(dot);
+          }
+        }
+
+        // 6. Card 6 (Synthesis Ratio & Mini Transcript)
+        const synthVal = document.getElementById('dash-synthesis-val');
+        if (synthVal) synthVal.textContent = `${d.synthesis_ratio}%`;
+        const wInLbl = document.getElementById('dash-words-in-lbl');
+        if (wInLbl) wInLbl.textContent = `${d.words_in.toLocaleString()} từ`;
+        const wOutLbl = document.getElementById('dash-words-out-lbl');
+        if (wOutLbl) wOutLbl.textContent = `${d.words_out.toLocaleString()} từ`;
+        const wOutBar = document.getElementById('dash-words-out-bar');
+        if (wOutBar) {
+          const outPct = Math.min(100, Math.round((d.words_out / Math.max(1, d.words_in)) * 100));
+          wOutBar.style.width = `${Math.max(15, outPct)}%`;
+        }
+
+        // Actual mini transcript from real DB segments
+        const miniFeed = document.getElementById('dashboard-transcript-mini');
+        if (miniFeed && d.recent_segments && d.recent_segments.length > 0) {
+          miniFeed.innerHTML = '';
+          d.recent_segments.forEach(s => {
+            const item = document.createElement('div');
+            item.className = 'py-1 border-b border-white/5 last:border-none';
+            item.innerHTML = `
+              <div class="flex items-center justify-between text-[11px] text-slate-400 mb-0.5">
+                <span class="font-bold text-emerald-400">${escapeHtml(s.speaker)}:</span>
+                <span class="font-mono text-[9px]">${formatTime(s.time)}</span>
+              </div>
+              <p class="text-slate-200 text-xs leading-relaxed line-clamp-2">${escapeHtml(s.text)}</p>
+            `;
+            miniFeed.appendChild(item);
+          });
+        }
+      } catch (e) {
+        console.error('loadDashboardStats error:', e);
+      }
+    }
+
+    async function loadVoices() {
+      try {
+        const res = await fetch('/api/voices');
+        const data = await res.json();
+        voicesList = data.voices || [];
+        const hostSel = document.getElementById('new-meeting-host');
+        if (hostSel) {
+          hostSel.innerHTML = '';
+          if (voicesList.length === 0) {
+            hostSel.innerHTML = '<option value="">(Auto-detect on speak)</option>';
+          } else {
+            voicesList.forEach(v => {
+              const opt = document.createElement('option');
+              opt.value = v.id;
+              opt.textContent = `${v.name} (${v.role || 'Host'})`;
+              hostSel.appendChild(opt);
+            });
+          }
+        }
+      } catch (e) {
+        console.error('Load voices error:', e);
+      }
+    }
+
+    async function loadMeetings() {
+      try {
+        const res = await fetch('/api/meetings');
+        const data = await res.json();
+        allMeetings = data.meetings || [];
+        renderMeetingsGrid(allMeetings);
+
+        // Cập nhật danh sách đổi phòng nhanh (Quick Switcher)
+        const switcher = document.getElementById('meeting-quick-switcher');
+        if (switcher) {
+          switcher.innerHTML = '<option value="">Đổi phòng...</option>';
+          allMeetings.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m.id;
+            opt.textContent = `#${m.id} ${m.title} (${m.status === 'live' ? '🟢 Live' : 'Đã kết thúc'})`;
+            if (m.id === currentMeetingId) opt.selected = true;
+            switcher.appendChild(opt);
+          });
+        }
+      } catch (e) {
+        console.error('Load meetings error:', e);
+      }
+    }
+
+    function leaveMeetingRoom() {
+      if (isRecording) {
+        stopMic();
+      }
+      if (wsEvents) {
+        try { wsEvents.close(); } catch(e){}
+        wsEvents = null;
+      }
+      // Rời phòng nhưng GIỮ NGUYÊN trạng thái cuộc họp (không kết thúc/lưu trữ)
+      navigateTab('meetings');
+    }
+
+    function switchMeetingDirectly(targetMid) {
+      if (!targetMid) return;
+      if (isRecording) {
+        stopMic();
+      }
+      joinMeetingRoom(parseInt(targetMid));
+    }
+
+    function renderMeetingsGrid(meetings) {
+      const container = document.getElementById('meetings-grid-container');
+      container.innerHTML = '';
+
+      if (!meetings || meetings.length === 0) {
+        container.innerHTML = '<div class="col-span-full text-center py-10 text-slate-400 text-xs">Chưa có cuộc họp nào. Bấm "+ Tạo Cuộc Họp Mới" để bắt đầu.</div>';
+        return;
+      }
+
+      meetings.forEach(m => {
+        const isLive = m.status === 'live';
+        const card = document.createElement('div');
+        card.className = `p-4 rounded-2xl glass-card flex flex-col justify-between transition ${isLive ? 'border-emerald-500/40 bg-emerald-950/20' : ''}`;
+        card.innerHTML = `
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold ${isLive ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-white/5 text-slate-400'}">
+                ${isLive ? '● LIVE' : 'ENDED'}
+              </span>
+              <span class="text-[10px] text-slate-400 font-mono">${new Date(m.started_at * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+            </div>
+            <h4 class="text-sm font-bold text-white mb-1 truncate">${escapeHtml(m.title)}</h4>
+            <p class="text-xs text-slate-400 line-clamp-2">${escapeHtml(m.description || 'Cuộc họp kỹ thuật nội bộ.')}</p>
+          </div>
+          <div class="mt-4 pt-3 border-t border-white/10 flex items-center justify-between gap-2">
+            <button onclick="joinMeetingRoom(${m.id})" class="px-3.5 py-1.5 rounded-xl ${isLive ? 'bg-gradient-to-r from-emerald-500 to-lime-400 text-black font-bold' : 'glass-pill text-white'} flex-1 text-xs transition">
+              ${isLive ? 'Vào Phòng Họp 🎙️' : 'Xem Chi Tiết 📄'}
+            </button>
+            <button onclick="deleteMeeting(${m.id}, event)" class="p-2 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 border border-white/10 hover:border-red-500/30 transition" title="Xóa cuộc họp">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    async function joinMeetingRoom(mid) {
+      currentMeetingId = mid;
+      try {
+        const res = await fetch(`/api/meetings/${mid}`);
+        const data = await res.json();
+        currentMeetingData = data.meeting;
+
+        document.getElementById('live-title').textContent = data.meeting.title;
+        document.getElementById('live-meeting-type').textContent = data.meeting.meeting_type || 'Review';
+        document.getElementById('live-desc').textContent = data.meeting.description || 'Meeting session';
+
+        const zeroBanner = document.getElementById('zero-voices-banner');
+        if (zeroBanner) zeroBanner.classList.toggle('hidden', voicesList.length > 0);
+
+        const isEnded = data.meeting.status === 'ended';
+        const micBtn = document.getElementById('btn-mic-toggle');
+        const endBtn = document.getElementById('btn-end-archive');
+
+        if (isEnded) {
+          if (micBtn) micBtn.classList.add('hidden');
+          if (endBtn) {
+            endBtn.textContent = '📥 Xuất Biên Bản (Markdown)';
+            endBtn.setAttribute('onclick', `exportMeetingMarkdown(${mid})`);
+            endBtn.className = 'mt-2 w-full py-1.5 rounded-xl glass-pill text-white text-xs font-medium transition';
+          }
+        } else {
+          if (micBtn) micBtn.classList.remove('hidden');
+          if (endBtn) {
+            endBtn.textContent = 'Kết Thúc & Lưu Trữ';
+            endBtn.setAttribute('onclick', 'endAndArchiveCurrentMeeting()');
+            endBtn.className = 'mt-2 w-full py-1.5 rounded-xl bg-white/5 hover:bg-red-950/60 border border-white/10 hover:border-red-700/60 text-slate-300 hover:text-red-300 text-xs font-medium transition';
+          }
+        }
+
+        navigateTab('live');
+
+        document.getElementById('transcript-feed').innerHTML = '';
+        attendees.clear();
+
+        if (data.segments) data.segments.forEach(s => appendSegment(s));
+        if (data.artifacts && data.artifacts.length > 0) displayArtifact(data.artifacts[0]);
+
+        if (!isEnded) connectEventsWs();
+      } catch (e) {
+        console.error('Join room error:', e);
+      }
+    }
+
+    function openCreateMeetingModal() {
+      document.getElementById('create-meeting-modal').classList.remove('hidden');
+    }
+    function closeCreateMeetingModal() {
+      document.getElementById('create-meeting-modal').classList.add('hidden');
+    }
+
+    async function handleCreateMeetingSubmit(e) {
+      e.preventDefault();
+      const title = document.getElementById('new-meeting-title').value.trim();
+      const mType = document.getElementById('new-meeting-type').value;
+      const hostId = parseInt(document.getElementById('new-meeting-host').value) || null;
+      const agenda = (document.getElementById('new-meeting-agenda').value.trim()).split('\n').filter(Boolean);
+
+      try {
+        const res = await fetch('/api/meetings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: title,
+            meeting_type: mType,
+            host_id: hostId,
+            agenda: agenda
+          })
+        });
+        const data = await res.json();
+        closeCreateMeetingModal();
+        joinMeetingRoom(data.meeting_id);
+      } catch (err) {
+        alert('Lỗi tạo cuộc họp: ' + err.message);
+      }
+    }
+
+    async function endAndArchiveCurrentMeeting() {
+      if (!confirm('Kết thúc và lưu trữ cuộc họp? AI sẽ tự động lập biên bản tổng kết vào MongoDB Atlas.')) return;
+      try {
+        await fetch(`/api/meetings/${currentMeetingId}/archive`, { method: 'POST' });
+        if (isRecording) stopMic();
+        navigateTab('meetings');
+      } catch (e) {
+        console.error('Archive error:', e);
+      }
+    }
+
+    async function deleteMeeting(mid, event) {
+      if (event) event.stopPropagation();
+      const targetMid = mid || currentMeetingId;
+      if (!targetMid) return;
+      if (!confirm(`Bạn có chắc muốn xóa vĩnh viễn cuộc họp #${targetMid} khỏi MongoDB Atlas?`)) return;
+      try {
+        const res = await fetch(`/api/meetings/${targetMid}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+          if (currentMeetingId === targetMid) {
+            currentMeetingId = null;
+            if (isRecording) stopMic();
+            navigateTab('meetings');
+          } else {
+            await loadMeetings();
+          }
+        }
+      } catch (e) {
+        alert('Lỗi xóa: ' + e.message);
+      }
+    }
+
+    async function exportMeetingMarkdown(mid) {
+      const targetMid = mid || currentMeetingId;
+      if (!targetMid) return;
+      try {
+        const res = await fetch(`/api/meetings/${targetMid}`);
+        const data = await res.json();
+        const m = data.meeting;
+        let md = `# BIÊN BẢN CUỘC HỌP: ${m.title}\n\n`;
+        md += `**Thời gian:** ${new Date(m.started_at * 1000).toLocaleString()} | **Trạng thái:** ${m.status.toUpperCase()} | **Loại:** ${m.meeting_type || 'General'}\n\n`;
+        if (m.description) md += `**Mục tiêu:** ${m.description}\n\n`;
+        if (m.summary) md += `## Tóm tắt điều hành\n${m.summary}\n\n`;
+
+        if (data.artifacts && data.artifacts.length > 0) {
+          const minArt = data.artifacts.find(a => a.kind === 'minutes');
+          if (minArt) md += `## Chi tiết biên bản tổng hợp AI\n\n${minArt.content}\n\n`;
+        }
+
+        md += `## Hội thoại chi tiết\n\n`;
+        (data.segments || []).forEach(s => {
+          md += `- **${s.speaker_label}** (${formatTime(s.t_start)}): ${s.text}\n`;
+        });
+
+        const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `meeting_${targetMid}_minutes.md`;
+        a.click();
+      } catch (e) {
+        console.error('Export error:', e);
+      }
+    }
+
+    async function triggerAiInferSpeakers() {
+      const targetMid = currentMeetingId;
+      if (!targetMid) {
+        alert('Vui lòng chọn hoặc vào một cuộc họp trước!');
+        return;
+      }
+      const btn = document.getElementById('btn-auto-infer-names');
+      if (btn) {
+        btn.innerHTML = '<span class="animate-spin text-xs">⏳</span> <span>Đang suy luận...</span>';
+      }
+      try {
+        const res = await fetch(`/api/meetings/${targetMid}/infer-speakers`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success && data.renamed && data.renamed.length > 0) {
+          await joinMeetingRoom(targetMid);
+          const report = data.renamed.map(r => `• ${r.old_label} ➔ ${r.new_name} (${Math.round(r.confidence * 100)}%): ${r.reasoning || ''}`).join('\n\n');
+          alert(`🎉 AI đã suy luận thành công danh tính cho ${data.renamed.length} người nói:\n\n` + report);
+        } else {
+          alert('AI đã phân tích đối thoại: Các người nói đã được định danh đầy đủ hoặc chưa có thêm manh mối xưng danh mới.');
+        }
+      } catch (e) {
+        alert('Lỗi khi kích hoạt AI suy luận danh tính: ' + e.message);
+      } finally {
+        if (btn) {
+          btn.innerHTML = '<span>🧠 AI Đoán Tên</span>';
+        }
+      }
+    }
+
+    // Voice Profiles Directory
+    function renderVoicesDirectory(filterQuery = '') {
+      const container = document.getElementById('voices-grid-container');
+      const badge = document.getElementById('voices-count-badge');
+      if (!container) return;
+      container.innerHTML = '';
+
+      let list = voicesList;
+      if (filterQuery) {
+        const q = filterQuery.toLowerCase();
+        list = list.filter(v => 
+          (v.name && v.name.toLowerCase().includes(q)) ||
+          (v.role && v.role.toLowerCase().includes(q)) ||
+          (v.department && v.department.toLowerCase().includes(q)) ||
+          (v.email && v.email.toLowerCase().includes(q))
+        );
+      }
+
+      if (badge) badge.textContent = `Tổng cộng ${list.length} / ${voicesList.length} hồ sơ trong MongoDB Atlas`;
+
+      if (list.length === 0) {
+        container.innerHTML = '<div class="col-span-full text-center py-8 text-slate-400 text-xs">Chưa có hồ sơ giọng nói nào. Bấm "+ Thu Mẫu Giọng Mới" để bắt đầu.</div>';
+        return;
+      }
+
+      list.forEach(v => {
+        const card = document.createElement('div');
+        card.className = 'p-4 rounded-2xl glass-card flex flex-col justify-between';
+        card.innerHTML = `
+          <div>
+            <div class="flex items-start justify-between gap-3 mb-2">
+              <div class="flex items-center gap-2.5">
+                <span class="w-8 h-8 rounded-full ${getAvatarColor(v.name)} flex items-center justify-center font-bold text-white text-xs shrink-0">
+                  ${v.name.charAt(0)}
+                </span>
+                <div>
+                  <h4 class="text-xs font-bold text-white">${escapeHtml(v.name)}</h4>
+                  <div class="text-[10px] text-slate-400">${escapeHtml(v.role || 'Thành viên')} ${v.department ? '• ' + escapeHtml(v.department) : ''}</div>
+                </div>
+              </div>
+              ${v.auto_learned ? 
+                '<span class="px-2 py-0.5 rounded text-[9px] bg-purple-500/20 text-purple-300 border border-purple-500/30">🤖 AI Tự Học</span>' : 
+                '<span class="px-2 py-0.5 rounded text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">🎤 Thu Mẫu</span>'}
+            </div>
+            <div class="text-slate-400 font-mono text-[10px] mt-2 pt-2 border-t border-white/5">
+              192D CAM++ vector • ${v.n_samples || 1} mẫu âm thanh
+            </div>
+          </div>
+          <div class="mt-3 pt-2 border-t border-white/5 flex items-center justify-between">
+            <span class="text-[10px] text-slate-500 font-mono">ID: #${v.id}</span>
+            <button onclick="deleteVoice(${v.id})" class="p-1 rounded-lg text-slate-400 hover:text-red-400 transition text-xs flex items-center gap-1">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+              <span>Xóa</span>
+            </button>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function searchVoices(q) { renderVoicesDirectory(q); }
+
+    async function deleteVoice(vid) {
+      if (!confirm(`Bạn có chắc muốn xóa vĩnh viễn vector giọng nói #${vid} khỏi MongoDB Atlas?`)) return;
+      try {
+        const res = await fetch(`/api/voices/${vid}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+          await loadVoices();
+          renderVoicesDirectory();
+        }
+      } catch (e) {
+        alert('Lỗi xóa: ' + e.message);
+      }
+    }
+
+    // Modal: 1-Click Inline Rename Speaker
+    let targetRenameLabel = '';
+
+    function openRenameModal(currentSpeakerLabel) {
+      targetRenameLabel = currentSpeakerLabel;
+      document.getElementById('rename-current-label').textContent = currentSpeakerLabel;
+      document.getElementById('rename-new-name').value = (currentSpeakerLabel.includes('Người') || currentSpeakerLabel.includes('Speaker')) ? '' : currentSpeakerLabel;
+      document.getElementById('rename-role').value = '';
+      document.getElementById('rename-email').value = '';
+      document.getElementById('rename-quick-select').value = '';
+      document.getElementById('rename-speaker-modal').classList.remove('hidden');
+    }
+
+    function closeRenameModal() {
+      document.getElementById('rename-speaker-modal').classList.add('hidden');
+    }
+
+    function onQuickSelectEmployee(val) {
+      if (!val) return;
+      const parts = val.split('|');
+      document.getElementById('rename-new-name').value = parts[0] || '';
+      document.getElementById('rename-role').value = parts[1] || '';
+      document.getElementById('rename-email').value = parts[2] || '';
+    }
+
+    async function submitRenameSpeaker() {
+      const newName = document.getElementById('rename-new-name').value.trim();
+      const newRole = document.getElementById('rename-role').value.trim();
+      const newEmail = document.getElementById('rename-email').value.trim();
+      if (!newName) { alert('Vui lòng nhập họ và tên!'); return; }
+
+      try {
+        const res = await fetch(`/api/meetings/${currentMeetingId}/confirm-identity`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            unknown_label: targetRenameLabel,
+            confirmed_name: newName,
+            role: newRole,
+            email: newEmail
+          })
+        });
+        const data = await res.json();
+        if (data.success || data.updated) {
+          applyRetroactiveRenaming({
+            old_label: targetRenameLabel,
+            new_name: newName,
+            role: newRole,
+            confidence: 1.0,
+            voice_id: data.voice_id
+          });
+          closeRenameModal();
+          await loadVoices();
+        }
+      } catch (e) {
+        alert('Lỗi kết nối: ' + e.message);
+      }
+    }
+
+    // Diagnostics Modal
+    function openDiagnosticsModal() {
+      document.getElementById('diagnostics-modal').classList.remove('hidden');
+      fetchDiagnostics();
+    }
+    function closeDiagnosticsModal() {
+      document.getElementById('diagnostics-modal').classList.add('hidden');
+    }
+    async function fetchDiagnostics() {
+      try {
+        const res = await fetch('/api/health');
+        const d = await res.json();
+        const container = document.getElementById('diag-cards-container');
+        container.innerHTML = `
+          <div class="p-3 rounded-xl bg-white/5 border border-white/10 flex justify-between items-center">
+            <div>
+              <div class="font-bold text-white text-xs">Mô hình CAM++ (3D-Speaker)</div>
+              <div class="text-[10px] text-slate-400">192-dim vector CPU ONNX (${d.campp.status})</div>
+            </div>
+            <span class="text-emerald-400 font-semibold text-xs">Ready</span>
+          </div>
+          <div class="p-3 rounded-xl bg-white/5 border border-white/10 flex justify-between items-center">
+            <div>
+              <div class="font-bold text-white text-xs">Soniox Realtime STT</div>
+              <div class="text-[10px] text-slate-400">stt-rt-v5 token streaming (${d.soniox.status})</div>
+            </div>
+            <span class="text-emerald-400 font-semibold text-xs">Connected</span>
+          </div>
+          <div class="p-3 rounded-xl bg-white/5 border border-white/10 flex justify-between items-center">
+            <div>
+              <div class="font-bold text-white text-xs">MongoDB Atlas Cloud</div>
+              <div class="text-[10px] text-slate-400">${d.mongodb.database} (${d.voices_count} hồ sơ giọng nói)</div>
+            </div>
+            <span class="text-emerald-400 font-semibold text-xs">Connected</span>
+          </div>
+          <div class="p-3 rounded-xl bg-white/5 border border-white/10 flex justify-between items-center">
+            <div>
+              <div class="font-bold text-white text-xs">AI Assistant Orchestrator</div>
+              <div class="text-[10px] text-slate-400">${d.llm.provider} • Thinking & Mock MCP</div>
+            </div>
+            <span class="text-emerald-400 font-semibold text-xs">Active</span>
+          </div>
+        `;
+      } catch (e) {
+        console.error('Diagnostics error:', e);
+      }
+    }
+
+    // Voice Studio Modal
+    let studioStream = null;
+    let studioAudioContext = null;
+    let studioPcmChunks = [];
+    let isStudioRecording = false;
+
+    function openVoiceStudioModal() {
+      document.getElementById('voice-studio-modal').classList.remove('hidden');
+    }
+    function closeVoiceStudioModal() {
+      if (isStudioRecording) stopStudioRecording(false);
+      document.getElementById('voice-studio-modal').classList.add('hidden');
+    }
+    async function toggleStudioRecording() {
+      if (isStudioRecording) stopStudioRecording(true);
+      else await startStudioRecording();
+    }
+    async function startStudioRecording() {
+      const name = document.getElementById('studio-name').value.trim();
+      if (!name) { alert('Vui lòng nhập họ và tên!'); return; }
+      try {
+        studioStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } });
+        studioAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        const source = studioAudioContext.createMediaStreamSource(studioStream);
+        const processor = studioAudioContext.createScriptProcessor(2048, 1, 1);
+        studioPcmChunks = [];
+
+        processor.onaudioprocess = (e) => {
+          if (!isStudioRecording) return;
+          const input = e.inputBuffer.getChannelData(0);
+          const pcm16 = new Int16Array(input.length);
+          for (let i = 0; i < input.length; i++) {
+            let s = Math.max(-1, Math.min(1, input[i]));
+            pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+          }
+          studioPcmChunks.push(pcm16);
+        };
+        source.connect(processor);
+        processor.connect(studioAudioContext.destination);
+
+        isStudioRecording = true;
+        document.getElementById('btn-studio-record').textContent = '⏹️ Hoàn Tất Sớm';
+      } catch (e) {
+        alert('Lỗi micro: ' + e.message);
+      }
+    }
+    async function stopStudioRecording(submit = true) {
+      isStudioRecording = false;
+      if (studioStream) { studioStream.getTracks().forEach(t => t.stop()); studioStream = null; }
+      if (studioAudioContext) { studioAudioContext.close(); studioAudioContext = null; }
+      document.getElementById('btn-studio-record').textContent = '🎙️ Bắt Đầu Đọc (10s)';
+
+      if (submit && studioPcmChunks.length > 0) {
+        let total = 0; studioPcmChunks.forEach(c => total += c.length);
+        const full = new Int16Array(total);
+        let offset = 0; studioPcmChunks.forEach(c => { full.set(c, offset); offset += c.length; });
+
+        const blob = new Blob([full.buffer], { type: 'application/octet-stream' });
+        const form = new FormData();
+        form.append('name', document.getElementById('studio-name').value.trim());
+        form.append('role', document.getElementById('studio-role').value.trim());
+        form.append('audio', blob, 'voice.pcm');
+
+        const res = await fetch('/api/voices/enroll-audio', { method: 'POST', body: form });
+        const d = await res.json();
+        if (d.success) {
+          const box = document.getElementById('studio-result-box');
+          box.classList.remove('hidden');
+          box.textContent = `Đã lưu vector 192D cho ${d.name} (${d.voiced_seconds}s âm thanh)!`;
+          await loadVoices();
+          renderVoicesDirectory();
+          setTimeout(closeVoiceStudioModal, 2000);
+        }
+      }
+    }
+
+    // WebSockets & Real-time Live Room
+    function connectEventsWs() {
+      if (wsEvents) { try { wsEvents.close(); } catch(e){} }
+      const loc = window.location;
+      const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${proto}//${loc.host}/ws/meeting/${currentMeetingId}/events`;
+      wsEvents = new WebSocket(wsUrl);
+
+      wsEvents.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          handleEventMessage(msg);
+        } catch (e) {}
+      };
+    }
+
+    function handleEventMessage(msg) {
+      if (msg.type === 'segment') {
+        appendSegment(msg.segment);
+        // Also update dashboard mini transcript
+        appendDashboardMini(msg.segment);
+      } else if (msg.type === 'segment_updated') {
+        updateSegmentBubble(msg.segment_id, msg.speaker_label, msg.speaker_id);
+      } else if (msg.type === 'interim') {
+        const txt = document.getElementById('interim-text');
+        if (txt) txt.textContent = msg.text ? `... ${msg.text}` : '';
+      } else if (msg.type === 'speaker_renamed') {
+        applyRetroactiveRenaming(msg);
+      } else if (msg.type === 'ai_thinking') {
+        appendThinkingLog(msg.text);
+      } else if (msg.type === 'ai_response') {
+        if (msg.response.chat_response) showCoDesignReply(msg.response.chat_response);
+        if (msg.response.artifact) displayArtifact(msg.response.artifact);
+      } else if (msg.type === 'artifact_updated') {
+        displayArtifact(msg.artifact);
+        if (msg.artifact.chat_message) showCoDesignReply(msg.artifact.chat_message);
+      }
+    }
+
+    function appendSegment(seg) {
+      const feed = document.getElementById('transcript-feed');
+      const speaker = seg.speaker_label || 'Speaker';
+      const isAI = seg.text && (seg.text.toLowerCase().includes('jarvis') || seg.text.toLowerCase().includes('trợ lý'));
+
+      if (!attendees.has(speaker)) {
+        attendees.set(speaker, { name: speaker, count: 1, id: seg.speaker_id });
+      } else {
+        attendees.get(speaker).count += 1;
+      }
+      renderAttendees();
+
+      const div = document.createElement('div');
+      div.className = `p-3 rounded-xl border backdrop-blur-md transition ${isAI ? 'bg-white/10 border-white/30' : 'bg-black/60 border-white/10'}`;
+      div.setAttribute('data-speaker', speaker);
+      div.setAttribute('data-seg-id', seg.id);
+      div.innerHTML = `
+        <div class="flex items-center justify-between text-[11px] text-slate-400 mb-1.5">
+          <div class="flex items-center gap-2">
+            <span class="w-5 h-5 rounded-full ${getAvatarColor(speaker)} flex items-center justify-center text-[10px] font-bold text-white uppercase speaker-avatar">
+              ${speaker.charAt(0)}
+            </span>
+            <button type="button" onclick="openRenameModal('${escapeHtml(speaker)}')" class="font-bold text-white speaker-name-tag hover:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer transition text-xs" title="Bấm để đổi tên hoặc gán danh tính">
+              <span>${escapeHtml(speaker)}</span>
+              <svg class="w-3 h-3 text-slate-400 hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+            </button>
+            ${seg.is_inferred ? '<span class="px-1.5 py-0.2 rounded text-[9px] bg-amber-500/10 text-amber-300 border border-amber-500/20">AI suy luận</span>' : ''}
+          </div>
+          <span class="font-mono text-[10px] text-slate-500">${formatTime(seg.t_start)}</span>
+        </div>
+        <p class="text-xs text-slate-200 leading-relaxed">${escapeHtml(seg.text)}</p>
+      `;
+      feed.appendChild(div);
+      feed.scrollTop = feed.scrollHeight;
+    }
+
+    function appendDashboardMini(seg) {
+      const box = document.getElementById('dashboard-transcript-mini');
+      if (!box) return;
+      const div = document.createElement('div');
+      div.innerHTML = `
+        <div class="flex items-center justify-between text-[10px] text-slate-400">
+          <span class="font-bold text-emerald-400">${escapeHtml(seg.speaker_label)}:</span>
+          <span class="font-mono text-[9px]">${formatTime(seg.t_start)}</span>
+        </div>
+        <p class="text-slate-300 text-[11px] leading-tight">${escapeHtml(seg.text)}</p>
+      `;
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function updateSegmentBubble(segId, newSpeaker, spkId) {
+      const bubble = document.querySelector(`[data-seg-id="${segId}"]`);
+      if (bubble) {
+        bubble.setAttribute('data-speaker', newSpeaker);
+        const nameTag = bubble.querySelector('.speaker-name-tag span');
+        if (nameTag) nameTag.textContent = newSpeaker;
+        const avatar = bubble.querySelector('.speaker-avatar');
+        if (avatar) {
+          avatar.className = `w-5 h-5 rounded-full ${getAvatarColor(newSpeaker)} flex items-center justify-center text-[10px] font-bold text-white uppercase speaker-avatar`;
+          avatar.textContent = newSpeaker.charAt(0);
+        }
+      }
+      if (!attendees.has(newSpeaker)) {
+        attendees.set(newSpeaker, { name: newSpeaker, count: 1, id: spkId });
+        renderAttendees();
+      }
+    }
+
+    function applyRetroactiveRenaming(info) {
+      const bubbles = document.querySelectorAll(`[data-speaker="${info.old_label}"]`);
+      bubbles.forEach(b => {
+        b.setAttribute('data-speaker', info.new_name);
+        const tag = b.querySelector('.speaker-name-tag span');
+        if (tag) tag.textContent = info.new_name;
+        const avatar = b.querySelector('.speaker-avatar');
+        if (avatar) {
+          avatar.className = `w-5 h-5 rounded-full ${getAvatarColor(info.new_name)} flex items-center justify-center text-[10px] font-bold text-white uppercase speaker-avatar`;
+          avatar.textContent = info.new_name.charAt(0);
+        }
+      });
+      if (attendees.has(info.old_label)) {
+        const old = attendees.get(info.old_label);
+        attendees.delete(info.old_label);
+        attendees.set(info.new_name, { name: info.new_name, count: old.count, id: info.voice_id });
+        renderAttendees();
+      }
+    }
+
+    function renderAttendees() {
+      const container = document.getElementById('attendees-container');
+      const analytics = document.getElementById('speaking-analytics-container');
+      if (!container) return;
+      container.innerHTML = '';
+      if (analytics) analytics.innerHTML = '';
+
+      document.getElementById('attendee-count').textContent = attendees.size;
+      let total = 0; attendees.forEach(a => total += a.count);
+
+      attendees.forEach(a => {
+        const div = document.createElement('div');
+        div.className = 'flex items-center justify-between text-xs py-1 px-1.5 rounded-lg hover:bg-white/5 group transition';
+        div.innerHTML = `
+          <div class="flex items-center gap-1.5 min-w-0">
+            <span class="w-4 h-4 rounded-full ${getAvatarColor(a.name)} flex items-center justify-center font-bold text-white text-[9px] shrink-0">
+              ${a.name.charAt(0)}
+            </span>
+            <span class="truncate text-slate-200 text-[11px] font-medium">${escapeHtml(a.name)}</span>
+          </div>
+          <div class="flex items-center gap-1 shrink-0">
+            <span class="text-[9px] text-slate-500 font-mono">${a.count} câu</span>
+            <button onclick="openRenameModal('${escapeHtml(a.name)}')" class="opacity-0 group-hover:opacity-100 p-0.5 hover:text-emerald-400 text-slate-400 rounded transition" title="Đổi tên / gán vai">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+            </button>
+          </div>
+        `;
+        container.appendChild(div);
+
+        if (analytics && total > 0) {
+          const pct = Math.round((a.count / total) * 100);
+          const bar = document.createElement('div');
+          bar.className = 'space-y-0.5 text-[10px] text-slate-400';
+          bar.innerHTML = `
+            <div class="flex justify-between"><span>${escapeHtml(a.name)}</span><span>${pct}%</span></div>
+            <div class="w-full bg-white/10 rounded-full h-1"><div class="bg-gradient-to-r from-emerald-500 to-lime-400 h-1 rounded-full" style="width:${pct}%"></div></div>
+          `;
+          analytics.appendChild(bar);
+        }
+      });
+    }
+
+    function appendThinkingLog(text) {
+      const box = document.getElementById('thinking-logs');
+      if (!box) return;
+      const p = document.createElement('p');
+      p.className = 'text-slate-300 leading-relaxed text-xs';
+      p.textContent = text;
+      box.appendChild(p);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function displayArtifact(art) {
+      currentArtifactId = art.id;
+      if (art.kind === 'web_design') {
+        switchTab('web');
+        document.getElementById('web-sandbox-frame').srcdoc = art.content;
+        const mini = document.getElementById('dashboard-mini-sandbox');
+        if (mini) mini.srcdoc = art.content;
+      } else if (art.kind === 'diagram') {
+        switchTab('diagram');
+        document.getElementById('diagram-container').innerHTML = `<div class="mermaid">${art.content}</div>`;
+        mermaid.run();
+      } else if (art.kind === 'minutes') {
+        switchTab('minutes');
+        document.getElementById('minutes-content').innerHTML = renderMarkdown(art.content);
+      }
+      document.getElementById('artifact-version-badge').textContent = `v${art.version || 1}`;
+    }
+
+    function showCoDesignReply(text) {
+      const box = document.getElementById('co-design-reply');
+      if (box) {
+        box.textContent = text;
+        box.classList.remove('hidden');
+      }
+    }
+
+    async function handleCoDesignSubmit(e) {
+      e.preventDefault();
+      const val = document.getElementById('co-design-input').value.trim();
+      if (!val) return;
+      document.getElementById('co-design-input').value = '';
+
+      if (currentArtifactId) {
+        const res = await fetch(`/api/meetings/${currentMeetingId}/co-design`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ artifact_id: currentArtifactId, feedback: val })
+        });
+        const d = await res.json();
+        displayArtifact(d);
+      } else {
+        askAI(val);
+      }
+    }
+
+    async function askAI(prompt) {
+      switchTab('thinking');
+      appendThinkingLog(`🤖 Lệnh: "${prompt}"`);
+      const res = await fetch(`/api/meetings/${currentMeetingId}/ai-ask`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      });
+      const d = await res.json();
+      if (d.artifact) displayArtifact(d.artifact);
+    }
+
+    async function askAIQuick(prompt) {
+      if (!prompt) return;
+      if (!currentMeetingId && allMeetings.length > 0) {
+        currentMeetingId = allMeetings[0].id;
+      }
+      if (!currentMeetingId) {
+        alert('Vui lòng tạo cuộc họp trước khi hỏi Jarvis.');
+        return;
+      }
+      navigateTab('live');
+      askAI(prompt);
+    }
+
+    function switchTab(t) {
+      ['web', 'diagram', 'minutes', 'thinking'].forEach(tab => {
+        document.getElementById(`tab-btn-${tab}`).className = (tab === t) ? 'px-2.5 py-0.5 rounded text-xs font-semibold text-white bg-white/20' : 'px-2.5 py-0.5 rounded text-xs font-semibold text-slate-400 hover:text-white';
+        document.getElementById(`pane-${tab}`).classList.toggle('hidden', tab !== t);
+      });
+      const tools = document.getElementById('sandbox-tools');
+      if (tools) tools.classList.toggle('hidden', t !== 'web');
+    }
+
+    // Viewport & Maximize
+    let isMaximized = false;
+    let isScaledFit = false;
+
+    function setSandboxViewport(mode) {
+      const frame = document.getElementById('web-sandbox-frame');
+      if (!frame) return;
+      if (mode === 'mobile') {
+        frame.style.maxWidth = '375px';
+        frame.style.height = '667px';
+        frame.style.margin = 'auto';
+      } else {
+        frame.style.maxWidth = '100%';
+        frame.style.height = '100%';
+        frame.style.margin = '0';
+      }
+    }
+
+    function toggleScaleFit() {
+      const frame = document.getElementById('web-sandbox-frame');
+      if (!frame) return;
+      isScaledFit = !isScaledFit;
+      if (isScaledFit) {
+        frame.style.transform = 'scale(0.8)';
+        frame.style.transformOrigin = 'center top';
+        frame.style.height = '125%';
+        frame.style.width = '125%';
+        document.getElementById('btn-scale-fit').className = 'p-1 text-emerald-400 bg-white/20 rounded transition';
+      } else {
+        frame.style.transform = 'none';
+        frame.style.height = '100%';
+        frame.style.width = '100%';
+        document.getElementById('btn-scale-fit').className = 'p-1 text-slate-400 hover:text-white transition';
+      }
+    }
+
+    function toggleMaximizeWorkspace() {
+      const rightPane = document.getElementById('workspace-right-pane');
+      if (!rightPane) return;
+      isMaximized = !isMaximized;
+      if (isMaximized) {
+        rightPane.classList.add('fixed', 'inset-0', 'z-50', 'bg-slate-950', 'p-4');
+        document.getElementById('maximize-icon').innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>';
+        document.getElementById('btn-maximize').title = 'Thu nhỏ lại (Minimize)';
+      } else {
+        rightPane.classList.remove('fixed', 'inset-0', 'z-50', 'bg-slate-950', 'p-4');
+        document.getElementById('maximize-icon').innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>';
+        document.getElementById('btn-maximize').title = 'Phóng to toàn màn hình';
+      }
+    }
+
+    function openSandboxInNewTab() {
+      const frame = document.getElementById('web-sandbox-frame');
+      if (frame && frame.srcdoc) {
+        const blob = new Blob([frame.srcdoc], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+      } else {
+        window.open('/vesper', '_blank');
+      }
+    }
+
+    // Mic recording
+    async function toggleMic() {
+      if (!currentMeetingId) { alert('Vui lòng tạo hoặc chọn một cuộc họp trước khi bật mic!'); return; }
+      if (isRecording) stopMic();
+      else await startMic();
+    }
+
+    async function startMic() {
+      try {
+        const loc = window.location;
+        const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${proto}//${loc.host}/ws/meeting/${currentMeetingId}/audio`;
+        wsAudio = new WebSocket(wsUrl);
+
+        wsAudio.onopen = async () => {
+          micStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } });
+          audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+          const source = audioContext.createMediaStreamSource(micStream);
+          const processor = audioContext.createScriptProcessor(2048, 1, 1);
+
+          processor.onaudioprocess = (e) => {
+            if (!isRecording || wsAudio.readyState !== WebSocket.OPEN) return;
+            const input = e.inputBuffer.getChannelData(0);
+            const pcm16 = new Int16Array(input.length);
+            for (let i = 0; i < input.length; i++) {
+              let s = Math.max(-1, Math.min(1, input[i]));
+              pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            wsAudio.send(pcm16.buffer);
+          };
+          source.connect(processor);
+          processor.connect(audioContext.destination);
+
+          isRecording = true;
+          document.getElementById('mic-label').textContent = 'Đang Thu Mic';
+          document.getElementById('btn-mic-toggle').className = 'mt-3 w-full py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-semibold text-xs flex items-center justify-center gap-2 transition animate-pulse';
+        };
+      } catch (e) {
+        alert('Lỗi micro: ' + e.message);
+      }
+    }
+
+    function stopMic() {
+      isRecording = false;
+      if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+      if (audioContext) { audioContext.close(); audioContext = null; }
+      if (wsAudio) { wsAudio.close(); wsAudio = null; }
+
+      document.getElementById('mic-label').textContent = 'Bật Mic Phòng';
+      document.getElementById('btn-mic-toggle').className = 'mt-3 w-full py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center justify-center gap-2 transition';
+    }
+
+    // Helper functions
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/[&<>"']/g, function(m) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];
+      });
+    }
+    function formatTime(sec) {
+      if (!sec) return '00:00';
+      const m = Math.floor(sec / 60).toString().padStart(2, '0');
+      const s = Math.floor(sec % 60).toString().padStart(2, '0');
+      return `${m}:${s}`;
+    }
+    function getAvatarColor(name) {
+      const colors = ['bg-emerald-600', 'bg-lime-600', 'bg-teal-600', 'bg-purple-600', 'bg-indigo-600', 'bg-blue-600', 'bg-pink-600'];
+      let hash = 0;
+      for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+      return colors[Math.abs(hash) % colors.length];
+    }
+    function renderMarkdown(md) {
+      let html = escapeHtml(md);
+      html = html.replace(/^# (.*$)/gim, '<h2 class="text-base font-bold text-white mb-2">$1</h2>');
+      html = html.replace(/^## (.*$)/gim, '<h3 class="text-sm font-semibold text-emerald-400 mt-3 mb-1">$1</h3>');
+      html = html.replace(/\*\*(.*?)\*\*/gim, '<strong>$1</strong>');
+      return html.replace(/\n/g, '<br>');
+    }
+  </script>
+</body>
+</html>

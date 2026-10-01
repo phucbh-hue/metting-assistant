@@ -1,0 +1,13 @@
+# Meeting Assistant AI - Python Dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-dotenv>=1.0.0
+pymongo>=4.6.0
+mongomock>=4.1.0
+numpy>=1.24.0
+pydantic>=2.5.0
+websockets>=12.0
+python-multipart>=0.0.6
+sherpa-onnx>=1.9.0
+anthropic>=0.39.0
+google-genai>=1.0.0

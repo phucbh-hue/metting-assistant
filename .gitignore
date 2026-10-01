@@ -1,0 +1,52 @@
+# Environment & secrets
+.env
+.env.local
+.env.production
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ONNX models (too large for git)
+models/*.onnx
+
+# Audio test files
+*.wav
+*.mp3
+*.ogg
+*.flac
+
+# Static assets (optional - uncomment if you want to exclude)
+# static/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Agent/skill configs (local tooling)
+.agents/
+.dsh/
+.gemini/
+
+# Debug files
+debug_*.py
+
+# Logs
+*.log
