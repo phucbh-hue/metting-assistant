@@ -226,6 +226,126 @@ async def generate_web_sandbox(meeting_id: int, prompt_request: str,
     return {"id": aid, "kind": "web_design", "title": title, "content": html_code}
 
 
+def _json_from_text(text: str) -> Any:
+    """Lấy object JSON đầu tiên trong phản hồi LLM (bỏ ```json ... ```)."""
+    if not text:
+        return {}
+    clean = re.sub(r"```(?:json)?\s*", "", text)
+    clean = re.sub(r"```\s*", "", clean).strip()
+    try:
+        return json.loads(clean)
+    except Exception:
+        pass
+    s, e = clean.find("{"), clean.rfind("}")
+    if s != -1 and e > s:
+        try:
+            return json.loads(clean[s:e + 1])
+        except Exception:
+            pass
+    return {}
+
+
+# ==============================================================================
+# 3b. BỘ SLIDE TRÌNH BÀY (PRESENTATION DECK)
+# ==============================================================================
+SLIDE_LAYOUTS = ("title", "bullets", "two_column", "quote", "metrics")
+
+SLIDES_SYSTEM = """Bạn là chuyên gia soạn slide thuyết trình cho cuộc họp nội bộ UrBox.
+Dựa vào yêu cầu, nội dung cuộc họp và dữ liệu tra cứu, soạn một bộ slide NGẮN GỌN, dễ trình bày.
+
+Quy tắc:
+- 4-8 slide. Slide đầu dùng layout "title" (bullets[0] là phụ đề). Các slide sau dùng "bullets",
+  "two_column" (ý chia 2 cột), "metrics" (mỗi ý dạng "Nhãn: Giá trị") hoặc "quote".
+- Mỗi slide tối đa 5 ý, mỗi ý tối đa 14 từ, viết cụ thể bằng tên người, số liệu, mốc thời gian có trong dữ liệu.
+- "notes": lời nhắc cho người trình bày (1-3 câu, nói gì ở slide này), dùng để nhắc bài.
+- Ngày ghi dd/mm/yyyy, tiền ghi dạng 1.000.000đ. Không bịa số liệu không có trong dữ liệu.
+
+Chỉ trả về MỘT JSON:
+{"title": "Tên bộ slide", "slides": [{"title": "...", "layout": "bullets", "bullets": ["...", "..."], "notes": "..."}]}"""
+
+SLIDES_REFINE_SYSTEM = """Bạn cùng người dùng chỉnh bộ slide đang trình chiếu trong cuộc họp.
+Áp dụng đúng yêu cầu sửa (thường là cho slide đang xem), giữ nguyên các slide không liên quan, giữ cùng cấu trúc JSON.
+Chỉ trả về MỘT JSON:
+{"chat_message": "Một câu tiếng Việt cho biết đã sửa gì", "focus_slide": <số thứ tự slide liên quan nhất, bắt đầu từ 1>,
+ "deck": {"title": "...", "slides": [{"title": "...", "layout": "...", "bullets": ["..."], "notes": "..."}]}}"""
+
+
+def normalize_deck(data: Any) -> Optional[Dict[str, Any]]:
+    """Chuẩn hóa bộ slide từ LLM; None nếu không hợp lệ."""
+    if isinstance(data, dict) and isinstance(data.get("deck"), dict):
+        data = data["deck"]
+    if not isinstance(data, dict) or not isinstance(data.get("slides"), list):
+        return None
+    slides = []
+    for s in data["slides"][:15]:
+        if isinstance(s, str):
+            s = {"title": s}
+        if not isinstance(s, dict):
+            continue
+        title = str(s.get("title") or "").strip()[:120]
+        bullets = s.get("bullets") or s.get("points") or []
+        if isinstance(bullets, str):
+            bullets = re.split(r"\n+|•", bullets)
+        bullets = [str(b).strip(" -•\t")[:200] for b in bullets if str(b).strip(" -•\t")][:6]
+        if not title and not bullets:
+            continue
+        layout = s.get("layout") if s.get("layout") in SLIDE_LAYOUTS else ("title" if not slides else "bullets")
+        slides.append({"title": title or f"Slide {len(slides) + 1}", "layout": layout, "bullets": bullets,
+                       "notes": str(s.get("notes") or "").strip()[:600]})
+    if not slides:
+        return None
+    return {"title": str(data.get("title") or slides[0]["title"]).strip()[:120], "slides": slides}
+
+
+async def generate_slides(meeting_id: int, prompt_request: str, context_text: str = "",
+                          data_text: str = "") -> Dict[str, Any]:
+    user_prompt = (f"Yêu cầu: {prompt_request}\n\nDữ liệu tra cứu (nếu có):\n{data_text or '(không có)'}\n\n"
+                   f"Nội dung cuộc họp gần nhất:\n{context_text or '(chưa có)'}")
+    deck = normalize_deck(_json_from_text(await _call_llm(SLIDES_SYSTEM, user_prompt, max_tokens=3500)))
+    if deck is None:
+        raise RuntimeError("AI chưa tạo được bộ slide hợp lệ, hãy thử lại với yêu cầu cụ thể hơn")
+    title = f"Slide: {deck['title'][:60]}"
+    aid = db.save_artifact(meeting_id=meeting_id, kind="slides", title=title,
+                           content=json.dumps(deck, ensure_ascii=False), prompt_trigger=prompt_request)
+    return db.get_artifact(aid)
+
+
+# ==============================================================================
+# 3c. NHẬN XÉT NHANH (để trợ lý đọc to trong lúc chờ phân tích)
+# ==============================================================================
+INSIGHT_KINDS = ("risk", "todo", "improve", "good", "info")
+
+INSIGHTS_SYSTEM = """Bạn là trợ lý cuộc họp, vừa đọc transcript. Nêu tối đa 4 nhận xét NGẮN, CỤ THỂ, có ích ngay:
+rủi ro hoặc vấn đề, việc chưa có người phụ trách hay hạn chót, điểm cần làm rõ hoặc cải thiện, điều đang làm tốt.
+Mỗi nhận xét là MỘT câu nói tự nhiên (tối đa 25 từ), nêu đúng tên người, số liệu, mốc thời gian trong cuộc họp,
+không chung chung, không lặp lại transcript. Không có gì đáng nói thì trả về danh sách rỗng.
+Chỉ trả về MỘT JSON: {"insights": [{"kind": "risk|todo|improve|good", "text": "..."}]}"""
+
+
+def normalize_insights(data: Any) -> List[Dict[str, str]]:
+    items = data.get("insights") if isinstance(data, dict) else data
+    out = []
+    for it in items if isinstance(items, list) else []:
+        if isinstance(it, str):
+            it = {"kind": "info", "text": it}
+        if not isinstance(it, dict):
+            continue
+        text = str(it.get("text") or "").strip()
+        if text:
+            out.append({"kind": it.get("kind") if it.get("kind") in INSIGHT_KINDS else "info", "text": text[:300]})
+    return out[:4]
+
+
+async def meeting_insights(segments: List[Dict[str, Any]], meeting: Optional[Dict[str, Any]] = None,
+                           focus: str = "") -> List[Dict[str, str]]:
+    if not segments:
+        return []
+    lines = "\n".join(f"{s.get('speaker_label', 'Không rõ')}: {s.get('text', '')}" for s in segments[-120:])
+    prompt = (f"Cuộc họp: {(meeting or {}).get('title', '')}\nTrọng tâm: {focus or 'toàn bộ cuộc họp'}\n\n"
+              f"Transcript:\n{lines}")
+    return normalize_insights(_json_from_text(await _call_llm(INSIGHTS_SYSTEM, prompt, max_tokens=800)))
+
+
 # ==============================================================================
 # 4. TRÒ CHUYỆN CO-DESIGN HAI CHIỀU (CONVERSATIONAL CO-DESIGN REFINEMENT)
 # ==============================================================================
@@ -242,11 +362,37 @@ Nhiệm vụ của bạn:
    - Mã nguồn hoàn chỉnh mới sau khi đã cập nhật (trong khối ```html, ```mermaid hoặc ```markdown tương ứng)."""
 
 
-async def co_design_refine(meeting_id: int, artifact_id: int, user_feedback: str) -> Dict[str, Any]:
+async def _refine_slides(meeting_id: int, art: Dict[str, Any], user_feedback: str,
+                         slide_index: Optional[int]) -> Dict[str, Any]:
+    deck = normalize_deck(_json_from_text(art.get("content", ""))) or {"title": art.get("title", ""), "slides": []}
+    cur = (slide_index or 0) + 1
+    prompt = (f"## Bộ slide hiện tại (JSON):\n{json.dumps(deck, ensure_ascii=False, indent=1)}\n\n"
+              f"## Người dùng đang xem slide số {cur}\n\n## Yêu cầu chỉnh sửa:\n\"{user_feedback}\"")
+    data = _json_from_text(await _call_llm(SLIDES_REFINE_SYSTEM, prompt, max_tokens=4000))
+    new_deck = normalize_deck(data)
+    if new_deck is None:
+        raise RuntimeError("AI chưa sửa được bộ slide, hãy nói rõ hơn cần sửa slide nào, sửa gì")
+    try:
+        focus = min(max(int(data.get("focus_slide")) - 1, 0), len(new_deck["slides"]) - 1)
+    except Exception:
+        focus = min(cur - 1, len(new_deck["slides"]) - 1)
+    new_aid = db.save_artifact(meeting_id=meeting_id, kind="slides", title=art.get("title", ""),
+                               content=json.dumps(new_deck, ensure_ascii=False), prompt_trigger=user_feedback,
+                               parent_id=art["id"])
+    out = db.get_artifact(new_aid)
+    out.update({"chat_message": str(data.get("chat_message") or "").strip() or f"Đã sửa slide: {user_feedback}",
+                "focus_slide": focus})
+    return out
+
+
+async def co_design_refine(meeting_id: int, artifact_id: int, user_feedback: str,
+                           slide_index: Optional[int] = None) -> Dict[str, Any]:
     """Cập nhật bản thiết kế theo đàm thoại trực tiếp với người dùng (Co-Design Loop)."""
     art = db.get_artifact(artifact_id)
     if not art:
         raise ValueError(f"Không tìm thấy artifact id={artifact_id}")
+    if art.get("kind") == "slides":
+        return await _refine_slides(meeting_id, art, user_feedback, slide_index)
 
     kind = art.get("kind", "web_design")
     cur_content = art.get("content", "")

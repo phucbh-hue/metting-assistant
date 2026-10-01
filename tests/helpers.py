@@ -42,6 +42,8 @@ def reset_db():
     for name in d.list_collection_names():
         d[name].drop()
     db.init()
+    from meeting import llm
+    llm._assistant_cache.update({"value": None, "at": 0.0})
     for s in list(live.SESSIONS.values()):
         s.dispose()
     live.SESSIONS.clear()

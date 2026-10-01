@@ -93,6 +93,18 @@ class AcceptReq(BaseModel):
     name: Optional[str] = None
 
 
+class StageReq(BaseModel):
+    action: str
+    artifact_id: Optional[int] = None
+    slide: Optional[int] = None
+    query: Optional[str] = None
+
+
+class AssistantSettings(BaseModel):
+    name: str
+    aliases: List[str] = Field(default_factory=list)
+
+
 class VoiceUpdate(BaseModel):
     name: Optional[str] = None
     role: Optional[str] = None
@@ -191,6 +203,21 @@ def health():
 @app.get("/api/stats")
 def stats():
     return db.get_stats()
+
+
+@app.get("/api/settings/assistant")
+def get_assistant_settings():
+    return {**llm.assistant_config(refresh=True), "generic": ["trợ lý ơi", "hey assistant", "@ai", "bot ơi"]}
+
+
+@app.put("/api/settings/assistant")
+def put_assistant_settings(req: AssistantSettings):
+    """Đặt tên gọi trợ lý. Áp dụng ngay cho việc nhận lời gọi; từ vựng Soniox cập nhật ở lần bật mic sau."""
+    try:
+        cfg = llm.set_assistant_config(req.name, req.aliases)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {**cfg, "generic": ["trợ lý ơi", "hey assistant", "@ai", "bot ơi"]}
 
 
 @app.get("/api/directory")
@@ -421,6 +448,44 @@ async def save_speaker_voice(mid: int, sid: int):
     return res
 
 
+@app.post("/api/meetings/{mid}/stage")
+async def control_stage(mid: int, req: StageReq):
+    """Điều khiển màn hình trình bày: show / next / prev / goto / topic / back."""
+    from meeting.live import MeetingSession
+    if req.action not in MeetingSession.STAGE_ACTIONS:
+        raise HTTPException(status_code=400, detail=f"Lệnh không hợp lệ: {req.action}")
+    s = await _session_or_404(mid)
+    try:
+        res = await s.stage_action(req.action, artifact_id=req.artifact_id, slide=req.slide, query=req.query)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    s.dispose_if_idle()
+    return res
+
+
+@app.post("/api/meetings/{mid}/insights")
+async def meeting_insights(mid: int, payload: Optional[Dict[str, Any]] = None):
+    """Trợ lý xem lại cuộc họp và nêu nhận xét (đọc to trên giao diện)."""
+    if not artifacts.llm_available():
+        raise HTTPException(status_code=503, detail="Chưa cấu hình ANTHROPIC_API_KEY hoặc GEMINI_API_KEY")
+    s = await _session_or_404(mid)
+    try:
+        items = await s.analyze_now((payload or {}).get("focus", ""))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Gọi LLM thất bại: {e}")
+    s.dispose_if_idle()
+    return {"insights": items}
+
+
+@app.post("/api/meetings/{mid}/reanalyze")
+async def reanalyze_meeting(mid: int):
+    """Chạy lại nhận diện người nói cho toàn bộ cuộc họp (giữ tên đã đặt)."""
+    s = await _session_or_404(mid)
+    res = await s.reanalyze()
+    await _finish_op(s)
+    return res
+
+
 @app.post("/api/meetings/{mid}/segments/{seq}/speaker")
 async def reassign_meeting_segment(mid: int, seq: int, req: ReassignReq):
     s = await _session_or_404(mid)
@@ -490,6 +555,31 @@ async def confirm_identity(mid: int, payload: Dict[str, Any]):
 # ==============================================================================
 # AI ASSISTANT & CO-DESIGN CHAT DUPLEX
 # ==============================================================================
+@app.post("/api/meetings/{mid}/command")
+async def assistant_command(mid: int, payload: Dict[str, Any]):
+    """Câu lệnh gõ cho trợ lý, xử lý giống hệt khi gọi bằng giọng nói (chuyển slide, nhắc bài, hỏi đáp...).
+
+    Kết quả phát qua WebSocket sự kiện; đồng thời trả về danh sách sự kiện để trang không có WebSocket
+    (cuộc họp đã kết thúc) vẫn hiển thị được."""
+    text = (payload.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Thiếu nội dung câu lệnh")
+    s = await _session_or_404(mid)
+    needs_llm = llm.stage_intent(text) is None and not (s.stage["artifact_id"] and llm.is_edit_command(text))
+    if needs_llm and not artifacts.llm_available():
+        raise HTTPException(status_code=503, detail="Chưa cấu hình ANTHROPIC_API_KEY hoặc GEMINI_API_KEY")
+    q = await s.subscribe()
+    try:
+        await s._handle_ai_activation(text, text, llm.assistant_config()["name"], source="text")
+    finally:
+        s.unsubscribe(q)
+    events = []
+    while not q.empty():
+        events.append(q.get_nowait())
+    s.dispose_if_idle()
+    return {"events": events}
+
+
 @app.post("/api/meetings/{mid}/ai-ask")
 async def ask_assistant(mid: int, payload: Dict[str, Any]):
     prompt = (payload.get("prompt") or "").strip()
@@ -508,13 +598,19 @@ async def ask_assistant(mid: int, payload: Dict[str, Any]):
         if ls is not None:
             await ls.emit({"type": "ai_tool_call", "tool": tool_info.get("tool"), "args": tool_info.get("args")})
 
+    async def _on_insights(items: List[Dict[str, str]]):
+        if ls is not None:
+            await ls.emit({"type": "ai_insights", "items": items, "source": "request"})
+
     try:
         res = await llm.think_and_act(meeting_id=mid, prompt=prompt, segments=segs, trigger="chat_message",
-                                      on_thinking=_on_thinking, on_tool=_on_tool)
+                                      on_thinking=_on_thinking, on_tool=_on_tool, on_insights=_on_insights)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Trợ lý AI lỗi: {e}")
     if ls is not None:
         await ls.emit({"type": "ai_response", "response": res})
+        if res.get("artifact"):
+            await ls.stage_action("show", artifact_id=res["artifact"]["id"])
     return res
 
 
@@ -523,15 +619,21 @@ async def co_design(mid: int, payload: Dict[str, Any]):
     artifact_id, feedback = payload.get("artifact_id"), (payload.get("feedback") or "").strip()
     if not artifact_id or not feedback:
         raise HTTPException(status_code=400, detail="Thiếu artifact_id hoặc feedback")
+    ls = live.SESSIONS.get(mid)
+    slide = payload.get("slide")
+    if slide is None and ls is not None and ls.stage["artifact_id"] == int(artifact_id):
+        slide = ls.stage["slide"]
     try:
-        res = await artifacts.co_design_refine(meeting_id=mid, artifact_id=int(artifact_id), user_feedback=feedback)
+        res = await artifacts.co_design_refine(meeting_id=mid, artifact_id=int(artifact_id), user_feedback=feedback,
+                                               slide_index=int(slide) if slide is not None else None)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Co-design lỗi: {e}")
-    ls = live.SESSIONS.get(mid)
     if ls is not None:
         await ls.emit({"type": "artifact_updated", "artifact": res})
+        if ls.stage["artifact_id"] in (int(artifact_id), None):
+            await ls.stage_action("show", artifact_id=res["id"], slide=res.get("focus_slide", slide))
     return res
 
 

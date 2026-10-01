@@ -81,6 +81,31 @@ class SonioxErrorRecoveryTests(unittest.TestCase):
         self.assertEqual(label(sp, keys[4]), "Người nói 2")
         self.assertEqual(sp.by_key[keys[4]]["reason"], "voice_override")
 
+    def test_new_person_hidden_under_reused_soniox_label_is_split_out(self):
+        """Lỗi thật (cuộc họp #30): đang phát podcast 2 người, người trong phòng nói chen vào nhưng Soniox
+        gắn cùng nhãn với khách mời. Phải tách thành người nói thứ 3 và chuyển ngược các câu của người đó."""
+        bank = VoiceBank(seed=15, n=3, channel=0.9)   # cùng phòng/mic: giọng khác người vẫn giống ~0.4-0.6
+        sp = voice.MeetingSpeakers()
+        podcast = script_add(sp, bank, [(0, "1", 5.0), (1, "2", 4.0), (0, "1", 3.0), (1, "2", 6.0),
+                                        (1, "2", 0.4), (0, "1", 4.0), (1, "2", 5.0)])
+        newcomer = script_add(sp, bank, [(2, "2", 0.6), (2, "2", 2.5), (2, "2", 0.9), (2, "2", 4.5),
+                                         (2, "2", 3.0), (2, "2", 0.5), (2, "2", 2.4)], start_key=50, t0=100)
+        self.assertEqual(sp.pop_splits(), [(2, 3)])
+        self.assertEqual(set(labels_of(sp, newcomer)), {"Người nói 3"})
+        self.assertEqual(labels_of(sp, podcast), [f"Người nói {i}" for i in (1, 2, 1, 2, 2, 1, 2)])
+        # Khách mời nói lại (Soniox vẫn gắn "2"): giọng khớp hẳn khách mời -> trả về đúng người
+        back = script_add(sp, bank, [(1, "2", 5.0)], start_key=90, t0=200)
+        self.assertEqual(label(sp, back[0]), "Người nói 2")
+
+    def test_same_speaker_is_not_split(self):
+        """Một người nói lâu, nhiều câu ngắn dài khác nhau: không được tự tách thành 2 người."""
+        bank = VoiceBank(seed=16, n=2, channel=0.9)
+        sp = voice.MeetingSpeakers()
+        script = [(0, "1", [1.2, 4.0, 2.5, 6.0, 1.5, 3.0, 5.0, 2.0, 1.1, 4.4][i % 10]) for i in range(30)]
+        script_add(sp, bank, script)
+        self.assertEqual(sp.pop_splits(), [])
+        self.assertEqual(len(sp.visible_profiles()), 1)
+
     def test_reconnect_new_epoch_reidentifies_by_voice(self):
         """Stream nối lại -> nhãn Soniox bắt đầu lại (thậm chí đảo nhau). CAM++ phải nhận lại đúng người."""
         bank = VoiceBank(seed=9)

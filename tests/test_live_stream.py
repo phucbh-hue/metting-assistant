@@ -116,6 +116,21 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((a["speaker_label"], b["speaker_label"]), ("Người nói 1", "Người nói 2"))
         self.assertAlmostEqual(b["t_start"] - a["t_start"], 2.6, places=1)
 
+    async def test_short_fragments_are_joined_and_punctuation_dropped(self):
+        """Lỗi thật (#30): nói ngập ngừng sinh ra câu vụn ("Anh ngồi xin" / "ngắt một chút nhé.") và dòng "."."""
+        ws = FakeSoniox.instances[0]
+        await self.stream.feed(tone(6.0))
+        with mock.patch.object(live, "SHORT_HOLD_S", 0.3):
+            ws.push({"tokens": [tok("Anh ngồi xin", 0, 600, "2"), tok("<end>", 600, 600)], "final_audio_proc_ms": 700})
+            await asyncio.sleep(0.05)
+            ws.push({"tokens": [tok(" ngắt một chút nhé.", 1700, 2400, "2"), tok("<end>", 2400, 2400)],
+                     "final_audio_proc_ms": 2500})
+            self.assertTrue(await self.wait_for(lambda: len(self.s.segments) == 1))
+            ws.push({"tokens": [tok(".", 3500, 3600, "2"), tok("<end>", 3600, 3600)], "final_audio_proc_ms": 3700})
+            await asyncio.sleep(0.6)
+        await self.s.drain()
+        self.assertEqual([x["text"] for x in self.s.segments], ["Anh ngồi xin ngắt một chút nhé."])
+
     async def test_reconnect_replays_audio_and_keeps_timeline(self):
         """Lỗi cũ: sau khi nối lại, timestamp Soniox bắt đầu từ 0 nhưng code không cộng offset -> cắt sai audio."""
         ws1 = FakeSoniox.instances[0]

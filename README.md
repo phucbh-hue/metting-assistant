@@ -1,15 +1,68 @@
 # UrBox Meeting Copilot
 
 Trợ lý cuộc họp nội bộ: bóc băng thời gian thực (Soniox), **tự tách và nhận ra từng người nói** (CAM++ 192D),
-AI đoán tên người nói từ hội thoại, trợ lý Jarvis tra cứu dữ liệu nội bộ qua MCP, tự lập biên bản, vẽ sơ đồ
-và phác thảo giao diện.
+AI đoán tên người nói từ hội thoại, trợ lý (tên gọi tùy chọn, mặc định Jarvis) có khuôn mặt và giọng nói,
+tra cứu dữ liệu nội bộ qua MCP, soạn và trình chiếu slide theo lệnh giọng nói, nhắc bài, tự lập biên bản,
+vẽ sơ đồ và phác thảo giao diện.
 
-- Phiên bản: 3.0 - cập nhật 01/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.1 - cập nhật 01/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
 
-## 1. Có gì mới ở bản 3.0
+## 1. Có gì mới ở bản 3.1
+
+### Trợ lý có khuôn mặt, giọng nói và màn hình trình chiếu
+
+- Bấm biểu tượng toàn màn hình ở góc khung AI, hoặc nói "Jarvis ơi, mở màn hình trình bày", để mở màn hình
+  trình chiếu: bên trái là khuôn mặt trợ lý, bên phải là nội dung đang trình bày (slide, biên bản, sơ đồ, giao diện).
+- Khuôn mặt đổi theo trạng thái: **chờ**, **lắng nghe** (vòng sáng co giãn theo âm lượng mic), **suy nghĩ**
+  (vòng nét đứt xoay, mắt nhìn lên), **nói** (miệng mấp máy theo lời). Nét mặt vui hoặc lo lắng theo nội dung.
+- Trợ lý nói bằng giọng tiếng Việt cài trên máy (Web Speech API). Máy chưa có giọng tiếng Việt thì trợ lý hiện
+  phụ đề; cài giọng Tiếng Việt trong Windows (Cài đặt > Thời gian và ngôn ngữ > Giọng nói). Giọng trực tuyến
+  "Online (Natural)" của Microsoft Edge chỉ được dùng khi người dùng bấm cho phép (xem mục Lưu ý dữ liệu).
+  Nút "Giọng nói" hoặc phím V để bật/tắt; bấm vào khuôn mặt để trợ lý dừng nói.
+- Khi trợ lý đang nói, mic gửi khoảng lặng thay cho âm thanh để giọng trợ lý không lọt vào transcript
+  (mốc thời gian vẫn khớp). Lời xác nhận chuyển slide chỉ hiện phụ đề để không cắt lời người trình bày.
+- Trong lúc chờ xử lý (soạn slide, lập biên bản cuối buổi), trợ lý nêu nhận xét: rủi ro, việc chưa có người nhận,
+  điểm cần cải thiện, điểm tốt. Nút **Nhận xét nhanh** để trợ lý xem lại cả cuộc họp bất kỳ lúc nào.
+
+### Bộ slide và điều khiển bằng lời
+
+"Jarvis ơi, làm slide báo cáo tiến độ sprint" -> trợ lý soạn bộ slide (5 kiểu bố cục: tiêu đề, gạch đầu dòng,
+hai cột, trích dẫn, số liệu; kèm ghi chú cho người trình bày) rồi đưa lên màn hình. Các lệnh trình chiếu dưới đây
+chạy ngay, không gọi LLM:
+
+| Nói sau tên gọi (hoặc gõ vào ô lệnh) | Kết quả |
+|---|---|
+| "chuyển slide", "slide tiếp theo", "tiếp đi" | Sang slide sau |
+| "quay lại slide trước" | Về slide trước |
+| "mở slide số 3", "mở slide về ngân sách" | Nhảy tới slide theo số thứ tự hoặc chủ đề |
+| "quay lại phần trình bày lúc nãy" | Về nội dung trình bày trước đó, ví dụ từ biên bản về bộ slide |
+| "nhắc bài", "ý tiếp theo" | Mở khung nhắc bài và đọc ý tiếp theo chưa nói |
+| "mở màn hình trình bày", "thu nhỏ màn hình trình bày" | Mở hoặc thu nhỏ màn hình trình chiếu |
+| "nhận xét nhanh về cuộc họp" | Trợ lý xem lại cuộc họp và nêu nhận xét |
+| "sửa slide này thêm số liệu doanh thu" | Sửa đúng slide đang chiếu (có gọi LLM), lưu thành phiên bản mới |
+
+- Khung nhắc bài đánh dấu ý đã nói dựa trên transcript từ lúc slide được chiếu và tô sáng ý tiếp theo.
+- Phím tắt trên màn hình trình chiếu: mũi tên trái/phải (chuyển slide), N (nhắc bài), V (giọng nói),
+  F (toàn màn hình), Esc (thu nhỏ).
+- Câu gõ trong ô chat đi cùng luồng với câu gọi bằng giọng nói (`POST /api/meetings/{id}/command`).
+
+### Đặt tên gọi cho trợ lý
+
+Biểu tượng bánh răng ở thanh bên trái -> đổi tên gọi (mặc định "Jarvis") và các tên gọi khác. Cách gọi hợp lệ:
+"Bông ơi, ...", "Bông, ...", "Bông tóm tắt giúp anh", hoặc gọi chung "trợ lý ơi". Gọi tên rồi ngừng thì trợ lý
+chờ câu yêu cầu tiếp theo trong 8 giây. Câu chỉ nhắc tới tên (ví dụ "bông hoa đẹp quá") không đánh thức trợ lý.
+
+### Phân biệt người nói
+
+- Tự phát hiện khi Soniox gán chung một nhãn cho hai người (thường gặp khi có người thứ ba vào giữa buổi):
+  tách hồ sơ theo giọng (CAM++), báo trên giao diện, có thể gộp lại nếu tách sai.
+- Menu "..." của cuộc họp -> **Phân tích lại người nói**: chạy lại bộ phân vai trên toàn bộ câu đã lưu.
+  Tên đã đặt được giữ cho người nói xuất hiện sớm nhất trong nhóm.
+
+## 2. Bản 3.0: sửa lỗi phân biệt người nói
 
 | Vấn đề ở bản 2.5 | Nguyên nhân gốc | Cách sửa |
 |---|---|---|
@@ -27,7 +80,7 @@ Khác:
 - Nội dung do AI sinh ra được làm sạch (DOMPurify) và chạy trong iframe sandbox cô lập.
 - Kết thúc cuộc họp trả về ngay, biên bản lập ở chế độ nền.
 
-## 2. Cách phân biệt người nói
+## 3. Cách phân biệt người nói
 
 ```
 Soniox (nhãn người nói theo phiên)  ─┐
@@ -43,10 +96,11 @@ CAM++ (vector giọng 192D mỗi câu)  ──┘          │               │
 3. Sau khi Soniox nối lại (nhãn đánh số lại từ đầu), nhận lại từng người bằng giọng.
 4. Câu quá ngắn ("dạ", "ừ") không đủ tính vector: theo nhãn Soniox.
 5. Hai hồ sơ có giọng trùng khớp mạnh thì tự gộp; người dùng có thể gộp, tách, đổi người nói của từng câu.
+6. Một nhãn Soniox chứa hai giọng khác hẳn nhau (mỗi nhóm từ 3 câu, 6 giây trở lên) thì tách thành hai hồ sơ.
 
 Ngưỡng được đo trên dữ liệu thật của model CAM++: cùng người câu ngắn 0.3-0.6, câu dài 0.6-0.87; khác người 0.0-0.4.
 
-## 3. Cấu trúc thư mục
+## 4. Cấu trúc thư mục
 
 ```
 meeting-assistant/
@@ -55,11 +109,11 @@ meeting-assistant/
 │   ├── live.py         # Luồng Soniox (epoch, phát lại audio, finalize) + MeetingSession
 │   ├── voice.py        # CAM++ embedding + MeetingSpeakers (theo dõi người nói)
 │   ├── identity.py     # IdentityEngine: AI đoán tên người nói (debounce, gợi ý xác nhận)
-│   ├── llm.py          # Wake-word "Jarvis" + Thinking/ReAct với Mock MCP
-│   ├── artifacts.py    # Biên bản, sơ đồ Mermaid, giao diện web, co-design
+│   ├── llm.py          # Tên gọi trợ lý, lệnh trình chiếu, Thinking/ReAct với Mock MCP
+│   ├── artifacts.py    # Biên bản, bộ slide, nhận xét, sơ đồ Mermaid, giao diện web, co-design
 │   ├── mcp.py          # Mock MCP: danh bạ, Jira, kiến trúc, lịch sử họp
 │   ├── db.py           # MongoDB (hoặc in-memory khi MEETING_DB=mock)
-│   └── index.html      # Giao diện web (SPA)
+│   └── index.html      # Giao diện web (SPA), gồm màn hình trình chiếu và khuôn mặt trợ lý
 ├── tests/              # Test offline (unittest), không gọi API ngoài
 ├── scripts/
 │   ├── demo_replay.py              # Server demo phát lại cuộc họp mẫu, không cần mic
@@ -68,7 +122,7 @@ meeting-assistant/
 └── static/
 ```
 
-## 4. Chạy
+## 5. Chạy
 
 ```powershell
 cd "C:\work\cralwer with ai\ASR\meeting-assistant"
@@ -77,10 +131,10 @@ $py = "C:\work\cralwer with ai\ASR\interviewer-assistant-AI-circle\.venv\Scripts
 # Server
 & $py -m uvicorn meeting.app:app --host 127.0.0.1 --port 8080
 
-# Demo không cần mic (DB in-memory, giọng tổng hợp): mở http://127.0.0.1:8090
+# Demo không cần mic (DB in-memory, giọng tổng hợp, có sẵn bộ slide mẫu): mở http://127.0.0.1:8090
 & $py scripts/demo_replay.py --port 8090
 
-# Test offline (~5 giây)
+# Test offline (~15 giây)
 & $py -m unittest discover -s tests -t . -v
 
 # Kiểm thử tích hợp (gọi Soniox / LLM thật, có tính phí, DB vẫn in-memory)
@@ -92,7 +146,10 @@ Luồng sử dụng: **Tạo cuộc họp** (góc trên bên phải) -> **Bật 
 màu riêng -> bấm **Đặt tên** (hoặc xác nhận gợi ý của AI, tick "Lưu mẫu giọng" nếu người đó đồng ý) ->
 **Kết thúc cuộc họp** để lập biên bản. Sau khi kết thúc vẫn đặt tên, gộp người nói và sửa từng câu được.
 
-## 5. Cấu hình
+Trình bày: nhờ trợ lý soạn slide (hoặc chọn tab **Slide**) -> bấm biểu tượng toàn màn hình ở khung AI ->
+nói "<tên gọi> ơi, chuyển slide", "nhắc bài"... Cần giọng Tiếng Việt cài trên Windows để trợ lý nói thành tiếng.
+
+## 6. Cấu hình
 
 Xem `.env.example`. Các biến quan trọng:
 
@@ -107,7 +164,7 @@ Xem `.env.example`. Các biến quan trọng:
 | `SONIOX_LANGUAGE_HINTS` | `vi,en` | Gợi ý ngôn ngữ cho Soniox |
 | `IDENTITY_MIN_INTERVAL_S` | `20` | Khoảng cách tối thiểu giữa 2 lần AI đoán tên |
 
-## 6. API chính
+## 7. API chính
 
 | Method | Đường dẫn | Mô tả |
 |---|---|---|
@@ -119,15 +176,24 @@ Xem `.env.example`. Các biến quan trọng:
 | POST | `/api/meetings/{id}/speakers/{sid}/save-voice` | Lưu mẫu giọng của người nói |
 | POST | `/api/meetings/{id}/segments/{seq}/speaker` | Đổi người nói của một câu (`target_sid: null` = người mới) |
 | POST | `/api/meetings/{id}/infer-speakers` | AI đoán tên ngay |
+| POST | `/api/meetings/{id}/reanalyze` | Phân tích lại người nói trên toàn bộ câu đã lưu |
+| POST | `/api/meetings/{id}/command` | Câu lệnh cho trợ lý, xử lý như khi gọi bằng giọng nói; trả về danh sách sự kiện |
+| POST | `/api/meetings/{id}/stage` | Điều khiển màn hình trình chiếu: `show`, `next`, `prev`, `goto`, `topic`, `back` |
+| POST | `/api/meetings/{id}/insights` | Trợ lý nêu nhận xét về cuộc họp |
+| POST | `/api/meetings/{id}/co-design` | Sửa một sản phẩm AI (slide đang chiếu được ưu tiên) |
+| GET/PUT | `/api/settings/assistant` | Tên gọi trợ lý và các tên gọi khác |
 | POST | `/api/meetings/{id}/inferences/{iid}/accept` \| `dismiss` | Xác nhận / bỏ qua gợi ý của AI |
 | GET/POST/PATCH/DELETE | `/api/voices` | Hồ sơ giọng nói; `POST /api/voices/enroll-audio` để thu mẫu |
 | WS | `/ws/meeting/{id}/audio` | PCM16 16kHz mono từ mic (một thiết bị ghi mỗi cuộc họp) |
-| WS | `/ws/meeting/{id}/events` | Sự kiện: `segment`, `segments_relabeled`, `speakers`, `interim`, `identity_suggestion`... |
+| WS | `/ws/meeting/{id}/events` | Sự kiện: `segment`, `segments_relabeled`, `speakers`, `speakers_split`, `interim`, `identity_suggestion`, `ai_say`, `ai_insights`, `stage_state`, `stage_command`, `stage_prompt`... |
 
-## 7. Lưu ý dữ liệu
+## 8. Lưu ý dữ liệu
 
 - Bộ test của bản 2.5 ghi vector **ngẫu nhiên** vào DB thật (hồ sơ có `consent_by` = `system_admin` hoặc
   `meeting_host`, 1-2 mẫu). Nếu từng chạy các test đó, hãy rà trang **Hồ sơ giọng nói**, xóa hồ sơ không đúng
   rồi thu mẫu lại bằng **Thu mẫu giọng**.
 - Cuộc họp tạo từ bản cũ vẫn mở được: hồ sơ người nói được dựng lại từ nhãn cũ ở lần mở đầu tiên.
 - Ảnh `static/wealth-bg.webp` (ảnh chụp một thiết kế của bên thứ ba) không còn được giao diện sử dụng.
+- Giọng nói của trợ lý mặc định dùng giọng cài trên máy, không gửi dữ liệu ra ngoài. Giọng "Online (Natural)" của
+  Microsoft Edge gửi nội dung câu trả lời tới dịch vụ đọc của Microsoft nên chỉ dùng khi người dùng bấm cho phép;
+  không bật cho cuộc họp có nội dung nhạy cảm khi chưa được phê duyệt.

@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -29,6 +30,10 @@ log = logging.getLogger("meeting.live")
 RATE = 16000
 BPS = RATE * 2                  # bytes / giây (PCM16 mono)
 SEGMENT_GAP_S = 0.8             # Ngắt câu khi im lặng quá ngần này giây
+SHORT_SEG_S = 1.2               # Câu ngắn hơn ngần này (hoặc dưới 3 từ) chờ nối với phần nói tiếp theo
+SHORT_JOIN_GAP_S = 2.5          # ... nếu cùng người nói tiếp trong vòng ngần này giây
+SHORT_HOLD_S = 2.5              # Chờ tối đa (giây thực) trước khi chốt câu ngắn
+WAKE_FOLLOWUP_S = 8.0           # Chỉ gọi tên trợ lý rồi ngừng: chờ câu yêu cầu trong ngần này giây
 MAX_SEGMENT_S = 20.0            # Câu dài hơn: cắt tại dấu câu để transcript cập nhật đều
 AUDIO_KEEP_S = 180              # Giữ tối đa ngần này giây audio để cắt clip / phát lại
 REPLAY_MAX_S = 15.0             # Tối đa số giây audio phát lại sau khi nối lại Soniox
@@ -75,6 +80,7 @@ class MeetingStream:
         self._open_lock = asyncio.Lock()
         self._fatal = ""              # Lỗi không thể tự khắc phục (sai API key, hết hạn mức...)
         self._reconnects: List[float] = []
+        self._hold_task: Optional[asyncio.Task] = None
 
     # ------------------------------------------------------------ status ---
     def _set_state(self, state: str, message: str = ""):
@@ -315,6 +321,9 @@ class MeetingStream:
                 interim, interim_raw = "", None
                 for tok in m.get("tokens", []):
                     txt = tok.get("text", "")
+                    if txt == "<end>" and self._is_short(self.cur):
+                        self._hold_flush()      # câu quá ngắn: chờ xem người đó có nói tiếp không
+                        continue
                     if txt in ("<end>", "<fin>"):
                         await self._flush()
                         continue
@@ -362,9 +371,12 @@ class MeetingStream:
         end = conn_off + tok.get("end_ms", 0) / 1000
 
         c = self.cur
-        if c and (c["epoch"] != epoch or c["raw"] != raw or start - c["end"] > SEGMENT_GAP_S):
+        gap_limit = SHORT_JOIN_GAP_S if self._is_short(c) else SEGMENT_GAP_S
+        if c and (c["epoch"] != epoch or c["raw"] != raw or start - c["end"] > gap_limit):
             await self._flush()
             c = None
+        elif c is not None:
+            self._cancel_hold()
         if c is None:
             self.cur = c = {"epoch": epoch, "raw": raw, "start": start, "end": end, "text": ""}
         c["text"] += text
@@ -372,10 +384,35 @@ class MeetingStream:
         if c["end"] - c["start"] >= MAX_SEGMENT_S and text.strip()[-1:] in (".", "?", "!", ",", ";"):
             await self._flush()
 
-    async def _flush(self):
-        c, self.cur = self.cur, None
-        if not c or not c["text"].strip():
+    @staticmethod
+    def _is_short(c: Optional[Dict[str, Any]]) -> bool:
+        return c is not None and ((c["end"] - c["start"]) < SHORT_SEG_S or len(re.findall(r"\w+", c["text"])) < 3)
+
+    def _cancel_hold(self):
+        t, self._hold_task = self._hold_task, None
+        if t is not None and t is not asyncio.current_task() and not t.done():
+            t.cancel()
+
+    def _hold_flush(self):
+        c = self.cur
+        self._cancel_hold()
+        if c is None:
             return
+
+        async def _later():
+            try:
+                await asyncio.sleep(SHORT_HOLD_S)
+                if self.cur is c:
+                    await self._flush()
+            except asyncio.CancelledError:
+                pass
+        self._hold_task = asyncio.create_task(_later())
+
+    async def _flush(self):
+        self._cancel_hold()
+        c, self.cur = self.cur, None
+        if not c or not re.search(r"\w", c["text"]):
+            return   # bỏ câu rỗng hoặc chỉ có dấu câu
         t0 = self.meeting_t(c["start"])
         await self.session.on_segment_finalized(
             t_start=round(t0, 2),
@@ -440,6 +477,11 @@ class MeetingSession:
         self.next_seq = max([int(s["seq"]) for s in self.segments if s.get("seq") is not None] + [0]) + 1
         self._epoch = max([int(s.get("epoch") or 0) for s in segments] + [-1]) + 1
         self._pending_enroll: Dict[int, Dict[str, Any]] = {}
+        self._pending_wake: Optional[Dict[str, Any]] = None
+        self._lock = asyncio.Lock()
+        # Màn hình trình bày: nội dung đang chiếu, slide hiện tại, lịch sử để "quay lại phần trước"
+        self.stage: Dict[str, Any] = {"artifact_id": None, "slide": 0, "history": [], "shown_at_seq": 0}
+        self._art_cache: Dict[int, Dict[str, Any]] = {}
         self._queue: asyncio.Queue = asyncio.Queue()
         self._db_queue: asyncio.Queue = asyncio.Queue()
         self._workers: List[asyncio.Task] = []
@@ -491,7 +533,7 @@ class MeetingSession:
         names += [a["name"] for a in self.speakers.anchors.values()]
         names += [n for n in (self.meeting.get("expected_attendees") or []) if isinstance(n, str)]
         seen, out = set(), []
-        for t in list(self.vocab) + names:
+        for t in llm.assistant_terms() + list(self.vocab) + names:   # tên trợ lý trước để chắc chắn được gửi
             k = str(t).strip()
             if k and k.casefold() not in seen:
                 seen.add(k.casefold())
@@ -532,6 +574,7 @@ class MeetingSession:
             "suggestions": self.identity.pending_suggestions(),
             "streams": {n: s.state for n, s in self.streams.items()},
             "mic_active": self.audio_owner is not None,
+            "stage": self.stage_public(),
         }
 
     # ----------------------------------------------------------- workers ---
@@ -583,6 +626,10 @@ class MeetingSession:
         return seq
 
     async def _process(self, it: Dict[str, Any]):
+        async with self._lock:
+            await self._process_locked(it)
+
+    async def _process_locked(self, it: Dict[str, Any]):
         seq, clip, vector, voiced = it["seq"], it["clip"] or b"", it["vector"], it["voiced"]
         if voiced is None:
             voiced = voice.voiced_s(clip) if clip else 0.0
@@ -609,11 +656,36 @@ class MeetingSession:
         await self._apply_relabels([k for k in changes if k != seq])
         await self._sync_speakers()
 
-        wake = llm.detect_wake_word(it["text"])
-        if wake:
-            log.info("meeting.live: bắt được wake-word '%s' với lệnh '%s'", *wake)
-            asyncio.create_task(self._handle_ai_activation(wake[1], it["text"]))
+        await self._check_wake(seg)
         self.identity.notify(seg)
+
+    async def _check_wake(self, seg: Dict[str, Any]):
+        """Phát hiện lời gọi trợ lý. Chỉ gọi tên rồi ngừng ("Jarvis ơi.") -> chờ câu yêu cầu tiếp theo."""
+        text, now = seg["text"], time.monotonic()
+        wake = llm.detect_wake_word(text)
+        if wake:
+            name, command = wake
+            if len(re.findall(r"\w+", command)) >= 2:
+                self._pending_wake = None
+                log.info("meeting.live: gọi trợ lý '%s' với yêu cầu '%s'", name, command)
+                asyncio.create_task(self._handle_ai_activation(command, text, name))
+            else:
+                token = object()
+                self._pending_wake = {"name": name, "until": now + WAKE_FOLLOWUP_S, "token": token}
+                await self.emit({"type": "ai_listening", "name": name, "sid": seg["speaker_key"]})
+                asyncio.create_task(self._expire_wake(token))
+            return
+        pw = self._pending_wake
+        if pw is not None and now <= pw["until"] and re.search(r"\w", text):
+            self._pending_wake = None
+            asyncio.create_task(self._handle_ai_activation(text, text, pw["name"]))
+
+    async def _expire_wake(self, token: object):
+        await asyncio.sleep(WAKE_FOLLOWUP_S + 0.5)
+        pw = self._pending_wake
+        if pw is not None and pw["token"] is token:
+            self._pending_wake = None
+            await self.emit({"type": "ai_listening_end", "name": pw["name"], "reason": "timeout"})
 
     async def _apply_relabels(self, keys: List[Any], is_inferred: Optional[bool] = None) -> int:
         items = []
@@ -642,6 +714,8 @@ class MeetingSession:
         for src, dst, auto in merges:
             self._pending_enroll.pop(src, None)
             await self.emit({"type": "speakers_merged", "source_sid": src, "target_sid": dst, "auto": auto})
+        for src, new in self.speakers.pop_splits():
+            await self.emit({"type": "speakers_split", "source_sid": src, "new_sid": new})
         if not dirty:
             return
         self._db(db.upsert_speakers, self.id, [p.to_dict(with_vector=True) for p in dirty])
@@ -733,6 +807,68 @@ class MeetingSession:
         await self._sync_speakers()
         return {"success": True, "seq": seq, "speaker": dst.to_dict(with_vector=False)}
 
+    async def reanalyze(self) -> Dict[str, Any]:
+        """Chạy lại nhận diện người nói cho toàn bộ cuộc họp bằng thuật toán hiện tại.
+
+        Dùng dữ liệu đã lưu (vector giọng, nhãn Soniox, epoch). Tên đã đặt được giữ cho hồ sơ mới chứa nhiều
+        câu nhất của người đó."""
+        await self.drain()
+        rows = await asyncio.to_thread(db.get_segments, self.id, True)
+        async with self._lock:
+            old = self.speakers
+            fresh = voice.MeetingSpeakers(anchors={vid: dict(a) for vid, a in old.anchors.items()},
+                                          expected_host_id=self.host_id)
+            known = set()
+            for s in rows:
+                known.add(s["seq"])
+                emb = s.get("raw_embedding")
+                v = np.asarray(emb, dtype=np.float32) if emb and voice.is_valid_vector(emb) else None
+                dur = max(0.0, float(s.get("t_end") or 0) - float(s.get("t_start") or 0))
+                voiced = s.get("voiced")
+                if voiced is None:
+                    voiced = dur * 0.7 if v is not None else 0.0
+                fresh.add(key=s["seq"], v=v, raw_label=s.get("raw_speaker"), t=float(s.get("t_start") or 0),
+                          voiced=float(voiced), text=s.get("text", ""), epoch=int(s.get("epoch") or 0), dur=dur,
+                          stream=s.get("stream") or "mic")
+            for s in old.segs:          # câu vừa xử lý nhưng chưa kịp có trong kết quả đọc DB
+                if s["key"] not in known:
+                    rk = s.get("rk")
+                    fresh.add(key=s["key"], v=s["v"], raw_label=s["raw"], t=s["t"], voiced=s["w"],
+                              text=s["text"], epoch=rk[1] if rk else 0, dur=s["dur"], stream=rk[0] if rk else "mic")
+            # Tên thuộc về người dùng hồ sơ cũ TRƯỚC TIÊN (người mới chen vào sau dưới cùng nhãn thì tách ra)
+            for op in sorted((p for p in old.active_profiles() if p.name), key=lambda p: p.first_t):
+                order = [fresh.sid_of(k) for k in old.keys_of(op.sid)]
+                for sid in dict.fromkeys(x for x in order if x is not None):
+                    np_ = fresh.profile(sid)
+                    if np_ is not None and not np_.name and fresh.find_by_name(op.name) is None:
+                        np_.name, np_.voice_id, np_.role = op.name, op.voice_id or np_.voice_id, op.role
+                        np_.origin, np_.locked, np_.confidence = op.origin, op.locked, op.confidence
+                        break
+            fresh.pop_dirty()
+            fresh.pop_merges()
+            fresh.pop_splits()
+            self.speakers = fresh
+            self._pending_enroll.clear()
+            self.identity.reset()
+            items = []
+            for seg in self.segments:
+                prof = fresh.profile(fresh.sid_of(seg["seq"]))
+                if prof is None:
+                    continue
+                seg.update({"speaker_key": prof.sid, "speaker_label": prof.label, "speaker_id": prof.voice_id,
+                            "is_inferred": prof.origin == "ai"})
+                items.append({"seq": seg["seq"], "speaker_key": prof.sid, "speaker_label": prof.label,
+                              "speaker_id": prof.voice_id, "is_inferred": prof.origin == "ai"})
+            self._db(db.replace_speakers, self.id, fresh.export_profiles())
+            self._db(db.update_segments_speaker_by_seqs, self.id, items)
+            self._db(db.set_inferences_status, self.id, "pending", "stale")
+        await self.drain()
+        snap = self.snapshot()
+        snap["artifacts"] = await asyncio.to_thread(db.get_artifacts, self.id)
+        await self.emit(snap)
+        log.info("meeting.live: phân tích lại cuộc họp %d -> %d người nói", self.id, len(self.public_speakers()))
+        return {"success": True, "speakers": self.public_speakers(), "segments": len(items)}
+
     VOICE_CONFLICT_MAX = 0.30   # cosine dưới mức này với mẫu giọng trùng tên -> coi là người khác
 
     def _voice_compatible(self, p: voice.SpeakerProfile, known: Dict[str, Any]) -> bool:
@@ -776,10 +912,25 @@ class MeetingSession:
             await self.streams[stream_name].feed(pcm)
 
     # ----------------------------------------------------------------- AI ---
-    async def _handle_ai_activation(self, command: str, full_sentence: str):
-        """Kích hoạt Thinking Engine khi gọi tên trợ lý."""
+    async def _handle_ai_activation(self, command: str, full_sentence: str, name: str = "", source: str = "voice"):
+        """Kích hoạt trợ lý khi được gọi tên: lệnh trình chiếu xử lý ngay, còn lại qua Thinking Engine."""
         prompt = command if len(command) > 5 else full_sentence
-        await self.emit({"type": "ai_activated", "wake_word": "Jarvis", "prompt": prompt})
+        await self.emit({"type": "ai_activated", "wake_word": name or llm.assistant_config()["name"], "prompt": prompt,
+                         "source": source})
+        try:
+            intent = llm.stage_intent(command)
+            if intent and await self._handle_stage_intent(intent):
+                return
+            if self.stage["artifact_id"] is not None and llm.is_edit_command(command):
+                await self._edit_on_stage(command)
+                return
+        except Exception as e:
+            log.warning("meeting.live: xử lý lệnh trình chiếu lỗi: %s", e)
+            await self.emit({"type": "ai_error", "text": f"Mình chưa làm được: {e}"})
+            return
+
+        async def _insights(items: List[Dict[str, str]]):
+            await self.emit({"type": "ai_insights", "items": items, "source": "request"})
 
         async def _thinking(thought: str):
             await self.emit({"type": "ai_thinking", "text": thought})
@@ -789,11 +940,152 @@ class MeetingSession:
 
         try:
             res = await llm.think_and_act(meeting_id=self.id, prompt=prompt, segments=self.segments,
-                                          on_thinking=_thinking, on_tool=_tool)
+                                          on_thinking=_thinking, on_tool=_tool, on_insights=_insights)
             await self.emit({"type": "ai_response", "response": res})
+            if res.get("artifact"):
+                await self.stage_action("show", artifact_id=res["artifact"]["id"])
         except Exception as e:
             log.warning("meeting.live: trợ lý AI lỗi: %s", e)
             await self.emit({"type": "ai_error", "text": f"Trợ lý AI lỗi: {e}"})
+
+    # ------------------------------------------------- màn hình trình bày ---
+    STAGE_ACTIONS = ("show", "next", "prev", "goto", "topic", "back")
+
+    def stage_public(self) -> Dict[str, Any]:
+        st = self.stage
+        return {"artifact_id": st["artifact_id"], "slide": st["slide"], "can_back": bool(st["history"]),
+                "shown_at_seq": st["shown_at_seq"]}
+
+    async def _get_artifact(self, aid: Optional[int]) -> Optional[Dict[str, Any]]:
+        if aid is None:
+            return None
+        if aid not in self._art_cache:
+            art = await asyncio.to_thread(db.get_artifact, int(aid))
+            if art is not None:
+                self._art_cache[aid] = art
+        return self._art_cache.get(aid)
+
+    @staticmethod
+    def _slides_of(art: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not art or art.get("kind") != "slides":
+            return []
+        deck = artifacts.normalize_deck(artifacts._json_from_text(art.get("content", "")))
+        return deck["slides"] if deck else []
+
+    @staticmethod
+    def _find_slide(slides: List[Dict[str, Any]], query: str) -> Optional[int]:
+        words = {w for w in re.findall(r"\w+", (query or "").lower()) if len(w) > 1}
+        best, best_score = None, 0.0
+        for i, sl in enumerate(slides):
+            text = " ".join([sl.get("title", "")] * 2 + sl.get("bullets", [])).lower()
+            have = set(re.findall(r"\w+", text))
+            score = len(words & have) / max(1, len(words))
+            if score > best_score:
+                best, best_score = i, score
+        return best if best_score >= 0.5 else None
+
+    async def stage_action(self, action: str, artifact_id: Optional[int] = None, slide: Optional[int] = None,
+                           query: Optional[str] = None) -> Dict[str, Any]:
+        """Điều khiển màn hình trình bày: show (đưa nội dung lên), next/prev/goto/topic (chuyển slide), back."""
+        st = self.stage
+        before = (st["artifact_id"], st["slide"])
+        if action == "show":
+            art = await self._get_artifact(artifact_id)
+            if art is None:
+                raise KeyError(f"Không tìm thấy nội dung {artifact_id}")
+            if st["artifact_id"] is not None and st["artifact_id"] != art["id"] \
+                    and art.get("parent_id") != st["artifact_id"]:   # bản sửa của cùng nội dung: không lưu lịch sử
+                st["history"] = (st["history"] + [{"artifact_id": st["artifact_id"], "slide": st["slide"]}])[-20:]
+            n = max(1, len(self._slides_of(art)))
+            st["artifact_id"], st["slide"] = art["id"], min(max(int(slide or 0), 0), n - 1)
+        elif action == "back":
+            if st["history"]:
+                prev = st["history"].pop()
+                st["artifact_id"], st["slide"] = prev["artifact_id"], prev["slide"]
+        elif st["artifact_id"] is not None:
+            slides = self._slides_of(await self._get_artifact(st["artifact_id"]))
+            n = max(1, len(slides))
+            if action == "next":
+                st["slide"] = min(n - 1, st["slide"] + 1)
+            elif action == "prev":
+                st["slide"] = max(0, st["slide"] - 1)
+            elif action == "goto":
+                st["slide"] = min(n - 1, max(0, int(slide or 0)))
+            elif action == "topic":
+                idx = self._find_slide(slides, query or "")
+                if idx is not None:
+                    st["slide"] = idx
+        if (st["artifact_id"], st["slide"]) != before:
+            st["shown_at_seq"] = self.next_seq - 1
+        await self.emit({"type": "stage_state", "stage": self.stage_public()})
+        return self.stage_public()
+
+    async def _say(self, text: str, mood: str = "happy", quiet: bool = False):
+        """quiet: chỉ hiện phụ đề, không đọc to (xác nhận chuyển slide: màn hình đổi là đủ, không cắt lời người nói)."""
+        await self.emit({"type": "ai_say", "text": text, "mood": mood, "quiet": quiet})
+
+    async def _handle_stage_intent(self, intent: Dict[str, Any]) -> bool:
+        """Thực hiện lệnh trình chiếu ngay (không gọi LLM). Trả về False nếu nên để LLM xử lý."""
+        action = intent["action"]
+        if action in ("open", "close"):
+            await self.emit({"type": "stage_command", "action": action})
+            await self._say("Mình mở màn hình trình bày đây." if action == "open" else "Đã thu nhỏ màn hình trình bày.")
+            return True
+        if action == "prompt":
+            await self.emit({"type": "stage_prompt"})
+            return True
+        if action == "analyze":
+            await self.analyze_now()
+            return True
+        if self.stage["artifact_id"] is None:
+            if action == "topic":
+                return False
+            await self._say("Hiện chưa có nội dung nào trên màn hình trình bày. Anh có thể nhờ mình soạn slide.", "concerned")
+            return True
+        if action == "back" and not self.stage["history"]:
+            await self._say("Không còn phần trình bày nào trước đó.", "concerned")
+            return True
+        if action == "topic":
+            slides = self._slides_of(await self._get_artifact(self.stage["artifact_id"]))
+            idx = self._find_slide(slides, intent.get("query", ""))
+            if idx is None:
+                if not slides:
+                    return False
+                await self._say(f"Mình chưa thấy slide nào nói về {intent.get('query', '')}.", "concerned")
+                return True
+            await self.stage_action("goto", slide=idx)
+        else:
+            await self.stage_action(action, slide=intent.get("slide"))
+        art = await self._get_artifact(self.stage["artifact_id"])
+        slides = self._slides_of(art)
+        if slides:
+            i = self.stage["slide"]
+            await self._say(f"Slide {i + 1} trên {len(slides)}: {slides[i]['title']}.", quiet=True)
+        else:
+            await self._say(f"Đang trình bày {art['title'] if art else 'nội dung trước'}.", quiet=True)
+        return True
+
+    async def _edit_on_stage(self, command: str):
+        """Sửa nội dung đang trình chiếu bằng lời nói ("sửa slide này thêm số liệu doanh thu")."""
+        st = self.stage
+        await self.emit({"type": "ai_thinking", "text": "Mình đang sửa nội dung đang trình chiếu..."})
+        try:
+            res = await artifacts.co_design_refine(self.id, st["artifact_id"], command, slide_index=st["slide"])
+        except Exception as e:
+            await self.emit({"type": "ai_error", "text": f"Mình chưa sửa được: {e}"})
+            return
+        self._art_cache[res["id"]] = res
+        message = res.pop("chat_message", "") or "Mình đã sửa xong."
+        await self.emit({"type": "artifact_updated", "artifact": res})
+        await self.stage_action("show", artifact_id=res["id"], slide=res.get("focus_slide", st["slide"]))
+        await self._say(message)
+
+    async def analyze_now(self, focus: str = "") -> List[Dict[str, str]]:
+        """Trợ lý xem lại cuộc họp và nêu nhận xét (rủi ro, việc chưa có người nhận, điểm cần cải thiện)."""
+        await self.emit({"type": "ai_thinking", "text": "Mình đang xem lại toàn bộ cuộc họp..."})
+        items = await artifacts.meeting_insights(self.segments, self.meeting, focus)
+        await self.emit({"type": "ai_insights", "items": items, "source": "analysis"})
+        return items
 
     # --------------------------------------------------------- lifecycle ---
     async def finish(self, generate_minutes: bool = True) -> Dict[str, Any]:
@@ -829,10 +1121,17 @@ class MeetingSession:
                 await self.identity.run(force=True)
             except Exception as e:
                 log.warning("meeting.live: đoán tên lần cuối lỗi: %s", e)
+            try:   # nhận xét nhanh để trợ lý nói trong lúc chờ lập biên bản
+                items = await artifacts.meeting_insights(self.segments, self.meeting)
+                if items:
+                    await self.emit({"type": "ai_insights", "items": items, "source": "meeting_end"})
+            except Exception as e:
+                log.warning("meeting.live: nhận xét cuối buổi lỗi: %s", e)
             art = await artifacts.generate_meeting_minutes(self.id, self.segments, self.title,
                                                            meeting=self.meeting, speakers=self.public_speakers())
             status = "done"
             await self.emit({"type": "artifact_created", "artifact": art})
+            await self.stage_action("show", artifact_id=art["id"])
         except Exception as e:
             log.warning("meeting.live: lập biên bản lỗi: %s", e)
             await self.emit({"type": "error", "text": f"Không lập được biên bản tự động: {e}"})

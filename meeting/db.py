@@ -484,6 +484,12 @@ def upsert_speakers(meeting_id: int, profiles: List[Dict[str, Any]]):
             col.update_one(f, u, upsert=True)
 
 
+def replace_speakers(meeting_id: int, profiles: List[Dict[str, Any]]):
+    """Thay toàn bộ hồ sơ người nói của cuộc họp (dùng khi phân tích lại)."""
+    _get_db()["meeting_speakers"].delete_many({"meeting_id": meeting_id})
+    upsert_speakers(meeting_id, profiles)
+
+
 def list_speakers(meeting_id: int, with_vector: bool = False) -> List[Dict[str, Any]]:
     proj = {"_id": 0} if with_vector else {"_id": 0, "centroid": 0}
     return list(_get_db()["meeting_speakers"].find({"meeting_id": meeting_id}, proj).sort("sid", 1))
@@ -519,6 +525,12 @@ def get_inference(iid: int) -> Optional[Dict[str, Any]]:
 def set_inference_status(iid: int, status: str) -> bool:
     return _get_db()["identity_inferences"].update_one(
         {"id": iid}, {"$set": {"status": status, "resolved_at": time.time()}}).matched_count > 0
+
+
+def set_inferences_status(meeting_id: int, from_status: str, to_status: str) -> int:
+    return _get_db()["identity_inferences"].update_many(
+        {"meeting_id": meeting_id, "status": from_status},
+        {"$set": {"status": to_status, "resolved_at": time.time()}}).modified_count
 
 
 def get_inferences(meeting_id: int, status: Optional[str] = None) -> List[Dict[str, Any]]:

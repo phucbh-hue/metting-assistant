@@ -241,6 +241,79 @@ class IdentityEngineTests(SessionTestCase):
         self.assertIn("Người nói 2", calls[0])
 
 
+class AssistantCallTests(SessionTestCase):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        from meeting import llm
+        llm.set_assistant_config("Bông", ["Bong"])
+        self.calls = []
+
+        async def fake_activation(command, full_sentence, name=""):
+            self.calls.append((name, command))
+        self.mid = db.create_meeting("Họp test")
+        self.s = await live.get_session(self.mid)
+        self.s._handle_ai_activation = fake_activation
+
+    async def test_call_with_request_in_same_sentence(self):
+        await self.feed(self.s, [(0, "1", 3.0, "Bông ơi, tóm tắt giúp anh các quyết định")])
+        await asyncio.sleep(0)
+        self.assertEqual(self.calls, [("Bông", "tóm tắt giúp anh các quyết định")])
+
+    async def test_call_then_pause_waits_for_next_sentence(self):
+        """Lỗi cũ: "Jarvis ơi." rồi ngừng một nhịp thì yêu cầu ở câu sau bị mất."""
+        q = await self.s.subscribe()
+        await self.feed(self.s, [(0, "1", 1.0, "Bông ơi.")])
+        self.assertIn("ai_listening", [e["type"] for e in self.events(q)])
+        await self.feed(self.s, [(0, "1", 3.0, "Tra cứu giúp anh ticket của Tuấn")], t0=5)
+        await asyncio.sleep(0)
+        self.assertEqual(self.calls, [("Bông", "Tra cứu giúp anh ticket của Tuấn")])
+
+    async def test_call_then_silence_times_out(self):
+        q = await self.s.subscribe()
+        with mock.patch.object(live, "WAKE_FOLLOWUP_S", 0.05):
+            await self.feed(self.s, [(0, "1", 1.0, "Bông ơi.")])
+            await asyncio.sleep(0.7)
+            await self.feed(self.s, [(1, "2", 3.0, "Mình bàn tiếp phần ngân sách nhé")], t0=20)
+        await asyncio.sleep(0)
+        self.assertEqual(self.calls, [])
+        self.assertIn("ai_listening_end", [e["type"] for e in self.events(q)])
+
+    async def test_mentioning_name_mid_sentence_does_not_call(self):
+        await self.feed(self.s, [(0, "1", 3.0, "Tôi nghĩ Bông làm được việc này"), (1, "2", 3.0, "bông hoa đẹp quá")])
+        await asyncio.sleep(0)
+        self.assertEqual(self.calls, [])
+
+    async def test_assistant_names_sent_to_soniox_vocabulary(self):
+        self.assertEqual(self.s.context_terms()[:2], ["Bông", "Bong"])
+
+
+class ReanalyzeTests(SessionTestCase):
+    async def test_reanalyze_splits_hidden_speaker_and_keeps_names(self):
+        """Dữ liệu giống cuộc họp #30: người trong phòng nói chen vào, Soniox gắn cùng nhãn "2" với khách mời,
+        bản cũ gộp hết vào khách mời đã được AI đặt tên. Phân tích lại phải ra 3 người, tên ở lại với khách mời."""
+        bank = VoiceBank(seed=15, n=3, channel=0.9)
+        mid = db.create_meeting("Podcast test")
+        rows = [(0, "1", 5.0), (1, "2", 4.0), (0, "1", 3.0), (1, "2", 6.0), (0, "1", 4.0), (1, "2", 5.0),
+                (2, "2", 2.5), (2, "2", 4.5), (2, "2", 3.0), (2, "2", 0.5), (2, "2", 2.4)]
+        t = 0.0
+        for i, (k, raw, voiced) in enumerate(rows, 1):
+            key = 1 if raw == "1" else 2
+            db.add_segment(mid, t, t + voiced * 1.3, "Người nói 1" if key == 1 else "Đặng Thế Trung", f"câu {i}",
+                           raw_embedding=bank.vec(k, voiced).tolist() if voiced >= 1 else None, seq=i,
+                           speaker_key=key, raw_speaker=raw, epoch=0, voiced=voiced)
+            t += voiced * 1.3 + 0.5
+        db.upsert_speakers(mid, [{"sid": 1, "name": "", "label": "Người nói 1", "origin": "new", "n_segments": 3},
+                                 {"sid": 2, "name": "Đặng Thế Trung", "label": "Đặng Thế Trung", "origin": "ai",
+                                  "confidence": 0.85, "n_segments": 8}])
+        s = await live.get_session(mid)
+        res = await s.reanalyze()
+        labels = [r["speaker_label"] for r in db.get_segments(mid)]
+        self.assertEqual(labels[:6], ["Người nói 1", "Đặng Thế Trung"] * 3)
+        self.assertEqual(set(labels[6:]), {"Người nói 3"})
+        self.assertEqual(sorted(p["label"] for p in res["speakers"]), ["Người nói 1", "Người nói 3", "Đặng Thế Trung"])
+        self.assertEqual(sorted(p["sid"] for p in db.list_speakers(mid)), [1, 2, 3])
+
+
 class LifecycleTests(SessionTestCase):
     async def test_finish_marks_ended_and_generates_minutes_in_background(self):
         mid = db.create_meeting("Họp chốt sprint")

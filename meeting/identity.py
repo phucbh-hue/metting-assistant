@@ -172,6 +172,11 @@ class IdentityEngine:
         self._suggestions: Dict[int, Dict[str, Any]] = {}
 
     # --------------------------------------------------------------- state ---
+    def reset(self):
+        """Hồ sơ người nói vừa được dựng lại: bỏ các gợi ý cũ (gắn với sid cũ)."""
+        self._suggestions.clear()
+        self._dismissed.clear()
+
     def targets(self) -> List[Any]:
         return [p for p in self.session.speakers.visible_profiles() if not p.name and not p.locked]
 

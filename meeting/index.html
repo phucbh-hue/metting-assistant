@@ -155,7 +155,7 @@
     .turn-user { margin-left: auto; max-width: 88%; background: rgba(255,255,255,.06); border: 1px solid var(--line); padding: 8px 12px; border-radius: 14px 14px 4px 14px; }
     .turn-ai { max-width: 100%; }
     .step { color: rgb(var(--muted)); font-size: 12.5px; }
-    .tab { height: 34px; padding: 0 12px; border-radius: 9px; font-size: 13px; font-weight: 500; color: rgb(var(--muted)); display: inline-flex; align-items: center; gap: 6px; }
+    .tab { height: 34px; padding: 0 12px; border-radius: 9px; font-size: 13px; font-weight: 500; color: rgb(var(--muted)); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; flex: none; }
     .tab:hover { color: rgb(var(--ink)); }
     .tab[aria-selected="true"] { background: rgba(255,255,255,.08); color: rgb(var(--ink)); }
     .tab .count { font-size: 11px; color: rgb(var(--muted)); }
@@ -186,6 +186,79 @@
       .room-grid { grid-template-columns: minmax(0, 1fr); }
       .room-grid > [data-pane]:not(.pane-active) { display: none; }
     }
+
+    /* --------- sân khấu trợ lý (toàn màn hình) --------- */
+    .stage { position: fixed; inset: 0; z-index: 55; display: grid; grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr) auto; gap: 14px; padding: 14px 18px;
+      background: radial-gradient(1100px 650px at 10% 16%, rgb(var(--accent) / .08), transparent 60%), rgb(var(--base)); }
+    .stage-top { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 12px; }
+    .stage-top > :first-child { flex: 1 1 220px; }
+    .stage-side { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+    .stage-main { display: flex; flex-direction: column; gap: 10px; min-height: 0; min-width: 0; }
+    .stage-foot { grid-column: 1 / -1; display: flex; gap: 12px; align-items: center; }
+    #stage-frame { flex: 1 1 0%; min-height: 0; display: grid; place-items: center; }
+    @media (max-width: 1023px) {
+      .stage { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto auto; overflow-y: auto; padding: 12px 16px; }
+      .stage-side { display: grid; grid-template-columns: 88px minmax(0, 1fr); align-items: start; }
+      .stage-side #av-insights, .stage-side #voice-hint { grid-column: 1 / -1; max-height: 30vh; }
+      #stage-frame { flex: none; }
+      .stage-foot { flex-wrap: wrap; }
+      .stage-foot form { width: 100% !important; }
+      .bubble::before { display: none; }
+    }
+    .face-btn { display: block; width: 100%; max-width: 220px; margin: 0 auto; border-radius: 999px; }
+    .face { width: 100%; height: auto; overflow: visible; display: block; }
+    .face .ring { fill: none; stroke: rgb(var(--accent)); stroke-width: 3; opacity: 0; transform-box: fill-box; transform-origin: center; transition: opacity .3s; }
+    .face .ring2 { fill: none; stroke: rgb(var(--accent) / .5); stroke-width: 2; stroke-dasharray: 5 9; opacity: 0; transform-box: fill-box; transform-origin: center; transition: opacity .3s; }
+    .face .white { fill: #F4FFFA; }
+    .face .pupil { fill: #0B0F12; }
+    .face .shine { fill: #fff; }
+    .face .brow { fill: none; stroke: #063b26; stroke-width: 5; stroke-linecap: round; }
+    .face .mouth { fill: #4a1124; stroke: #063b26; stroke-width: 4; stroke-linejoin: round; }
+    .face .cheek { fill: #FF7AC6; opacity: 0; transition: opacity .5s; }
+    .face.mood-happy .cheek { opacity: .35; }
+    .face-mini { width: 40px; height: 40px; flex: none; }
+    .bubble { position: relative; background: rgb(var(--raise)); border: 1px solid var(--line-strong); border-radius: 16px;
+      padding: 12px 14px; font-size: 14.5px; line-height: 1.55; min-height: 50px; }
+    .bubble::before { content: ""; position: absolute; top: -8px; left: 50%; margin-left: -7px; width: 14px; height: 14px;
+      background: rgb(var(--raise)); border-left: 1px solid var(--line-strong); border-top: 1px solid var(--line-strong); transform: rotate(45deg); }
+    .bubble .cap { display: block; margin-top: 6px; font-size: 12.5px; color: rgb(var(--muted)); }
+    .insight { display: flex; gap: 9px; padding: 9px 11px; border-radius: 11px; background: rgba(255,255,255,.035); border: 1px solid var(--line); font-size: 13px; line-height: 1.5; }
+    .insight .k { flex: none; width: 8px; height: 8px; border-radius: 99px; margin-top: 6px; }
+    .insight.speaking { border-color: rgb(var(--accent) / .55); background: rgb(var(--accent) / .08); }
+    .slide-wrap { container-type: inline-size; width: 100%; }
+    .slide { width: 100%; aspect-ratio: 16 / 9; position: relative; border-radius: 18px; overflow: hidden; display: flex; flex-direction: column;
+      background: linear-gradient(155deg, #131c22 0%, #0d1317 58%, #0e1b16 100%); border: 1px solid var(--line-strong); box-shadow: 0 30px 80px rgba(0,0,0,.45); }
+    .slide::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: .7cqw; background: rgb(var(--accent)); }
+    .sl-inner { flex: 1; padding: 5.5cqw 7cqw 2cqw; display: flex; flex-direction: column; justify-content: center; min-height: 0; overflow: hidden; }
+    .slide h1 { font-size: 5cqw; line-height: 1.15; font-weight: 700; letter-spacing: -.01em; }
+    .slide h2 { font-size: 3.4cqw; line-height: 1.2; font-weight: 700; margin-bottom: 2.4cqw; }
+    .slide .sl-sub { margin-top: 2cqw; font-size: 2.2cqw; color: rgb(var(--muted)); }
+    .slide ul { display: flex; flex-direction: column; gap: 1.5cqw; }
+    .slide li { font-size: 2.2cqw; line-height: 1.42; padding-left: 3cqw; position: relative; }
+    .slide li::before { content: ""; position: absolute; left: 0; top: .6em; width: 1cqw; height: 1cqw; border-radius: 99px; background: rgb(var(--accent)); }
+    .slide .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4cqw; }
+    .slide .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(17cqw, 1fr)); gap: 2cqw; }
+    .slide .metric { border: 1px solid var(--line-strong); border-radius: 1.5cqw; padding: 2cqw; background: rgba(255,255,255,.03); }
+    .slide .metric .v { font-size: 3.2cqw; font-weight: 700; color: rgb(var(--accent)); font-variant-numeric: tabular-nums; }
+    .slide .metric .l { font-size: 1.7cqw; color: rgb(var(--muted)); margin-top: .5cqw; }
+    .slide blockquote { font-size: 3.3cqw; line-height: 1.35; font-weight: 600; }
+    .slide cite { display: block; margin-top: 2cqw; font-size: 2cqw; color: rgb(var(--muted)); font-style: normal; }
+    .sl-foot { display: flex; justify-content: space-between; gap: 2cqw; padding: 0 7cqw 2.4cqw; font-size: 1.45cqw; color: rgb(var(--muted)); font-variant-numeric: tabular-nums; }
+    .slide-enter { animation: slideIn .35s ease-out; }
+    @keyframes slideIn { from { opacity: 0; transform: translateY(10px) scale(.992); } to { opacity: 1; transform: none; } }
+    .no-scrollbar { scrollbar-width: none; }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .fade-right { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
+    .thumbs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+    .thumb { flex: none; max-width: 200px; padding: 6px 10px; border-radius: 9px; border: 1px solid var(--line); font-size: 12px; color: rgb(var(--muted));
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+    .thumb:hover { color: rgb(var(--ink)); }
+    .thumb[aria-current="true"] { border-color: rgb(var(--accent) / .6); color: rgb(var(--ink)); background: rgb(var(--accent) / .08); }
+    .prompter { border: 1px solid var(--line-strong); border-radius: 14px; padding: 12px 16px; background: rgb(var(--raise)); max-height: 30vh; overflow-y: auto; flex: none; }
+    .prompter li { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; }
+    .prompter li.done { color: rgb(var(--muted)); text-decoration: line-through; }
+    .prompter li.next { color: rgb(var(--accent)); font-weight: 600; }
   </style>
 </head>
 <body class="flex flex-col-reverse sm:flex-row overflow-hidden">
@@ -206,9 +279,14 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M17 6a4 4 0 0 1 0 6M20 3a8 8 0 0 1 0 12"/></svg>
       </a>
     </div>
-    <button class="rail-btn" data-act="diag" title="Tình trạng hệ thống" aria-label="Tình trạng hệ thống">
-      <span id="health-dot" class="w-2.5 h-2.5 rounded-full" style="background: rgb(var(--muted));"></span>
-    </button>
+    <div class="flex sm:flex-col items-center gap-2">
+      <button class="rail-btn" data-act="settings" title="Cài đặt trợ lý" aria-label="Cài đặt trợ lý">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+      </button>
+      <button class="rail-btn" data-act="diag" title="Tình trạng hệ thống" aria-label="Tình trạng hệ thống">
+        <span id="health-dot" class="w-2.5 h-2.5 rounded-full" style="background: rgb(var(--muted));"></span>
+      </button>
+    </div>
   </nav>
 
   <!-- ===================== NỘI DUNG ===================== -->
@@ -253,7 +331,7 @@
         <div class="lg:hidden seg self-start" role="tablist" aria-label="Chọn khu vực">
           <button role="tab" data-act="room-pane" data-pane="people" aria-selected="false">Người nói</button>
           <button role="tab" data-act="room-pane" data-pane="transcript" aria-selected="true">Transcript</button>
-          <button role="tab" data-act="room-pane" data-pane="ai" aria-selected="false">Jarvis</button>
+          <button role="tab" data-act="room-pane" data-pane="ai" aria-selected="false"><span data-assistant-name>Jarvis</span></button>
         </div>
         <div class="room-grid flex-1 min-h-0">
           <!-- Cột trái: mic + người nói -->
@@ -287,11 +365,25 @@
 
           <!-- Cột phải: Jarvis & sản phẩm AI -->
           <section class="panel flex flex-col min-h-0" data-pane="ai">
-            <div class="px-2 pt-2 pb-1 border-b divider flex items-center gap-1 overflow-x-auto shrink-0" role="tablist" aria-label="Không gian AI">
-              <button class="tab" role="tab" data-act="tab" data-tab="jarvis" aria-selected="true">Jarvis</button>
+            <div class="border-b divider flex items-center shrink-0">
+            <div id="ai-tabs" class="px-2 pt-2 pb-1 flex items-center gap-1 overflow-x-auto no-scrollbar flex-1 min-w-0" role="tablist" aria-label="Không gian AI">
+              <button class="tab" role="tab" data-act="tab" data-tab="jarvis" aria-selected="true"><span data-assistant-name>Jarvis</span></button>
+              <button class="tab" role="tab" data-act="tab" data-tab="slides" aria-selected="false">Slide <span class="count num" data-count="slides"></span></button>
               <button class="tab" role="tab" data-act="tab" data-tab="minutes" aria-selected="false">Biên bản <span class="count num" data-count="minutes"></span></button>
               <button class="tab" role="tab" data-act="tab" data-tab="diagram" aria-selected="false">Sơ đồ <span class="count num" data-count="diagram"></span></button>
               <button class="tab" role="tab" data-act="tab" data-tab="web_design" aria-selected="false">Giao diện <span class="count num" data-count="web_design"></span></button>
+            </div>
+            <button class="icon-btn mx-2 shrink-0" data-act="stage-open" title="Trình chiếu toàn màn hình cùng trợ lý" aria-label="Trình chiếu toàn màn hình cùng trợ lý">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+            </button>
+            </div>
+            <div id="av-mini" class="px-3 py-2 border-b divider flex items-center gap-3 shrink-0">
+              <svg class="face face-mini" data-face viewBox="0 0 200 200" aria-hidden="true"></svg>
+              <div class="min-w-0 flex-1">
+                <div class="font-semibold text-[13px]" data-assistant-name>Jarvis</div>
+                <div class="text-[12px] text-muted truncate" data-av-status>Đang chờ</div>
+              </div>
+              <button class="btn btn-ghost btn-sm" data-act="voice-toggle" data-voice-btn title="Bật hoặc tắt giọng nói của trợ lý"></button>
             </div>
             <div id="art-bar" class="hidden px-3 py-2 border-b divider flex items-center gap-2 shrink-0">
               <select id="art-version" class="input" style="height:32px;font-size:12.5px" aria-label="Chọn phiên bản"></select>
@@ -328,6 +420,49 @@
         </div>
       </section>
     </main>
+  </div>
+
+  <!-- ============ SÂN KHẤU TRỢ LÝ (TOÀN MÀN HÌNH) ============ -->
+  <div id="stage" class="stage hidden" role="dialog" aria-modal="true" aria-label="Màn hình trình bày cùng trợ lý">
+    <div class="stage-top">
+      <div class="min-w-0">
+        <div class="font-semibold text-[16px] truncate" id="stage-title">Cuộc họp</div>
+        <div class="text-[12.5px] text-muted truncate" id="stage-sub"></div>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <button class="btn btn-ghost btn-sm" data-act="stage-analyze" title="Trợ lý xem lại cuộc họp và nêu nhận xét">Nhận xét nhanh</button>
+        <button class="btn btn-ghost btn-sm" data-act="voice-toggle" data-voice-btn title="Bật hoặc tắt giọng nói của trợ lý (phím V)"></button>
+        <button class="btn btn-ghost btn-sm hidden md:inline-flex" data-act="stage-fullscreen" id="stage-fs-btn" title="Phím F">Toàn màn hình</button>
+        <button class="btn btn-ghost btn-sm" data-act="stage-close" title="Thu nhỏ (Esc)">Thu nhỏ</button>
+      </div>
+    </div>
+    <aside class="stage-side" aria-label="Trợ lý">
+      <button class="face-btn" data-act="voice-stop" title="Bấm để trợ lý dừng nói" aria-label="Dừng giọng nói của trợ lý">
+        <svg class="face" data-face viewBox="0 0 200 200" aria-hidden="true"></svg>
+      </button>
+      <div class="flex flex-col gap-3 min-w-0">
+        <div class="text-center">
+          <div class="font-semibold text-[18px]" data-assistant-name>Jarvis</div>
+          <div class="text-[13px] text-muted" data-av-status>Đang chờ</div>
+        </div>
+        <div id="av-bubble" class="bubble text-muted" aria-live="polite">Gọi tên mình kèm yêu cầu, hoặc gõ ở ô bên dưới.</div>
+      </div>
+      <div class="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2" id="av-insights" aria-label="Nhận xét của trợ lý"></div>
+      <p id="voice-hint" class="text-[12px] text-muted hidden"></p>
+    </aside>
+    <main class="stage-main">
+      <div id="stage-frame"></div>
+      <div id="stage-nav" class="flex flex-col gap-2"></div>
+      <div id="stage-prompter" class="prompter hidden" aria-live="polite"></div>
+    </main>
+    <div class="stage-foot">
+      <button class="btn btn-ghost btn-sm shrink-0" data-act="mic-toggle" id="stage-mic-btn">Bật mic</button>
+      <div class="flex-1 min-w-0 text-[13px] text-muted truncate" id="stage-live">Chưa có ai nói.</div>
+      <form id="stage-ask" class="flex items-center gap-2" style="width:min(520px,46vw)">
+        <input id="stage-input" class="input" autocomplete="off" aria-label="Câu lệnh cho trợ lý">
+        <button class="btn btn-primary btn-sm" type="submit">Gửi</button>
+      </form>
+    </div>
   </div>
 
   <div id="modal-root"></div>
@@ -473,8 +608,11 @@ function closeMenu() {
 const S = {
   view: 'hub', meetings: [], stats: null, filter: 'all', q: '',
   voices: [], directory: [], health: null,
+  assistant: { name: 'Jarvis', aliases: [] },
   room: null,
 };
+const AN = () => (S.assistant && S.assistant.name) || 'Jarvis';
+const hasWords = t => /[\p{L}\p{N}]/u.test(t || '');
 
 /* =====================================================================
    ĐIỀU HƯỚNG (hash router: #/, #/m/12, #/voices)
@@ -646,7 +784,7 @@ function newRoom(id) {
     id, meeting: null, segs: new Map(), order: [], speakers: new Map(), suggestions: new Map(),
     artifacts: [], tab: 'jarvis', artSel: {}, turns: [], interim: null, activeSid: null, activeAt: 0,
     ws: null, wsRetry: 0, wsTimer: null, pingTimer: null, pollTimer: null, closed: false, newBelow: false,
-    vp: 'desktop',
+    vp: 'desktop', stage: { artifact_id: null, slide: 0, can_back: false, shown_at_seq: 0 }, panelSlide: {},
   };
 }
 async function openRoom(mid) {
@@ -670,6 +808,9 @@ async function openRoom(mid) {
 function closeRoom() {
   const R = S.room;
   if (!R) return;
+  if (STAGE.open) closeStage();
+  stopVoice(); $('#av-insights').innerHTML = ''; avSet('idle', 'neutral');
+  const bub = $('#av-bubble'); bub.className = 'bubble text-muted'; bub.textContent = 'Gọi tên mình kèm yêu cầu, hoặc gõ ở ô bên dưới.';
   R.closed = true;
   clearTimeout(R.wsTimer); clearInterval(R.pingTimer); clearInterval(R.pollTimer);
   if (R.ws) { try { R.ws.close(); } catch (e) { /* bỏ qua */ } }
@@ -679,11 +820,12 @@ function applySnapshot(d) {
   const R = S.room;
   R.meeting = d.meeting;
   R.segs.clear(); R.order = [];
-  (d.segments || []).forEach(s => { R.segs.set(s.seq, s); R.order.push(s.seq); });
+  (d.segments || []).filter(s => hasWords(s.text)).forEach(s => { R.segs.set(s.seq, s); R.order.push(s.seq); });
   R.speakers = new Map((d.speakers || []).map(p => [p.sid, p]));
   R.spkSig = (d.speakers || []).map(p => `${p.sid}:${p.label}:${p.origin}`).join('|');
   R.suggestions = new Map((d.suggestions || []).map(s => [s.inference_id, s]));
   R.artifacts = (d.artifacts || []).slice().sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+  if (d.stage) R.stage = d.stage;
 }
 function renderRoomSkeleton() {
   $('#t-list').innerHTML = '<div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang tải cuộc họp...</div>';
@@ -691,6 +833,7 @@ function renderRoomSkeleton() {
   $('#pane-jarvis').innerHTML = ''; $('#t-interim').classList.add('hidden'); $('#t-empty').classList.add('hidden');
 }
 function renderRoom() {
+  if (STAGE.open) renderStage();
   renderTopbar();
   renderMicBox();
   renderSpeakers();
@@ -726,6 +869,7 @@ function setStatus(text) { $('#t-status').textContent = text || ''; }
 
 function onEvent(R, ev) {
   if (S.room !== R) return;
+  try { avatarEvent(R, ev); } catch (e) { console.error(e); }
   switch (ev.type) {
     case 'init':
       applySnapshot(ev); renderRoom(); break;
@@ -754,8 +898,27 @@ function onEvent(R, ev) {
       toast(`AI gợi ý: ${ev.label} có thể là ${ev.suggested_name}.`, 'info'); break;
     case 'suggestion_resolved': R.suggestions.delete(ev.inference_id); renderSuggestions(); break;
     case 'stream_status': onStreamStatus(ev); break;
+    case 'ai_listening': {
+      const t = newTurn('', 'voice'); t.listening = true; switchTab('jarvis'); renderJarvis(); break;
+    }
+    case 'ai_listening_end': {
+      const t = R.turns[R.turns.length - 1];
+      if (t && t.listening && !t.done) {
+        t.listening = false; t.done = true;
+        t.error = `Không nghe thấy yêu cầu sau khi gọi "${ev.name}". Hãy gọi kèm yêu cầu, ví dụ "${ev.name} ơi, tóm tắt giúp anh".`;
+      }
+      renderJarvis(); break;
+    }
     case 'ai_activated': {
-      const t = newTurn(ev.prompt, 'voice'); t.pendingVoice = true; switchTab('jarvis'); renderJarvis(); break;
+      const last = R.turns[R.turns.length - 1];
+      if (last && last.listening && !last.done) { last.listening = false; last.prompt = ev.prompt; }
+      else newTurn(ev.prompt, ev.source === 'text' ? 'chat' : 'voice');
+      switchTab('jarvis'); renderJarvis(); break;
+    }
+    case 'speakers_split': {
+      const a = R.speakers.get(ev.source_sid), b = R.speakers.get(ev.new_sid);
+      toast(`Phát hiện thêm một người nói dùng chung nhãn với ${a ? a.label : 'người khác'}, đã tách thành ${b ? b.label : 'người nói mới'}. Có thể gộp lại nếu sai.`, 'info', 7000);
+      break;
     }
     case 'ai_thinking': currentTurn().steps.push(ev.text); renderJarvis(); break;
     case 'ai_tool_call': currentTurn().tools.push(ev.tool); renderJarvis(); break;
@@ -771,8 +934,28 @@ function onEvent(R, ev) {
       R.meeting = Object.assign(R.meeting, ev.meeting || {}, { status: ev.status, minutes_status: ev.minutes_status });
       if (ev.status === 'ended' && MIC.on && MIC.mid === R.id) stopMic(true);
       renderTopbar(); renderMicBox(); renderTabs();
-      if (ev.minutes_status === 'failed') toast('Không lập được biên bản tự động. Thử nhờ Jarvis lập lại.', 'err');
+      if (ev.minutes_status === 'failed') toast(`Không lập được biên bản tự động. Thử nhờ ${AN()} lập lại.`, 'err');
       break;
+    case 'ai_say': {
+      const t = R.turns[R.turns.length - 1];
+      if (t && !t.done && !t.listening) { t.done = true; t.response = ev.text; renderJarvis(); } else appendAssistantNote(ev.text);
+      break;
+    }
+    case 'ai_insights': {
+      const t = R.turns[R.turns.length - 1];
+      const items = ev.items || [];
+      if (t && !t.done) {
+        t.insights = items;
+        if (ev.source === 'analysis') { t.done = true; if (!items.length) t.response = 'Mình đã xem lại cuộc họp, chưa thấy điểm nào cần lưu ý thêm.'; }
+      } else if (items.length) { const n = newTurn('', 'note'); n.done = true; n.insights = items; }
+      renderJarvis(); break;
+    }
+    case 'stage_prompt': {
+      const text = promptNext();
+      const t = R.turns[R.turns.length - 1];
+      if (t && !t.done) { t.done = true; t.response = text; }
+      renderJarvis(); break;
+    }
     case 'error': toast(ev.text, 'err'); break;
   }
 }
@@ -827,6 +1010,7 @@ let tTimer = null;
 function scheduleTranscript() { clearTimeout(tTimer); tTimer = setTimeout(() => renderTranscript(false), 60); }
 function addSegment(s) {
   const R = S.room;
+  if (!hasWords(s.text)) return;
   if (R.segs.has(s.seq)) { Object.assign(R.segs.get(s.seq), s); scheduleTranscript(); return; }
   R.segs.set(s.seq, s); R.order.push(s.seq);
   const box = $('#t-scroll'); const stick = nearBottom(box);
@@ -1148,7 +1332,7 @@ const QUICK = [
   'Vẽ sơ đồ luồng xử lý đang được bàn',
   'Tra cứu ticket Jira liên quan tới nội dung vừa nói',
 ];
-const KIND_LABEL = { minutes: 'Biên bản', diagram: 'Sơ đồ', web_design: 'Giao diện' };
+const KIND_LABEL = { minutes: 'Biên bản', diagram: 'Sơ đồ', web_design: 'Giao diện', slides: 'Slide' };
 function newTurn(prompt, via = 'chat') {
   const t = { prompt, via, steps: [], tools: [], response: null, artifact: null, error: null, done: false };
   S.room.turns.push(t); return t;
@@ -1171,7 +1355,7 @@ function renderJarvis() {
   const box = $('#pane-jarvis');
   if (!R.turns.length) {
     box.innerHTML = `<div class="text-muted text-[13px]">
-      <p class="mb-3">Gọi <span class="text-ink font-medium">"Jarvis ơi..."</span> trong lúc họp, hoặc gõ câu hỏi bên dưới. Jarvis đọc transcript và tra cứu dữ liệu nội bộ (Jira, danh bạ, kiến trúc hệ thống).</p>
+      <p class="mb-3">Gọi <span class="text-ink font-medium">"${esc(AN())} ơi..."</span> trong lúc họp, hoặc gõ câu hỏi bên dưới. ${esc(AN())} đọc transcript và tra cứu dữ liệu nội bộ (Jira, danh bạ, kiến trúc hệ thống). <button class="link" data-act="settings">Đổi tên gọi</button></p>
       <div class="flex flex-col gap-1.5">${QUICK.map(q => `<button class="text-left btn btn-ghost btn-sm justify-start" style="height:auto;padding:8px 10px;white-space:normal" data-act="quick" data-prompt="${esc(q)}">${esc(q)}</button>`).join('')}</div>
     </div>`;
     return;
@@ -1181,10 +1365,12 @@ function renderJarvis() {
     const steps = t.steps.length ? `<details class="mb-1" ${t.done ? '' : 'open'}><summary class="step cursor-pointer">${t.done ? `Đã xử lý ${t.steps.length} bước` : 'Đang xử lý...'}</summary>
       <ul class="mt-1 flex flex-col gap-0.5">${t.steps.map(s => `<li class="step">${esc(s)}</li>`).join('')}</ul></details>` : '';
     const tools = t.tools.length ? `<div class="flex flex-wrap gap-1 mb-1">${t.tools.map(x => `<span class="chip">tra cứu ${esc(x)}</span>`).join('')}</div>` : '';
-    const body = t.error ? `<p style="color:rgb(var(--danger))">${esc(t.error)}</p>`
-      : (t.response ? `<div class="md">${renderMd(t.response)}</div>` : (t.done ? '' : '<div class="flex items-center gap-2 step"><span class="spinner"></span>Jarvis đang trả lời...</div>'));
+    const body = t.listening ? `<div class="flex items-center gap-2 step"><span class="dot-live"></span>${esc(AN())} đang nghe yêu cầu của bạn...</div>`
+      : t.error ? `<p style="color:rgb(var(--danger))">${esc(t.error)}</p>`
+      : (t.response ? `<div class="md">${renderMd(t.response)}</div>` : (t.done ? '' : `<div class="flex items-center gap-2 step"><span class="spinner"></span>${esc(AN())} đang trả lời...</div>`));
     const art = t.artifact ? `<button class="btn btn-ghost btn-sm mt-2" data-act="open-art" data-aid="${t.artifact.id}">Mở ${esc(KIND_LABEL[t.artifact.kind] || 'sản phẩm')} v${t.artifact.version || 1}</button>` : '';
-    return `${user}<div class="turn-ai">${steps}${tools}${body}${art}</div>`;
+    const ins = (t.insights || []).length ? `<div class="flex flex-col gap-1.5 mb-2">${t.insights.map(insightHtml).join('')}</div>` : '';
+    return `${user}<div class="turn-ai">${steps}${tools}${ins}${body}${art}</div>`;
   }).join('');
   box.scrollTop = box.scrollHeight;
 }
@@ -1203,18 +1389,27 @@ function addArtifact(art, show) {
 }
 function renderTabs() {
   const R = S.room; if (!R) return;
-  ['minutes', 'diagram', 'web_design'].forEach(k => {
+  ['slides', 'minutes', 'diagram', 'web_design'].forEach(k => {
     const n = R.artifacts.filter(a => a.kind === k).length;
     const c = $(`[data-count="${k}"]`); if (c) c.textContent = n ? n : '';
   });
   $$('[data-act="tab"]').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === R.tab ? 'true' : 'false'));
+  const sel = $('#ai-tabs [aria-selected="true"]'); if (sel && sel.offsetParent) sel.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  updateTabFade();
   const isArt = R.tab !== 'jarvis';
+  $('#av-mini').classList.toggle('hidden', isArt);
   $('#pane-jarvis').classList.toggle('hidden', isArt);
   $('#pane-art').classList.toggle('hidden', !isArt);
   const input = $('#ask-input');
   if (isArt) renderArtifactPane();
-  else { $('#art-bar').classList.add('hidden'); input.placeholder = 'Hỏi Jarvis về cuộc họp này'; }
+  else { $('#art-bar').classList.add('hidden'); input.placeholder = `Hỏi ${AN()} về cuộc họp này`; }
 }
+/** Làm mờ mép phải dải tab khi còn tab bị khuất (thanh cuộn đã ẩn). */
+function updateTabFade() {
+  const el = $('#ai-tabs'); if (el) el.classList.toggle('fade-right', el.scrollWidth - el.scrollLeft - el.clientWidth > 4);
+}
+$('#ai-tabs').addEventListener('scroll', updateTabFade, { passive: true });
+window.addEventListener('resize', updateTabFade);
 function switchTab(tab) { if (!S.room) return; S.room.tab = tab; renderTabs(); }
 function currentArtifact() {
   const R = S.room; const list = R.artifacts.filter(a => a.kind === R.tab);
@@ -1228,14 +1423,15 @@ async function renderArtifactPane() {
   $('#web-tools').classList.toggle('hidden', R.tab !== 'web_design' || !art);
   if (!art) {
     bar.classList.add('hidden');
-    input.placeholder = 'Hỏi Jarvis về cuộc họp này';
+    input.placeholder = `Hỏi ${AN()} về cuộc họp này`;
     if (R.tab === 'minutes' && R.meeting.minutes_status === 'pending') {
       pane.innerHTML = '<div class="flex items-center gap-2 text-muted"><span class="spinner"></span>AI đang lập biên bản từ transcript...</div>';
     } else {
       const hint = {
         minutes: ['Biên bản được lập tự động khi kết thúc cuộc họp.', 'Lập biên bản ngay', 'Lập biên bản cuộc họp với quyết định và bảng việc cần làm'],
-        diagram: ['Nhờ Jarvis vẽ sơ đồ từ nội dung đang bàn.', 'Vẽ sơ đồ luồng đang bàn', 'Vẽ sơ đồ luồng xử lý đang được bàn trong cuộc họp'],
-        web_design: ['Nhờ Jarvis phác thảo giao diện cho ý tưởng trong cuộc họp.', 'Phác thảo giao diện', 'Thiết kế giao diện web cho ý tưởng chính đang bàn'],
+        diagram: [`Nhờ ${AN()} vẽ sơ đồ từ nội dung đang bàn.`, 'Vẽ sơ đồ luồng đang bàn', 'Vẽ sơ đồ luồng xử lý đang được bàn trong cuộc họp'],
+        web_design: [`Nhờ ${AN()} phác thảo giao diện cho ý tưởng trong cuộc họp.`, 'Phác thảo giao diện', 'Thiết kế giao diện web cho ý tưởng chính đang bàn'],
+        slides: [`Nhờ ${AN()} soạn bộ slide từ nội dung cuộc họp, rồi trình chiếu và điều khiển bằng giọng nói.`, 'Soạn slide báo cáo', 'Làm slide báo cáo tiến độ và các quyết định của cuộc họp'],
       }[R.tab];
       pane.innerHTML = `<div class="text-muted"><p class="mb-3">${hint[0]}${R.meeting.minutes_status === 'failed' && R.tab === 'minutes' ? ' Lần lập tự động vừa rồi thất bại.' : ''}</p>
         <button class="btn btn-ghost btn-sm" data-act="quick" data-prompt="${esc(hint[2])}">${hint[1]}</button></div>`;
@@ -1245,7 +1441,21 @@ async function renderArtifactPane() {
   bar.classList.remove('hidden');
   $('#art-version').innerHTML = list.map(a => `<option value="${a.id}" ${a.id === art.id ? 'selected' : ''}>${esc(a.title)} - v${a.version || 1}</option>`).join('');
   input.placeholder = `Yêu cầu sửa ${KIND_LABEL[art.kind].toLowerCase()} này`;
-  if (art.kind === 'minutes') {
+  if (art.kind === 'slides') {
+    const deck = parseDeck(art.content);
+    const onStage = R.stage && R.stage.artifact_id === art.id;
+    const i = Math.max(0, Math.min(onStage ? R.stage.slide : (R.panelSlide[art.id] || 0), deck.slides.length - 1));
+    pane.innerHTML = `<div class="slide-wrap">${slideHtml(deck, i, false)}</div>
+      <div class="flex items-center justify-between gap-2 mt-3">
+        <div class="flex items-center gap-2">
+          <button class="btn btn-ghost btn-sm" data-act="panel-slide" data-aid="${art.id}" data-to="${i - 1}" ${i <= 0 ? 'disabled' : ''}>Trước</button>
+          <span class="num text-muted text-[12.5px]">${i + 1} / ${deck.slides.length}</span>
+          <button class="btn btn-ghost btn-sm" data-act="panel-slide" data-aid="${art.id}" data-to="${i + 1}" ${i >= deck.slides.length - 1 ? 'disabled' : ''}>Sau</button>
+        </div>
+        <button class="btn btn-primary btn-sm" data-act="stage-show" data-aid="${art.id}" data-slide="${i}">Trình chiếu</button>
+      </div>
+      ${deck.slides[i].notes ? `<p class="text-[12.5px] text-muted mt-3"><span class="text-ink font-medium">Ghi chú cho người trình bày:</span> ${esc(deck.slides[i].notes)}</p>` : ''}`;
+  } else if (art.kind === 'minutes') {
     pane.innerHTML = `<article class="md">${renderMd(art.content)}</article>`;
   } else if (art.kind === 'diagram') {
     pane.innerHTML = '<div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang vẽ sơ đồ...</div>';
@@ -1283,21 +1493,32 @@ async function submitAsk(text) {
   $('#ask-input').value = ''; autosize();
   if (art) {
     const t = newTurn(`Sửa ${KIND_LABEL[art.kind].toLowerCase()}: ${text}`); renderJarvis();
-    R.pendingCoDesign = true;
+    R.pendingCoDesign = true; avSet('thinking', 'neutral');
     try {
       const res = await POST(`/api/meetings/${R.id}/co-design`, { artifact_id: art.id, feedback: text });
       t.done = true; t.response = res.chat_message; t.artifact = res;
       addArtifact(res, true); renderJarvis();
-    } catch (e) { t.done = true; t.error = e.message; renderJarvis(); toast(e.message, 'err'); }
+      avSet('idle', 'happy'); if (res.chat_message) say(res.chat_message, { mood: 'happy' });
+    } catch (e) { t.done = true; t.error = e.message; renderJarvis(); toast(e.message, 'err'); avSet('idle', 'concerned'); }
     finally { R.pendingCoDesign = false; }
     return;
   }
-  const t = newTurn(text); switchTab('jarvis'); renderJarvis();
+  switchTab('jarvis');
+  await sendCommand(text);
+}
+async function sendCommand(text) {
+  const R = S.room; if (!R || !text) return;
+  const live = R.ws && R.ws.readyState === 1;   // có WebSocket: kết quả về qua sự kiện như khi gọi bằng giọng nói
+  let t = null;
+  if (!live) { t = newTurn(text, 'chat'); renderJarvis(); avSet('thinking', 'neutral'); }
   try {
-    const res = await POST(`/api/meetings/${R.id}/ai-ask`, { prompt: text });
-    finishTurn(t, res);
-    if (res.artifact) switchTab(res.artifact.kind);
-  } catch (e) { t.done = true; t.error = e.message; renderJarvis(); }
+    const res = await POST(`/api/meetings/${R.id}/command`, { text });
+    if (!live) (res.events || []).forEach(ev => { if (ev.type !== 'ai_activated') onEvent(R, ev); });
+  } catch (e) {
+    t = t || newTurn(text, 'chat');
+    t.done = true; t.error = e.message; renderJarvis();
+    avSet('idle', 'concerned'); showBubble('Mình chưa làm được yêu cầu này.', e.message);
+  }
 }
 $('#ask-form').addEventListener('submit', e => { e.preventDefault(); submitAsk($('#ask-input').value); });
 function autosize() { const el = $('#ask-input'); el.style.height = 'auto'; el.style.height = Math.min(120, el.scrollHeight) + 'px'; }
@@ -1375,7 +1596,7 @@ async function createCapture(onPcm, onLevel) {
     }
   };
 }
-function setMic(state, msg = '') { MIC.state = state; MIC.msg = msg; renderMicBox(); renderRecPill(); }
+function setMic(state, msg = '') { MIC.state = state; MIC.msg = msg; renderMicBox(); renderRecPill(); renderStageMic(); }
 async function startMic(mid) {
   if (MIC.on) {
     if (MIC.mid === mid) return;
@@ -1427,6 +1648,7 @@ function openAudioSocket(mid) {
 }
 function sendPcm(pcm) {
   const ws = MIC.ws;
+  if (VOICE.audible || performance.now() < VOICE.gateUntil) pcm = new Int16Array(pcm.length);   // giữ đúng dòng thời gian
   if (ws && ws.readyState === 1 && MIC.state === 'live') ws.send(pcm.buffer);
   else if (MIC.on) { MIC.buffer.push(pcm.buffer); if (MIC.buffer.length > 60) MIC.buffer.shift(); }  // giữ tối đa ~6s khi đang kết nối
 }
@@ -1485,6 +1707,477 @@ function renderMicBox() {
     </div>`;
 }
 window.addEventListener('beforeunload', e => { if (MIC.on) { e.preventDefault(); e.returnValue = ''; } });
+
+/* =====================================================================
+   KHUÔN MẶT TRỢ LÝ & GIỌNG NÓI
+   ===================================================================== */
+const FACE_SVG = (id) => `
+  <defs><radialGradient id="${id}" cx="38%" cy="32%" r="78%">
+    <stop offset="0%" stop-color="#8AF5C8"/><stop offset="65%" stop-color="#3DDC97"/><stop offset="100%" stop-color="#1F9E6C"/>
+  </radialGradient></defs>
+  <circle class="ring2" cx="100" cy="100" r="97"/>
+  <circle class="ring" cx="100" cy="100" r="90"/>
+  <g data-head>
+    <circle cx="100" cy="100" r="78" fill="url(#${id})"/>
+    <ellipse class="cheek" cx="60" cy="121" rx="11" ry="7"/><ellipse class="cheek" cx="140" cy="121" rx="11" ry="7"/>
+    <ellipse class="white" cx="72" cy="92" rx="14" ry="16"/><ellipse class="white" cx="128" cy="92" rx="14" ry="16"/>
+    <circle class="pupil" cx="72" cy="94" r="7"/><circle class="pupil" cx="128" cy="94" r="7"/>
+    <circle class="shine" cx="75" cy="90" r="2.4"/><circle class="shine" cx="131" cy="90" r="2.4"/>
+    <path class="brow" d=""/><path class="brow" d=""/>
+    <path class="mouth" d=""/>
+  </g>`;
+const AV = { faces: [], state: 'idle', mood: 'neutral', heardAt: -1e9, mouth: 0, phase: 0, kickAt: 0, bubbleText: '',
+  gx: 0, gy: 0, tgx: 0, tgy: 0, nextGaze: 0, blinkT: -1, blinkAt: 2000, shown: '' };
+const AV_STATUS = { idle: 'Đang chờ', listening: 'Đang lắng nghe', thinking: 'Đang suy nghĩ', speaking: 'Đang nói' };
+const REDUCED_MOTION = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function mountFaces() {
+  $$('[data-face]').forEach((svg, i) => {
+    if (svg.dataset.ready) return;
+    svg.innerHTML = FACE_SVG(`face-grad-${i}`);
+    svg.dataset.ready = '1';
+    AV.faces.push({ svg, head: $('[data-head]', svg), ring: $('.ring', svg), ring2: $('.ring2', svg), mouth: $('.mouth', svg),
+      whites: $$('.white', svg), pupils: $$('.pupil', svg), shines: $$('.shine', svg), brows: $$('.brow', svg) });
+  });
+}
+function avSet(state, mood) { if (state) AV.state = state; if (mood) { AV.mood = mood; AV.moodAt = performance.now(); } }
+function mouthPath(open, smile) {
+  const w = 21, cx = 100, y = 129 - smile * 3;
+  const up = y + smile * 8 - open * 2, low = y + smile * 8 + 3 + open * 22;
+  return `M ${cx - w} ${y.toFixed(1)} Q ${cx} ${up.toFixed(1)} ${cx + w} ${y.toFixed(1)} Q ${cx} ${low.toFixed(1)} ${cx - w} ${y.toFixed(1)} Z`;
+}
+function avFrame(ts) {
+  requestAnimationFrame(avFrame);
+  if (document.hidden) return;
+  const visible = AV.faces.filter(f => f.svg.getClientRects().length);
+  if (!visible.length) return;
+  const speaking = !!VOICE.current;
+  if (AV.mood !== 'neutral' && !speaking && ts - (AV.moodAt || 0) > 7000) AV.mood = 'neutral';
+  const heard = ts - AV.heardAt < 1600 || (MIC.on && MIC.level > 0.02);
+  const st = speaking ? 'speaking' : AV.state === 'thinking' ? 'thinking'
+    : (AV.state === 'listening' || heard) ? 'listening' : 'idle';
+  if (st !== AV.shown) {
+    AV.shown = st;
+    $$('[data-av-status]').forEach(el => { el.textContent = AV_STATUS[st]; });
+  }
+  if (ts > AV.nextGaze) {
+    const r = () => Math.random() * 2 - 1;
+    [AV.tgx, AV.tgy] = st === 'thinking' ? [5 + r() * 1.5, -6 + r()] : st === 'listening' ? [r() * 2, 2.5]
+      : st === 'speaking' ? [r() * 2.5, r()] : [r() * 4, r() * 2.5];
+    AV.nextGaze = ts + (REDUCED_MOTION ? 4000 : 700 + Math.random() * 1800);
+  }
+  AV.gx += (AV.tgx - AV.gx) * 0.12; AV.gy += (AV.tgy - AV.gy) * 0.12;
+  if (AV.blinkT < 0 && ts > AV.blinkAt) AV.blinkT = ts;
+  let open = 1;
+  if (AV.blinkT >= 0) {
+    const k = (ts - AV.blinkT) / 150;
+    if (k >= 1) { AV.blinkT = -1; AV.blinkAt = ts + 2200 + Math.random() * 3800; } else open = 1 - Math.sin(k * Math.PI);
+  }
+  let target = 0;
+  if (speaking) { AV.phase += 0.36 + Math.random() * 0.12; target = 0.28 + 0.38 * Math.abs(Math.sin(AV.phase)) + (ts - AV.kickAt < 110 ? 0.25 : 0); }
+  AV.mouth += (target - AV.mouth) * 0.35;
+  const smile = AV.mood === 'happy' ? 0.9 : AV.mood === 'concerned' ? -0.55 : st === 'thinking' ? 0.1 : 0.6;
+  const lift = st === 'thinking' ? -5 : st === 'listening' ? -2.5 : 0;
+  const tilt = AV.mood === 'concerned' ? 4 : st === 'thinking' ? -1.5 : 0;
+  const t = ts / 1000;
+  const ringOn = st === 'listening' ? 0.9 : st === 'speaking' ? 0.45 : 0;
+  const ringScale = 1 + (st === 'listening' ? Math.min(0.07, MIC.level * 1.5) + (REDUCED_MOTION ? 0 : 0.02 * (1 + Math.sin(t * 5)))
+    : st === 'speaking' ? AV.mouth * 0.04 : 0);
+  const bob = REDUCED_MOTION ? 0 : Math.sin(t * 1.6) * 1.4;
+  for (const f of visible) {
+    f.head.setAttribute('transform', `translate(0 ${bob.toFixed(2)})`);
+    f.whites.forEach(w => w.setAttribute('ry', (16 * Math.max(0.08, open)).toFixed(2)));
+    f.pupils.forEach((pp, i) => { pp.setAttribute('cx', (72 + i * 56 + AV.gx).toFixed(2)); pp.setAttribute('cy', (94 + AV.gy).toFixed(2)); pp.style.opacity = open < 0.3 ? 0 : 1; });
+    f.shines.forEach((sh, i) => { sh.setAttribute('cx', (75 + i * 56 + AV.gx).toFixed(2)); sh.setAttribute('cy', (90 + AV.gy).toFixed(2)); sh.style.opacity = open < 0.3 ? 0 : 0.9; });
+    f.brows[0].setAttribute('d', `M 58 ${70 + lift + tilt} Q 72 ${63 + lift} 86 ${70 + lift - tilt}`);
+    f.brows[1].setAttribute('d', `M 114 ${70 + lift - tilt} Q 128 ${63 + lift} 142 ${70 + lift + tilt}`);
+    f.mouth.setAttribute('d', mouthPath(AV.mouth, smile));
+    f.ring.style.opacity = ringOn; f.ring.style.transform = `scale(${ringScale.toFixed(3)})`;
+    f.ring2.style.opacity = st === 'thinking' ? 1 : 0; f.ring2.style.transform = REDUCED_MOTION ? '' : `rotate(${(t * 50) % 360}deg)`;
+    f.svg.classList.toggle('mood-happy', AV.mood === 'happy');
+  }
+}
+
+const VOICE = { enabled: true, supported: 'speechSynthesis' in window, voice: null, queue: [], current: null, audible: false, gateUntil: 0,
+  allowOnline: false, onlineAvailable: false };
+try { VOICE.enabled = localStorage.getItem('mc_voice') !== 'off'; VOICE.allowOnline = localStorage.getItem('mc_voice_online') === 'on'; } catch (e) { /* bỏ qua */ }
+/** Ưu tiên giọng cài trên máy (không gửi dữ liệu ra ngoài); giọng trực tuyến chỉ dùng khi người dùng cho phép. */
+function pickVoice() {
+  if (!VOICE.supported) return;
+  const vi = speechSynthesis.getVoices().filter(v => /^vi/i.test(v.lang));
+  const local = vi.filter(v => v.localService);
+  const online = vi.filter(v => !v.localService);
+  VOICE.onlineAvailable = online.length > 0;
+  VOICE.voice = local[0] || (VOICE.allowOnline ? (online.find(v => /natural|neural/i.test(v.name)) || online[0]) : null) || null;
+  updateVoiceUi();
+}
+if (VOICE.supported) { pickVoice(); speechSynthesis.addEventListener('voiceschanged', pickVoice); }
+function updateVoiceUi() {
+  $$('[data-voice-btn]').forEach(b => { b.textContent = VOICE.enabled ? 'Giọng nói: bật' : 'Giọng nói: tắt'; b.setAttribute('aria-pressed', VOICE.enabled ? 'true' : 'false'); });
+  const hint = $('#voice-hint');
+  if (hint) {
+    const missing = VOICE.enabled && (!VOICE.supported || !VOICE.voice);
+    hint.classList.toggle('hidden', !missing);
+    hint.innerHTML = !missing ? '' : VOICE.onlineAvailable
+      ? 'Máy chỉ có giọng tiếng Việt trực tuyến, nên trợ lý đang hiện phụ đề. Nếu dùng giọng này, câu trả lời của trợ lý sẽ được gửi tới dịch vụ đọc của Microsoft. <button class="link" data-act="voice-online">Cho phép giọng trực tuyến</button>'
+      : 'Máy chưa có giọng đọc tiếng Việt nên trợ lý hiện phụ đề thay cho giọng nói. Cài giọng Tiếng Việt trong Windows (Cài đặt > Thời gian và ngôn ngữ > Giọng nói) rồi tải lại trang.';
+  }
+}
+function toggleVoice() {
+  VOICE.enabled = !VOICE.enabled;
+  try { localStorage.setItem('mc_voice', VOICE.enabled ? 'on' : 'off'); } catch (e) { /* bỏ qua */ }
+  if (!VOICE.enabled) stopVoice();
+  updateVoiceUi();
+  toast(VOICE.enabled ? 'Trợ lý sẽ nói thành tiếng.' : 'Trợ lý chỉ hiện phụ đề, không nói thành tiếng.', 'info');
+}
+/** Bỏ ký hiệu markdown, giữ tối đa vài câu đầu để đọc to. */
+function speakable(text) {
+  let t = String(text || '').replace(/```[\s\S]*?```/g, ' ').replace(/^\s*\|.*\|\s*$/gm, ' ').replace(/^#+\s*/gm, '')
+    .replace(/\*\*|__|`/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/^\s*[-*•]\s+/gm, '').replace(/\s+/g, ' ').trim();
+  if (t.length > 420) { const cut = t.slice(0, 420); const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('? '), cut.lastIndexOf('! ')); t = end > 120 ? cut.slice(0, end + 1) : cut + '...'; }
+  return t;
+}
+/** Chia thành các câu ngắn: trình duyệt đọc ổn định hơn và có thể ngắt giữa chừng. */
+function chunks(text) {
+  const out = [];
+  (text.match(/[^.!?…]+[.!?…]*\s*/g) || [text]).forEach(sn => {
+    sn = sn.trim(); if (!sn) return;
+    if (out.length && out[out.length - 1].length + sn.length < 140) out[out.length - 1] += ' ' + sn; else out.push(sn);
+  });
+  return out;
+}
+function showBubble(text, caption) {
+  AV.bubbleText = text;
+  const b = $('#av-bubble'); if (!b) return;
+  b.classList.remove('text-muted');
+  b.innerHTML = esc(text) + (caption ? `<span class="cap">${esc(caption)}</span>` : '');
+}
+function say(text, opts = {}) {
+  const spoken = speakable(text); if (!spoken) return;
+  const parts = chunks(spoken);
+  parts.forEach((part, k) => VOICE.queue.push({ spoken: part, bubble: opts.bubble || spoken, caption: opts.caption, first: k === 0,
+    mood: opts.mood || 'neutral', insightId: opts.insightId }));
+  if (VOICE.queue.length > 24) VOICE.queue.splice(0, VOICE.queue.length - 24);
+  pumpVoice();
+}
+function pumpVoice() {
+  if (VOICE.current || !VOICE.queue.length) return;
+  const item = VOICE.current = VOICE.queue.shift();
+  AV.mood = item.mood; AV.moodAt = performance.now();
+  if (item.first) showBubble(item.bubble, item.caption);
+  markInsight(item.insightId, true);
+  let finished = false;
+  const done = () => {
+    if (finished) return; finished = true;
+    clearTimeout(item.timer);
+    if (!VOICE.queue.length || VOICE.queue[0].insightId !== item.insightId) markInsight(item.insightId, false);
+    if (VOICE.audible) VOICE.gateUntil = performance.now() + 300;   // chờ tiếng vọng tắt hẳn
+    VOICE.current = null; VOICE.audible = false;
+    setTimeout(pumpVoice, 220);
+  };
+  item.finish = done;
+  if (VOICE.enabled && VOICE.supported && VOICE.voice) {
+    const u = new SpeechSynthesisUtterance(item.spoken);
+    u.voice = VOICE.voice; u.lang = VOICE.voice.lang || 'vi-VN'; u.rate = 1.05; u.pitch = 1.05;
+    u.onboundary = () => { AV.kickAt = performance.now(); };
+    u.onend = done; u.onerror = done;
+    VOICE.audible = true;
+    speechSynthesis.speak(u);
+    item.timer = setTimeout(done, 3000 + item.spoken.length * 110);
+  } else {
+    item.timer = setTimeout(done, Math.min(8000, 600 + item.spoken.split(/\s+/).length * 280));
+  }
+}
+function stopVoice() {
+  VOICE.queue = [];
+  if (VOICE.supported) speechSynthesis.cancel();
+  if (VOICE.current && VOICE.current.finish) VOICE.current.finish();
+  $$('.insight.speaking').forEach(el => el.classList.remove('speaking'));
+}
+
+/* ---------- nhận xét của trợ lý ---------- */
+const INSIGHT_STYLE = {
+  risk: ['#FF8A8A', 'Có một rủi ro: '], todo: ['#FFC145', 'Việc cần chốt: '], improve: ['#5AB2FF', 'Nên cải thiện: '],
+  good: ['#9BE15D', 'Điểm tốt: '], info: ['#8D99A5', ''],
+};
+const INSIGHT_NAME = { risk: 'Rủi ro', todo: 'Việc cần chốt', improve: 'Nên cải thiện', good: 'Điểm tốt', info: 'Ghi nhận' };
+let insightSeq = 0;
+function insightHtml(it) {
+  const [color] = INSIGHT_STYLE[it.kind] || INSIGHT_STYLE.info;
+  const name = INSIGHT_NAME[it.kind] || INSIGHT_NAME.info;
+  return `<div class="insight" ${it._id ? `data-insight="${it._id}"` : ''}><span class="k" style="background:${color}" title="${name}"></span><span><span class="sr-only">${name}: </span>${esc(it.text)}</span></div>`;
+}
+function markInsight(id, on) { if (id) $$(`[data-insight="${id}"]`).forEach(el => el.classList.toggle('speaking', on)); }
+function narrateInsights(items, source) {
+  if (!items || !items.length) {
+    if (source === 'analysis') say('Mình đã xem lại cuộc họp, chưa thấy điểm nào cần lưu ý thêm.', { mood: 'happy' });
+    return;
+  }
+  const intro = { meeting_end: 'Trong lúc chờ lập biên bản, mình có vài nhận xét.', request: 'Trong lúc chuẩn bị, mình để ý mấy điểm.',
+    analysis: 'Mình đã xem lại cuộc họp, có mấy điểm sau.' }[source] || 'Mình có vài nhận xét.';
+  say(intro, { mood: 'neutral' });
+  const box = $('#av-insights');
+  items.forEach(it => { it._id = `ins-${++insightSeq}`; });
+  if (box) box.insertAdjacentHTML('afterbegin', items.map(insightHtml).join(''));   // lượt mới ở trên, giữ thứ tự đọc
+  // Đang ghi âm thì chỉ đọc 3 ý đầu cho gọn, các ý còn lại vẫn hiện trên màn hình
+  const spokenMax = MIC.on ? 3 : 6;
+  items.forEach((it, k) => {
+    if (k >= spokenMax) return;
+    const [, prefix] = INSIGHT_STYLE[it.kind] || INSIGHT_STYLE.info;
+    say(prefix + it.text, { mood: it.kind === 'risk' ? 'concerned' : it.kind === 'good' ? 'happy' : 'neutral', insightId: it._id });
+  });
+  if (box) while (box.children.length > 14) box.lastElementChild.remove();
+}
+async function analyzeNow() {
+  const R = S.room; if (!R) return;
+  const live = R.ws && R.ws.readyState === 1;
+  avSet('thinking', 'neutral'); showBubble('Để mình xem lại toàn bộ cuộc họp...');
+  try {
+    const r = await POST(`/api/meetings/${R.id}/insights`, {});
+    if (!live) {   // không có WebSocket (cuộc họp đã kết thúc): tự hiển thị kết quả
+      narrateInsights(r.insights, 'analysis');
+      const n = newTurn('', 'note'); n.done = true; n.insights = r.insights || [];
+      if (!n.insights.length) n.response = 'Mình đã xem lại cuộc họp, chưa thấy điểm nào cần lưu ý thêm.';
+      renderJarvis();
+    }
+  } catch (e) { avSet('idle', 'concerned'); showBubble('Mình chưa xem lại được cuộc họp.', e.message); }
+  finally { if (AV.state === 'thinking') avSet('idle'); }
+}
+
+/* ---------- khuôn mặt phản ứng theo sự kiện cuộc họp ---------- */
+function avatarEvent(R, ev) {
+  switch (ev.type) {
+    case 'interim': if (ev.text) AV.heardAt = performance.now(); setLive(ev); break;
+    case 'segment': setLive(null, ev.segment); if (STAGE.open) renderPrompter(); break;
+    case 'ai_listening': avSet('listening', 'happy'); showBubble('Mình nghe đây, anh chị cứ nói yêu cầu.'); break;
+    case 'ai_listening_end': avSet('idle', 'neutral'); showBubble(`Mình chưa nghe thấy yêu cầu. Thử nói "${ev.name} ơi, chuyển slide".`); break;
+    case 'ai_activated': avSet('thinking', 'neutral'); showBubble(`"${ev.prompt}"`); break;
+    case 'ai_thinking': showBubble(AV.bubbleText || 'Đang xử lý...', ev.text); break;
+    case 'ai_insights': narrateInsights(ev.items, ev.source); if (ev.source === 'analysis') avSet('idle'); break;
+    case 'ai_response': avSet('idle', 'happy'); if (ev.response && ev.response.chat_response) say(ev.response.chat_response, { mood: 'happy' }); break;
+    case 'ai_say': avSet('idle', ev.mood || 'happy'); if (ev.quiet) showBubble(ev.text); else say(ev.text, { mood: ev.mood || 'happy' }); break;
+    case 'ai_error': avSet('idle', 'concerned'); say('Mình chưa làm được yêu cầu này.', { mood: 'concerned', caption: ev.text }); break;
+    case 'stage_state': applyStage(ev.stage); break;
+    case 'stage_command': avSet('idle', 'happy'); if (ev.action === 'open') openStage(); else closeStage(); break;
+    case 'stage_prompt': avSet('idle', 'happy'); break;
+    case 'meeting_status':
+      if (ev.minutes_status === 'pending') { avSet('thinking', 'neutral'); showBubble('Mình đang lập biên bản cuộc họp...'); }
+      else if (ev.minutes_status === 'failed' && AV.state === 'thinking') { avSet('idle', 'concerned'); showBubble('Mình chưa lập được biên bản tự động.', `Thử nói "${AN()} ơi, lập biên bản".`); }
+      else if (AV.state === 'thinking' && ev.minutes_status === 'done') avSet('idle');
+      renderStageMic(); break;
+    case 'artifact_created':
+      if (ev.artifact && ev.artifact.kind === 'minutes') { avSet('idle', 'happy'); say('Biên bản cuộc họp đã xong.', { mood: 'happy' }); }
+      break;
+  }
+}
+function setLive(interim, seg) {
+  const el = $('#stage-live'); if (!el) return;
+  if (interim) {
+    if (!interim.text) return;
+    el.innerHTML = `<span style="color:${colorOf(interim.speaker_key)}" class="font-medium">${esc(interim.speaker_label || 'Đang nghe')}:</span> <span class="text-ink">${esc(interim.text)}</span>`;
+  } else if (seg && hasWords(seg.text)) {
+    const p = speakerOf(seg.speaker_key);
+    el.innerHTML = `<span style="color:${colorOf(seg.speaker_key)}" class="font-medium">${esc(p ? p.label : seg.speaker_label)}:</span> ${esc(seg.text)}`;
+  }
+}
+
+/* =====================================================================
+   SÂN KHẤU: TRÌNH CHIẾU CÙNG TRỢ LÝ
+   ===================================================================== */
+const STAGE = { open: false };
+function parseDeck(content) {
+  try { const d = typeof content === 'string' ? JSON.parse(content) : content; if (d && Array.isArray(d.slides) && d.slides.length) return d; } catch (e) { /* bỏ qua */ }
+  return { title: 'Slide', slides: [{ title: 'Không đọc được bộ slide', layout: 'bullets', bullets: [], notes: '' }] };
+}
+function slideHtml(deck, i, animate) {
+  const n = deck.slides.length; const sl = deck.slides[i] || deck.slides[0];
+  const b = sl.bullets || [];
+  const li = arr => arr.map(x => `<li>${esc(x)}</li>`).join('');
+  let body;
+  if (sl.layout === 'title') body = `<h1>${esc(sl.title)}</h1>${b.length ? `<p class="sl-sub">${b.map(esc).join('<br>')}</p>` : ''}`;
+  else if (sl.layout === 'quote') body = `<blockquote>${esc(b[0] || sl.title)}</blockquote>${b[1] ? `<cite>${esc(b[1])}</cite>` : ''}`;
+  else if (sl.layout === 'metrics') body = `<h2>${esc(sl.title)}</h2><div class="metrics">${b.map(x => {
+    const k = x.indexOf(':'); const l = k > 0 ? x.slice(0, k) : x, v = k > 0 ? x.slice(k + 1).trim() : '';
+    return `<div class="metric"><div class="v">${esc(v || l)}</div>${v ? `<div class="l">${esc(l)}</div>` : ''}</div>`; }).join('')}</div>`;
+  else if (sl.layout === 'two_column') { const h = Math.ceil(b.length / 2); body = `<h2>${esc(sl.title)}</h2><div class="cols"><ul>${li(b.slice(0, h))}</ul><ul>${li(b.slice(h))}</ul></div>`; }
+  else body = `<h2>${esc(sl.title)}</h2><ul>${li(b)}</ul>`;
+  return `<div class="slide ${animate && !REDUCED_MOTION ? 'slide-enter' : ''}" role="img" aria-label="Slide ${i + 1} trên ${n}: ${esc(sl.title)}">
+    <div class="sl-inner">${body}</div><div class="sl-foot"><span class="truncate">${esc(deck.title || '')}</span><span>${i + 1} / ${n}</span></div></div>`;
+}
+function artLabel(a) {
+  const kind = KIND_LABEL[a.kind] || a.kind; const title = String(a.title || '');
+  return title.toLowerCase().startsWith(kind.toLowerCase()) ? title : `${kind}: ${title}`;
+}
+function stageArtifact() { const R = S.room; return R && R.stage ? R.artifacts.find(a => a.id === R.stage.artifact_id) || null : null; }
+function openStage(skipAutoShow) {
+  const R = S.room; if (!R || !R.meeting) return;
+  if (!STAGE.open) {
+    STAGE.open = true;
+    STAGE.lastFocus = document.activeElement;
+    $('#stage').classList.remove('hidden');
+    try { if (!document.fullscreenElement && document.documentElement.requestFullscreen && innerWidth >= 768) document.documentElement.requestFullscreen().catch(() => {}); } catch (e) { /* cần thao tác của người dùng */ }
+  }
+  renderStage();
+  if (!skipAutoShow && !R.stage.artifact_id) {
+    const last = [...R.artifacts].reverse().find(a => a.kind === 'slides') || R.artifacts[R.artifacts.length - 1];
+    if (last) stageAction('show', { artifact_id: last.id });
+  }
+  setTimeout(() => { const b = $('[data-act="stage-close"]'); if (STAGE.open && b && !$('#stage').contains(document.activeElement)) b.focus({ preventScroll: true }); }, 30);
+}
+function closeStage() {
+  if (!STAGE.open) return;
+  STAGE.open = false;
+  $('#stage').classList.add('hidden');
+  if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+  if (STAGE.lastFocus && document.contains(STAGE.lastFocus)) STAGE.lastFocus.focus({ preventScroll: true });
+}
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => toast('Trình duyệt không cho phép toàn màn hình.', 'err'));
+}
+document.addEventListener('fullscreenchange', () => { const b = $('#stage-fs-btn'); if (b) b.textContent = document.fullscreenElement ? 'Thoát toàn màn hình' : 'Toàn màn hình'; });
+function renderStage() {
+  const R = S.room; if (!R || !R.meeting) return;
+  const m = R.meeting;
+  $('#stage-title').textContent = m.title;
+  $('#stage-sub').innerHTML = m.status === 'ended' ? `Đã kết thúc ${esc(fmt.date(m.ended_at))}`
+    : `<span class="num" data-since="${m.started_at}">${fmt.clock(Date.now() / 1000 - m.started_at)}</span> - nói "${esc(AN())} ơi, chuyển slide" hoặc dùng phím mũi tên`;
+  renderStageMic();
+  $('#stage-input').placeholder = `Gõ cho ${AN()}: "chuyển slide", "nhắc bài", "làm slide báo cáo"...`;
+  updateVoiceUi();
+  renderStageFrame(false);
+}
+function renderStageMic() {
+  const R = S.room; const b = $('#stage-mic-btn'); if (!b || !R || !R.meeting) return;
+  const mine = MIC.on && MIC.mid === R.id;
+  b.classList.toggle('hidden', R.meeting.status === 'ended');
+  b.textContent = mine ? (MIC.state === 'live' ? 'Tắt mic' : 'Đang kết nối mic...') : 'Bật mic';
+}
+function fitSlide() {
+  const f = $('#stage-frame'); const w = f && $('.slide-wrap', f); if (!w) return;
+  if (innerWidth < 1024) { w.style.width = '100%'; return; }
+  const r = f.getBoundingClientRect();
+  w.style.width = Math.max(240, Math.min(r.width, r.height * 16 / 9)) + 'px';
+}
+if (window.ResizeObserver) new ResizeObserver(fitSlide).observe($('#stage-frame'));
+let stageRenderSeq = 0;
+async function renderStageFrame(animate) {
+  const R = S.room; const frame = $('#stage-frame'); const nav = $('#stage-nav'); if (!frame || !R) return;
+  const my = ++stageRenderSeq;
+  const art = stageArtifact();
+  const picker = R.artifacts.length ? `<select class="input" data-stage-pick style="height:32px;width:auto;max-width:280px;font-size:12.5px" aria-label="Chọn nội dung trình bày">
+      ${art ? '' : '<option value="">Chọn nội dung...</option>'}${[...R.artifacts].reverse().map(a => `<option value="${a.id}" ${art && a.id === art.id ? 'selected' : ''}>${esc(artLabel(a))} - v${a.version || 1}</option>`).join('')}</select>` : '';
+  if (!art) {
+    frame.innerHTML = `<div class="text-center text-muted max-w-md"><p class="text-ink font-medium mb-2">Chưa có nội dung trên màn hình</p>
+      <p class="mb-4">Nói "${esc(AN())} ơi, làm slide báo cáo tiến độ" hoặc bấm nút dưới đây. ${esc(AN())} sẽ vừa soạn vừa nêu nhận xét.</p>
+      <button class="btn btn-primary btn-sm" data-act="quick" data-prompt="Làm slide báo cáo tiến độ và các quyết định của cuộc họp">Soạn slide từ cuộc họp</button></div>`;
+    nav.innerHTML = picker ? `<div class="flex justify-end">${picker}</div>` : '';
+    renderPrompter();
+    return;
+  }
+  const back = `<button class="btn btn-ghost btn-sm" data-act="stage-back" ${R.stage.can_back ? '' : 'disabled'} title="Quay lại nội dung trình bày trước đó">Phần trước</button>`;
+  if (art.kind === 'slides') {
+    const deck = parseDeck(art.content); const i = Math.max(0, Math.min(R.stage.slide, deck.slides.length - 1));
+    frame.innerHTML = `<div class="slide-wrap">${slideHtml(deck, i, animate)}</div>`;
+    fitSlide();
+    const prompterOn = !$('#stage-prompter').classList.contains('hidden');
+    nav.innerHTML = `<div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="flex items-center gap-2">
+          <button class="btn btn-ghost btn-sm" data-act="stage-prev" ${i <= 0 ? 'disabled' : ''} aria-label="Slide trước"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>Trước</button>
+          <span class="num text-muted text-[13px]">${i + 1} / ${deck.slides.length}</span>
+          <button class="btn btn-ghost btn-sm" data-act="stage-next" ${i >= deck.slides.length - 1 ? 'disabled' : ''} aria-label="Slide sau">Sau<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg></button>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">${back}<button class="btn btn-ghost btn-sm" data-act="stage-prompter" aria-pressed="${prompterOn}" title="Phím N">Nhắc bài</button>${picker}</div>
+      </div>
+      <div class="thumbs" aria-label="Danh sách slide">${deck.slides.map((sl, k) => `<button class="thumb" data-act="stage-goto" data-slide="${k}" aria-current="${k === i}">${k + 1}. ${esc(sl.title)}</button>`).join('')}</div>`;
+    const cur = $('.thumb[aria-current="true"]', nav); if (cur) cur.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  } else {
+    nav.innerHTML = `<div class="flex flex-wrap items-center justify-end gap-2">${back}${picker}</div>`;
+    if (art.kind === 'minutes') frame.innerHTML = `<article class="md panel w-full h-full overflow-y-auto p-6 max-w-4xl">${renderMd(art.content)}</article>`;
+    else if (art.kind === 'web_design') {
+      frame.innerHTML = `<iframe title="Bản thiết kế giao diện" sandbox="allow-scripts allow-modals allow-forms" class="bg-white rounded-xl w-full h-full border divider"></iframe>`;
+      $('iframe', frame).srcdoc = art.content;
+    } else if (art.kind === 'diagram') {
+      frame.innerHTML = '<div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang vẽ sơ đồ...</div>';
+      try {
+        if (!window.mermaid) throw new Error('Chưa tải được thư viện Mermaid');
+        const { svg } = await mermaid.render(`smmd-${art.id}-${Date.now()}`, art.content);
+        if (my === stageRenderSeq) frame.innerHTML = `<div class="panel p-6 w-full h-full overflow-auto grid place-items-center">${svg}</div>`;
+      } catch (e) { if (my === stageRenderSeq) frame.innerHTML = `<pre class="text-[12px] text-muted whitespace-pre-wrap">${esc(art.content)}</pre>`; }
+    }
+  }
+  renderPrompter();
+}
+document.addEventListener('change', e => {
+  if (e.target.matches('[data-stage-pick]') && e.target.value) stageAction('show', { artifact_id: parseInt(e.target.value, 10) });
+});
+async function stageAction(action, extra = {}) {
+  const R = S.room; if (!R) return;
+  try { await applyStage(await POST(`/api/meetings/${R.id}/stage`, { action, ...extra })); }
+  catch (e) { toast(e.message, 'err'); }
+}
+async function applyStage(st) {
+  const R = S.room; if (!R || !st) return;
+  const prev = R.stage || {};
+  const changed = prev.artifact_id !== st.artifact_id || prev.slide !== st.slide;
+  R.stage = st;
+  if (st.artifact_id && !R.artifacts.some(a => a.id === st.artifact_id)) {
+    try { const art = await GET(`/api/artifacts/${st.artifact_id}`); if (S.room === R && !R.artifacts.some(a => a.id === art.id)) R.artifacts.push(art); renderTabs(); } catch (e) { /* bỏ qua */ }
+  }
+  if (S.room !== R) return;
+  if (STAGE.open) renderStageFrame(changed);
+  if (R.tab === 'slides' && changed) renderArtifactPane();
+}
+
+/* ---------- nhắc bài: ý nào đã nói, ý nào chưa ---------- */
+const STOPWORDS = new Set('và của cho các những là có được trong với này đã sẽ một để từ theo khi thì mà ở về ra vào lên như cũng rất nhiều không chưa đang bị hay hoặc nên phải thêm đến tại do vì nếu'.split(' '));
+const tokensOf = t => (String(t || '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
+function coverage(sl) {
+  const R = S.room; const since = (R.stage && R.stage.shown_at_seq) || 0;
+  const said = new Set(tokensOf(R.order.filter(q => q > since).map(q => R.segs.get(q).text).join(' ')));
+  return (sl.bullets || []).map(b => {
+    const ks = [...new Set(tokensOf(b).filter(w => w.length > 1 && !STOPWORDS.has(w)))];
+    const hit = ks.filter(k => said.has(k)).length;
+    return { text: b, done: ks.length > 0 && hit / ks.length >= 0.5 };
+  });
+}
+function currentSlide() {
+  const art = stageArtifact(); if (!art || art.kind !== 'slides') return null;
+  const deck = parseDeck(art.content);
+  return deck.slides[Math.max(0, Math.min(S.room.stage.slide, deck.slides.length - 1))];
+}
+function renderPrompter() {
+  const box = $('#stage-prompter'); if (!box || box.classList.contains('hidden')) return;
+  const sl = currentSlide();
+  if (!sl) { box.innerHTML = '<p class="text-muted text-[13px]">Nhắc bài dùng cho bộ slide. Hãy đưa một bộ slide lên màn hình.</p>'; return; }
+  const cov = coverage(sl); const nextIdx = cov.findIndex(c => !c.done);
+  box.innerHTML = `<div class="flex items-center justify-between gap-3 mb-1"><span class="font-semibold text-[13px] truncate">Nhắc bài: ${esc(sl.title)}</span>
+      <span class="text-[12px] text-muted num shrink-0">${cov.filter(c => c.done).length}/${cov.length} ý đã nói</span></div>
+    ${sl.notes ? `<p class="text-[13px] text-muted mb-2">${esc(sl.notes)}</p>` : ''}
+    <ul>${cov.map((c, k) => `<li class="${c.done ? 'done' : k === nextIdx ? 'next' : ''}"><span aria-hidden="true">${c.done ? '✓' : k === nextIdx ? '›' : '·'}</span><span>${esc(c.text)}</span></li>`).join('')}</ul>`;
+}
+function togglePrompter(force) {
+  const box = $('#stage-prompter'); if (!box) return;
+  box.classList.toggle('hidden', force === undefined ? undefined : !force);
+  renderPrompter(); fitSlide();
+  const b = $('[data-act="stage-prompter"]'); if (b) b.setAttribute('aria-pressed', !box.classList.contains('hidden'));
+}
+function promptNext() {
+  const sl = currentSlide();
+  if (!sl) { const t = 'Chưa có bộ slide nào trên màn hình để nhắc bài.'; avSet('idle', 'concerned'); say(t, { mood: 'concerned' }); return t; }
+  if (!STAGE.open) openStage(true);
+  togglePrompter(true);
+  const next = coverage(sl).find(c => !c.done);
+  const text = next ? `Ý tiếp theo: ${next.text}.` : (sl.notes ? `Slide này đã nói đủ ý. Lưu ý: ${sl.notes}` : 'Slide này đã nói đủ ý, có thể chuyển slide.');
+  say(text, { mood: 'happy' });
+  return text;
+}
+$('#stage-ask').addEventListener('submit', e => {
+  e.preventDefault();
+  const v = $('#stage-input').value.trim(); if (!v) return;
+  $('#stage-input').value = '';
+  sendCommand(v);
+});
 
 /* =====================================================================
    HỒ SƠ GIỌNG NÓI
@@ -1614,6 +2307,66 @@ function openVoiceStudio() {
 }
 
 /* =====================================================================
+   CÀI ĐẶT TRỢ LÝ (tên gọi)
+   ===================================================================== */
+function applyAssistantName() {
+  $$('[data-assistant-name]').forEach(el => { el.textContent = AN(); });
+  if (S.room && S.room.meeting) { renderTabs(); renderJarvis(); }
+  else $('#ask-input').placeholder = `Hỏi ${AN()} về cuộc họp này`;
+}
+async function loadAssistant() {
+  try { S.assistant = await GET('/api/settings/assistant'); } catch (e) { /* giữ mặc định */ }
+  applyAssistantName();
+}
+function openSettings() {
+  const a = S.assistant || { name: 'Jarvis', aliases: [] };
+  openModal(`
+    <h3 class="text-lg font-semibold mb-1">Cài đặt trợ lý</h3>
+    <p class="text-muted text-[13px] mb-4">Đặt tên để gọi trợ lý trong cuộc họp thay cho "Jarvis".</p>
+    <form id="as-form" class="flex flex-col gap-4">
+      <div><label class="field" for="as-name">Tên gọi trợ lý</label>
+        <input id="as-name" class="input" required minlength="2" maxlength="30" value="${esc(a.name)}" placeholder="Ví dụ: Bông">
+        <p class="text-[12px] text-muted mt-1">Nên chọn tên 2 âm tiết, dễ đọc và ít trùng từ thông dụng để không bị gọi nhầm.</p></div>
+      <div><label class="field" for="as-aliases">Tên gọi khác (tùy chọn, cách nhau bằng dấu phẩy)</label>
+        <input id="as-aliases" class="input" value="${esc((a.aliases || []).join(', '))}" placeholder="Ví dụ: Vít, Gia Vít">
+        <p class="text-[12px] text-muted mt-1">Thêm các cách hệ thống nhận dạng giọng nói hay chép nhầm tên. Với "Jarvis" thường bị chép thành "Vít".</p></div>
+      <div class="rounded-xl p-3 text-[13px]" style="background:rgba(255,255,255,.04);border:1px solid var(--line)">
+        Cách gọi trong cuộc họp: <span class="text-ink font-medium" id="as-preview"></span>
+        <p class="text-[12px] text-muted mt-1">Gọi tên rồi ngừng một nhịp cũng được, trợ lý sẽ chờ câu tiếp theo khoảng 8 giây. Luôn gọi được bằng "trợ lý ơi".</p>
+      </div>
+      <p class="text-[12px] text-muted">Tên mới có hiệu lực ngay. Nếu mic đang bật, hãy tắt rồi bật lại để hệ thống nhận dạng tên chính xác hơn.</p>
+      <div class="flex justify-end gap-2"><button type="button" class="btn btn-ghost" data-act="modal-close">Hủy</button><button class="btn btn-primary" type="submit">Lưu tên gọi</button></div>
+    </form>`, {
+    onMount(m) {
+      const preview = () => { const n = $('#as-name', m).value.trim() || 'Bông'; $('#as-preview', m).textContent = `"${n} ơi, tóm tắt giúp anh các quyết định" hoặc "${n}, tra cứu ticket của Tuấn"`; };
+      $('#as-name', m).addEventListener('input', preview); preview();
+      $('#as-form', m).addEventListener('submit', async e => {
+        e.preventDefault();
+        const btn = $('button[type=submit]', m); btn.disabled = true;
+        try {
+          S.assistant = await PUT('/api/settings/assistant', {
+            name: $('#as-name', m).value.trim(),
+            aliases: $('#as-aliases', m).value.split(',').map(x => x.trim()).filter(Boolean),
+          });
+          closeModal(); applyAssistantName();
+          toast(`Đã đổi tên gọi trợ lý thành ${S.assistant.name}.`);
+        } catch (err) { toast(err.message, 'err'); btn.disabled = false; }
+      });
+    }
+  });
+}
+async function reanalyzeMeeting() {
+  const R = S.room; if (!R) return;
+  const ok = await confirmDialog({ title: 'Phân tích lại người nói?', body: 'Hệ thống chạy lại nhận diện người nói cho toàn bộ cuộc họp bằng thuật toán hiện tại. Tên đã đặt được giữ cho người tương ứng; nên kiểm tra lại sau khi chạy xong.', ok: 'Phân tích lại' });
+  if (!ok) return;
+  try {
+    const r = await POST(`/api/meetings/${R.id}/reanalyze`);
+    toast(`Đã phân tích lại: ${r.speakers.length} người nói.`);
+    await refreshRoomIfNoWs(R);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+/* =====================================================================
    TÌNH TRẠNG HỆ THỐNG
    ===================================================================== */
 async function loadHealth() {
@@ -1674,7 +2427,9 @@ document.addEventListener('click', async e => {
     }
     case 'room-menu': {
       const R = S.room; if (!R) return;
-      const c = await openMenu(el, [{ id: 'export', text: 'Xuất Markdown' }, { id: 'delete', text: 'Xóa cuộc họp', danger: true }]);
+      const c = await openMenu(el, [{ id: 'reanalyze', text: 'Phân tích lại người nói' }, { id: 'export', text: 'Xuất Markdown' },
+                                    { id: 'delete', text: 'Xóa cuộc họp', danger: true }]);
+      if (c === 'reanalyze') reanalyzeMeeting();
       if (c === 'export') exportMarkdown(R.id);
       if (c === 'delete') deleteMeeting(R.id);
       return;
@@ -1708,16 +2463,54 @@ document.addEventListener('click', async e => {
     case 'voice-studio': return openVoiceStudio();
     case 'voice-edit': return openEditVoice(parseInt(el.dataset.vid, 10));
     case 'voice-delete': return deleteVoice(parseInt(el.dataset.vid, 10));
+    case 'stage-open': return openStage();
+    case 'stage-close': return closeStage();
+    case 'stage-fullscreen': return toggleFullscreen();
+    case 'stage-next': return stageAction('next');
+    case 'stage-prev': return stageAction('prev');
+    case 'stage-back': return stageAction('back');
+    case 'stage-goto': return stageAction('goto', { slide: parseInt(el.dataset.slide, 10) });
+    case 'stage-show': { const sl = parseInt(el.dataset.slide, 10) || 0; openStage(true); return stageAction('show', { artifact_id: parseInt(el.dataset.aid, 10), slide: sl }); }
+    case 'stage-prompter': return togglePrompter();
+    case 'stage-analyze': return analyzeNow();
+    case 'voice-toggle': return toggleVoice();
+    case 'voice-stop': return stopVoice();
+    case 'voice-online':
+      VOICE.allowOnline = true;
+      try { localStorage.setItem('mc_voice_online', 'on'); } catch (e) { /* bỏ qua */ }
+      pickVoice(); return toast('Đã cho phép giọng đọc trực tuyến.', 'info');
+    case 'panel-slide': {
+      const aid = parseInt(el.dataset.aid, 10), to = parseInt(el.dataset.to, 10);
+      if (S.room.stage && S.room.stage.artifact_id === aid) return stageAction('goto', { slide: to });
+      S.room.panelSlide[aid] = to; return renderArtifactPane();
+    }
     case 'diag': return openDiagnostics();
+    case 'settings': closeMenu(); return openSettings();
     case 'modal-close': return closeModal();
   }
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeMenu(); if ($('#modal-root').innerHTML) closeModal(); }
-  if (e.key === 'Enter' && e.target.matches('.mrow[data-act="open-meeting"]')) location.hash = `#/m/${e.target.dataset.mid}`;
+  if (e.key === 'Escape') {
+    const hadOverlay = !$('#popover').classList.contains('hidden') || !!$('#modal-root').innerHTML;
+    closeMenu(); if ($('#modal-root').innerHTML) closeModal();
+    if (!hadOverlay && STAGE.open && !document.fullscreenElement) closeStage();
+  }
+  const typing = e.target instanceof Element && e.target.matches('input, textarea, select, [contenteditable]');
+  if (STAGE.open && !e.ctrlKey && !e.metaKey && !e.altKey && !typing && !$('#modal-root').innerHTML) {
+    if (['ArrowRight', 'PageDown'].includes(e.key)) { e.preventDefault(); stageAction('next'); }
+    else if (['ArrowLeft', 'PageUp'].includes(e.key)) { e.preventDefault(); stageAction('prev'); }
+    else if (e.key === 'n' || e.key === 'N') togglePrompter();
+    else if (e.key === 'v' || e.key === 'V') toggleVoice();
+    else if (e.key === 'f' || e.key === 'F') toggleFullscreen();
+  }
+  if (e.key === 'Enter' && e.target instanceof Element && e.target.matches('.mrow[data-act="open-meeting"]')) location.hash = `#/m/${e.target.dataset.mid}`;
 });
 
 /* Khởi động */
+mountFaces();
+updateVoiceUi();
+requestAnimationFrame(avFrame);
+loadAssistant();
 loadHealth();
 route();
 setInterval(loadHealth, 60000);

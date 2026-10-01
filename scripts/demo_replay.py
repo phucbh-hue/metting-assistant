@@ -5,10 +5,13 @@
 - DB in-memory (không đụng MongoDB thật), không cần mic, không gọi Soniox.
 - Vector giọng là dữ liệu tổng hợp (không phải giọng người thật).
 - Mặc định tắt LLM để không tốn phí; thêm --with-llm để AI tự đoán tên người nói từ hội thoại.
+- Có sẵn một bộ slide mẫu trên màn hình trình bày: gõ "chuyển slide", "quay lại", "nhắc bài" vào ô lệnh
+  (các lệnh này chạy không cần LLM), hoặc để kịch bản tự gọi "Jarvis ơi, chuyển slide".
 Mở http://127.0.0.1:8090 rồi vào cuộc họp "Demo: Review Sprint 39" để xem transcript chạy trực tiếp.
 """
 import argparse
 import asyncio
+import json
 import os
 import sys
 import time
@@ -42,6 +45,7 @@ D = 192
 SCRIPT = [
     (0, "1", "Chào mọi người, mình bắt đầu họp review sprint 39 nhé."),
     (1, "2", "Dạ em chào anh Phúc, em là Hương bên marketing, hôm nay em báo cáo chiến dịch Mega Sale mười tháng mười."),
+    (0, "1", "Jarvis ơi, chuyển slide."),
     (0, "1", "Ok Hương, em nói tiến độ landing page trước đi."),
     (1, "2", "Landing page đã xong bản desktop, bản mobile còn phần banner, dự kiến thứ sáu là xong."),
     (1, "2", "Dạ."),
@@ -53,6 +57,24 @@ SCRIPT = [
     (2, "3", "Ừ."),
     (0, "1", "Vậy chốt: Hương xong mobile trước thứ sáu, Tuấn chạy staging cuối tuần, mình review lại vào thứ hai."),
 ]
+
+
+def demo_deck():
+    """Bộ slide mẫu (dữ liệu giả lập) khớp với kịch bản họp."""
+    return {"title": "Review Sprint 39", "slides": [
+        {"title": "Review Sprint 39 - Team Payment", "layout": "title",
+         "bullets": [f"Họp ngày {time.strftime('%d/%m/%Y')}"], "notes": "Mở đầu, nêu hai mục chính của buổi họp"},
+        {"title": "Tiến độ Mega Sale 10.10", "layout": "bullets",
+         "bullets": ["Landing page xong bản desktop", "Bản mobile còn phần banner, dự kiến xong thứ sáu",
+                     "Cần số liệu đổi voucher theo ngày cho báo cáo đối tác"],
+         "notes": "Hương báo cáo, nhấn mạnh hạn thứ sáu"},
+        {"title": "Hiệu năng và hạ tầng", "layout": "metrics",
+         "bullets": ["Độ trễ danh mục voucher: 80 ms", "Bộ nhớ đệm: Redis", "Migrate Postgres 18: Staging cuối tuần"],
+         "notes": "Tuấn cập nhật phần backend và DevOps"},
+        {"title": "Việc cần làm", "layout": "two_column",
+         "bullets": ["Hương: xong bản mobile trước thứ sáu", "Tuấn: chạy thử staging cuối tuần",
+                     "Marketing: gửi số liệu đổi voucher", "Cả nhóm: review lại vào thứ hai"], "notes": ""},
+    ]}
 
 
 def unit(x):
@@ -100,6 +122,8 @@ async def replay():
                                 expected_attendees=["Hương", "Lê Văn Tuấn"],
                                 agenda=["Tiến độ Mega Sale 10.10", "Migrate Postgres 18"])
         s = await live.get_session(mid)
+        deck_id = db.save_artifact(mid, "slides", "Slide: Review Sprint 39", json.dumps(demo_deck(), ensure_ascii=False))
+        await s.stage_action("show", artifact_id=deck_id)
         print(f"\n>>> Demo sẵn sàng: http://{args.host}:{args.port}/#/m/{mid}\n", flush=True)
         await asyncio.sleep(args.delay)
         t = 2.0

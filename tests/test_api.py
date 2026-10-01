@@ -107,6 +107,22 @@ class ApiTests(unittest.TestCase):
         d = self.client.get(f"/api/meetings/{mid}").json()
         self.assertEqual([p["label"] for p in d["speakers"]], ["Bùi Hồng Phúc", "Người nói 2"])
 
+    def test_assistant_name_settings(self):
+        self.assertEqual(self.client.get("/api/settings/assistant").json()["name"], "Jarvis")
+        r = self.client.put("/api/settings/assistant", json={"name": " Bông ", "aliases": ["Bong", "bông", "  "]})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual((r.json()["name"], r.json()["aliases"]), ("Bông", ["Bong"]))
+        self.assertEqual(self.client.get("/api/settings/assistant").json()["name"], "Bông")
+        self.assertEqual(self.client.put("/api/settings/assistant", json={"name": "1"}).status_code, 400)
+        self.assertEqual(self.client.put("/api/settings/assistant", json={"name": "Bông", "aliases": ["x" * 40]}).status_code, 400)
+
+    def test_reanalyze_endpoint(self):
+        mid = self.create()
+        self.add_segments(mid, [(0, "1", 3.0), (1, "2", 3.0)])
+        r = self.client.post(f"/api/meetings/{mid}/reanalyze")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual([p["label"] for p in r.json()["speakers"]], ["Người nói 1", "Người nói 2"])
+
     def test_infer_speakers_requires_llm(self):
         mid = self.create()
         self.assertEqual(self.client.post(f"/api/meetings/{mid}/infer-speakers").status_code, 503)

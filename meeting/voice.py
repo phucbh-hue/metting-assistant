@@ -175,6 +175,37 @@ def merge_vectors(vectors: List[np.ndarray], weights: Optional[List[float]] = No
     return unit(acc)
 
 
+def _two_way_partitions(V: np.ndarray, W: np.ndarray, min_size: int, iters: int = 6):
+    """Sinh các phương án chia các vector (theo thứ tự thời gian) thành 2 cụm, tinh chỉnh bằng 2-means cầu.
+
+    Khởi tạo: (a) mọi mốc thời gian "k câu cuối là người khác" - đúng tình huống người mới vào giữa chừng,
+    (b) cặp vector khác nhau nhất. Trả về các mảng nhãn 0/1 không trùng nhau."""
+    n = len(V)
+    inits = []
+    for k in range(min_size, n - min_size + 1):
+        lab = np.zeros(n, dtype=int)
+        lab[n - k:] = 1
+        inits.append(lab)
+    S = V @ V.T
+    i, j = np.unravel_index(np.argmin(S), S.shape)
+    inits.append((S[:, j] > S[:, i]).astype(int))
+    seen = set()
+    for lab in inits:
+        for _ in range(iters):
+            if lab.sum() in (0, n):
+                break
+            c0 = unit((V[lab == 0] * W[lab == 0, None]).sum(axis=0))
+            c1 = unit((V[lab == 1] * W[lab == 1, None]).sum(axis=0))
+            new = (V @ c1 > V @ c0).astype(int)
+            if np.array_equal(new, lab):
+                break
+            lab = new
+        key = lab.tobytes() if lab[0] == 0 else (1 - lab).tobytes()
+        if key not in seen and 0 < lab.sum() < n:
+            seen.add(key)
+            yield lab
+
+
 # ==============================================================================
 # THEO DÕI NGƯỜI NÓI TRONG CUỘC HỌP (MeetingSpeakers)
 # ==============================================================================
@@ -281,6 +312,14 @@ class MeetingSpeakers:
     ANCHOR_T_WEAK = 0.58       # ... khi hồ sơ mới có ít dữ liệu (>= ANCHOR_MIN_W)
     ANCHOR_MARGIN = 0.06
     ANCHOR_MIN_W = 1.0
+    # Tách hồ sơ: Soniox đôi khi dùng lại nhãn của một người cho người mới (ví dụ khách mời vừa xem video,
+    # rồi người trong phòng nói). Từng câu lẻ không đủ để phân biệt (cùng phòng, cùng mic nên vẫn giống ~0.5),
+    # nhưng các câu của người mới rất giống NHAU -> tách được khi đã đủ dữ liệu.
+    SPLIT_CROSS_T = 0.65       # Centroid 2 cụm con giống nhau dưới mức này -> 2 người khác nhau
+    SPLIT_MIN_SEGS = 3         # Mỗi cụm con cần >= 3 câu có vector
+    SPLIT_MIN_W = 6.0          # ... và >= 6 giây tiếng nói
+    SPLIT_COHESION_GAP = 0.12  # Mỗi cụm con phải "chặt" hơn độ giống giữa 2 cụm ít nhất ngần này
+    SPLIT_WINDOW = 40          # Xét tối đa 40 câu có vector gần nhất của hồ sơ
     MAX_W = 8.0                # Trọng số tối đa của một câu khi cộng vào centroid
     MAX_HISTORY = 2000         # Số câu tối đa giữ trong RAM
 
@@ -299,6 +338,7 @@ class MeetingSpeakers:
         self.last_sid: Optional[int] = None
         self.dirty: Set[int] = set()          # Hồ sơ vừa thay đổi (để lưu DB / phát sự kiện)
         self.merges: List[Tuple[int, int, bool]] = []  # (src, dst, tự động?) chưa phát sự kiện
+        self.splits: List[Tuple[int, int]] = []        # (hồ sơ gốc, hồ sơ mới tách ra) chưa phát sự kiện
         # Phiên stream mở khi đã có người nói từ trước (nối lại / mở lại mic): nhãn Soniox đánh số lại từ đầu
         self.epoch_fresh: Dict[Tuple[str, int], bool] = {}
         # Câu ngắn của nhãn Soniox chưa xác định trong phiên "fresh": gán tạm, chờ câu có vector để chốt
@@ -517,6 +557,11 @@ class MeetingSpeakers:
         self.last_sid = p.sid
         log.debug("meeting.voice: seg %s raw=%s -> %s (%s)", key, raw, p.label, reason)
 
+        if v is not None:
+            q = self._maybe_split(p)
+            if q is not None:
+                self.last_sid = self.profile(seg["sid"]).sid
+                self._bind_anchor(q)
         self._bind_anchor(p)
         self._maybe_merge(p)
 
@@ -586,6 +631,96 @@ class MeetingSpeakers:
         p.confidence = best
         self.dirty.add(p.sid)
         log.info("meeting.voice: hồ sơ %d khớp mẫu giọng '%s' (cos=%.2f)", p.sid, p.name, best)
+
+    # -------------------------------------------------------------- split ---
+    @staticmethod
+    def _vote_w(seg: Dict[str, Any]) -> float:
+        return max(seg["w"], 0.3) if seg["w"] > 0 else 0.5
+
+    def _maybe_split(self, p: SpeakerProfile) -> Optional[SpeakerProfile]:
+        """Tìm trong hồ sơ p hai cụm giọng khác hẳn nhau; cụm mới hơn trở thành người nói mới."""
+        if not p.active:
+            return None
+        members = [s for s in self.segs if s["v"] is not None and s["reason"] != "manual"
+                   and self.profile(s["sid"]) is p][-self.SPLIT_WINDOW:]
+        n = len(members)
+        if n < 2 * self.SPLIT_MIN_SEGS:
+            return None
+        V = np.stack([s["v"] for s in members]).astype(np.float64)
+        W = np.array([s["w"] for s in members], dtype=np.float64)
+        best = None
+        for lab in _two_way_partitions(V, W, self.SPLIT_MIN_SEGS):
+            res = self._eval_partition(V, W, lab)
+            if res is not None and (best is None or res[0] < best[0]):
+                best = (res[0], lab)
+        if best is None:
+            return None
+        lab = best[1]
+        t = np.array([s["t"] for s in members])
+        newer = 1 if t[lab == 1].mean() > t[lab == 0].mean() else 0
+        newer_keys = {members[i]["key"] for i in range(n) if lab[i] == newer}
+        q = self._new_profile(float(t[lab == newer].min()))
+        member_new = {members[i]["key"]: bool(lab[i] == newer) for i in range(n)}
+        # Chia theo LƯỢT NÓI (chuỗi câu liền nhau của hồ sơ p, không bị người khác chen vào):
+        # câu không có vector chỉ theo người mới khi cùng lượt với câu có vector của người mới.
+        runs, cur = [], []
+        for s in self.segs:
+            if self.profile(s["sid"]) is p:
+                cur.append(s)
+            elif cur:
+                runs.append(cur)
+                cur = []
+        if cur:
+            runs.append(cur)
+        moved = []
+        for run in runs:
+            voted = [(s["t"], member_new[s["key"]]) for s in run if s["key"] in member_new]
+            if not voted or not any(x for _, x in voted):
+                continue
+            for s in run:
+                if s["reason"] == "manual":
+                    continue
+                to_new = member_new[s["key"]] if s["key"] in member_new else \
+                    min(voted, key=lambda a: abs(a[0] - s["t"]))[1]
+                if to_new:
+                    self._detach(s, p)
+                    s["sid"] = q.sid
+                    self._attach(s, q)
+                    moved.append(s)
+        # Tính lại phiếu Soniox của các nhãn liên quan theo người nói thực tế của từng câu
+        for rk in {s["rk"] for s in moved if s["rk"] is not None}:
+            votes: Dict[int, float] = {}
+            same_rk = [s for s in self.segs if s["rk"] == rk]
+            for s in same_rk:
+                sid = self.profile(s["sid"]).sid
+                votes[sid] = votes.get(sid, 0.0) + self._vote_w(s)
+            # Soniox đang dùng nhãn này cho người mới -> câu ngắn tiếp theo mặc định là người mới
+            if same_rk and self.profile(max(same_rk, key=lambda s: s["t"])["sid"]) is q:
+                votes[q.sid] = max(votes.get(q.sid, 0.0), votes.get(p.sid, 0.0) + 1.0)
+            self.raw_votes[rk] = votes
+        self.splits.append((p.sid, q.sid))
+        self.dirty.update({p.sid, q.sid})
+        log.info("meeting.voice: tách %d câu khỏi hồ sơ %d thành người nói mới %d (cos=%.2f)",
+                 len(moved), p.sid, q.sid, best[0])
+        return q
+
+    def _eval_partition(self, V: np.ndarray, W: np.ndarray, lab: np.ndarray) -> Optional[Tuple[float, float]]:
+        """Trả về (độ giống giữa 2 cụm, độ chặt nhỏ nhất) nếu phân chia hợp lệ."""
+        idx = [np.where(lab == c)[0] for c in (0, 1)]
+        if min(len(i) for i in idx) < self.SPLIT_MIN_SEGS or min(W[i].sum() for i in idx) < self.SPLIT_MIN_W:
+            return None
+        sums = [(V[i] * W[i, None]).sum(axis=0) for i in idx]
+        cross = float(unit(sums[0]) @ unit(sums[1]))
+        if cross >= self.SPLIT_CROSS_T:
+            return None
+        coh = min(float(np.mean([V[j] @ unit(sums[c] - V[j] * W[j]) for j in idx[c]])) for c in (0, 1))
+        if coh < cross + self.SPLIT_COHESION_GAP:
+            return None
+        return cross, coh
+
+    def pop_splits(self) -> List[Tuple[int, int]]:
+        out, self.splits = self.splits, []
+        return out
 
     # -------------------------------------------------------------- merge ---
     def _soniox_distinct(self, a: int, b: int) -> bool:
