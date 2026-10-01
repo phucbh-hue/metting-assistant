@@ -136,6 +136,7 @@ TOOL_LABELS = {
     "query_system_architecture": "tài liệu kiến trúc hệ thống",
     "query_meeting_history": "biên bản các cuộc họp trước",
     "update_jira_issue_status": "cập nhật ticket Jira",
+    "web_search": "thông tin trên mạng",
 }
 
 # ---------------------------------------------------------------- lệnh trình chiếu ---
@@ -264,6 +265,8 @@ AGENT_TOOLS = {
     "query_meeting_history": "query_meeting_history(keyword): quyết định ở các cuộc họp trước",
     "search_knowledge": "search_knowledge(query, top_k?): tìm trong kho tri thức nội bộ (quy trình, chính sách, tài liệu kỹ thuật)",
     "read_document": "read_document(path): đọc toàn văn một tài liệu trong kho tri thức (path lấy từ search_knowledge)",
+    "web_search": "web_search(query): tìm trên Internet thông tin công khai mới nhất (giá cả, tỷ giá, tin tức, đối thủ, "
+                  "quy định); trả về nội dung các trang đã đọc kèm nguồn",
 }
 ARTIFACT_KINDS = ("dashboard", "report", "slides", "web_design", "diagram", "minutes")
 KIND_NAMES = {"dashboard": "dashboard", "report": "báo cáo nhanh", "slides": "bộ slide", "web_design": "trang web",
@@ -435,6 +438,12 @@ def summarize_tool_result(tool: str, result: Any) -> str:
         return ""
     if result.get("error"):
         return f"Em chưa tra được {TOOL_LABELS.get(tool, tool)}: {result['error']}."
+    if tool == "web_search":
+        srcs = result.get("sources") or []
+        if not srcs:
+            return "Em chưa tìm được trang nào phù hợp trên mạng."
+        doms = ", ".join(dict.fromkeys(str(s.get("domain") or s.get("title") or "")[:40] for s in srcs[:4]))
+        return f"Em đã đọc {len(srcs)} nguồn trên mạng: {doms}."
     if tool == "query_jira_issues":
         issues = result.get("issues") or []
         if not issues:
@@ -617,8 +626,13 @@ async def think_and_act(meeting_id: int, prompt: str, segments: List[Dict[str, A
             await _thought(f"Em đang tra cứu {TOOL_LABELS.get(tool, tool)}...")
             if on_tool:
                 await on_tool({"tool": tool, "args": args})
-            call_async = getattr(mcp, "call_tool_async", None)      # qua MCP thật nếu đã cấu hình, không thì tại chỗ
-            res = await call_async(tool, args) if call_async else await asyncio.to_thread(mcp.call_tool, tool, args)
+            if tool == "web_search":                                # trình duyệt thật / Claude, không qua MCP
+                async def _web_status(text, kind="status"):
+                    await _progress(text, "status")
+                res = await artifacts.web_search_tool(str(args.get("query") or prompt), _web_status)
+            else:
+                call_async = getattr(mcp, "call_tool_async", None)  # qua MCP thật nếu đã cấu hình, không thì tại chỗ
+                res = await call_async(tool, args) if call_async else await asyncio.to_thread(mcp.call_tool, tool, args)
             tool_results.append({"tool": tool, "args": args, "result": res})
             finding = summarize_tool_result(tool, res)
             if finding:

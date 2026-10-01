@@ -95,6 +95,12 @@
     .chip-live { background: rgb(var(--live) / .12); color: rgb(var(--live)); border-color: rgb(var(--live) / .3); }
     .chip-accent { background: rgb(var(--accent) / .12); color: rgb(var(--accent)); border-color: rgb(var(--accent) / .3); }
     .chip-warn { background: rgba(255, 193, 69, .12); color: #FFC145; border-color: rgba(255, 193, 69, .3); }
+    .notice { border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; font-size: 13.5px; line-height: 1.55; }
+    .notice-warn { background: rgba(255, 193, 69, .07); border-color: rgba(255, 193, 69, .35); }
+    .notice-info { background: rgb(var(--accent) / .06); border-color: rgb(var(--accent) / .3); }
+    .notice-danger { background: rgb(var(--danger) / .07); border-color: rgb(var(--danger) / .35); }
+    .notice b { color: rgb(var(--ink)); font-weight: 600; }
+    .notice ol { margin: 6px 0 0 18px; list-style: decimal; }
     .seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: rgba(0,0,0,.25); border: 1px solid var(--line); }
     .seg button { height: 28px; padding: 0 12px; border-radius: 7px; font-size: 12.5px; font-weight: 500; color: rgb(var(--muted)); }
     .seg button[aria-selected="true"] { background: rgba(255,255,255,.1); color: rgb(var(--ink)); }
@@ -358,6 +364,7 @@
       <section id="view-hub" class="h-full overflow-y-auto">
         <div class="max-w-6xl mx-auto px-4 md:px-6 py-6">
           <p id="hub-summary" class="text-muted mb-5"></p>
+          <div id="hub-storage"></div>
           <div id="hub-live"></div>
           <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
             <div class="seg" role="tablist" aria-label="Lọc cuộc họp">
@@ -726,12 +733,61 @@ function renderTopbar() {
    ===================================================================== */
 async function loadHub() {
   try {
-    const [m, st] = await Promise.all([GET('/api/meetings'), GET('/api/stats')]);
-    S.meetings = m.meetings || []; S.stats = st;
+    const [m, st, sto] = await Promise.all([GET('/api/meetings'), GET('/api/stats'), GET('/api/storage').catch(() => null)]);
+    S.meetings = m.meetings || []; S.stats = st; S.storage = sto;
   } catch (e) { toast(e.message, 'err'); }
   renderHub();
 }
+function storageNotice(sto, inSettings = false) {
+  if (!sto) return '';
+  const fix = `<ol>
+      <li>Vào <b>cloud.mongodb.com</b>, chọn project chứa cluster, mục <b>Network Access</b>.</li>
+      <li>Bấm <b>Add IP Address</b> rồi <b>Add Current IP Address</b> (hoặc nhập IP công khai của máy), lưu và chờ 1-2 phút.</li>
+      <li>Tắt cửa sổ server rồi chạy lại <b>run.cmd</b>. Khi kết nối lại được, mục này sẽ hiện nút đồng bộ.</li></ol>`;
+  if (sto.mode === 'local_file') {
+    return `<div class="notice notice-warn ${inSettings ? '' : 'mb-5'}">
+      <p><b>Chưa kết nối được MongoDB Atlas.</b> Cuộc họp đang được lưu trên máy tại <b>data/local_db</b>, không mất khi tắt server${sto.local_meetings ? ` (${sto.local_meetings} cuộc họp)` : ''}. Khi Atlas kết nối lại, các cuộc họp này đồng bộ lên được.</p>
+      ${sto.atlas_error ? `<p class="text-muted mt-1">Lý do: ${esc(sto.atlas_error)}.</p>` : ''}
+      ${inSettings ? fix : `<button class="btn btn-ghost btn-sm mt-2" data-act="settings">Xem cách khắc phục</button>`}
+    </div>`;
+  }
+  if (sto.mode === 'memory') {
+    return `<div class="notice notice-danger ${inSettings ? '' : 'mb-5'}"><p><b>Đang dùng bộ nhớ tạm:</b> dữ liệu sẽ mất khi tắt server (chế độ thử nghiệm).</p></div>`;
+  }
+  const pend = sto.pending || [];
+  if (pend.length) {
+    return `<div class="notice notice-info ${inSettings ? '' : 'mb-5'}">
+      <p><b>Có ${pend.length} cuộc họp ghi lúc mất kết nối Atlas</b> đang nằm trên máy: ${pend.slice(0, 3).map(m => esc(m.title || `#${m.id}`)).join(', ')}${pend.length > 3 ? ', ...' : ''}.</p>
+      <button class="btn btn-primary btn-sm mt-2" data-act="storage-sync">Đồng bộ lên Atlas</button>
+    </div>`;
+  }
+  return inSettings ? `<div class="notice"><p><b>Đã kết nối ${sto.mode === 'atlas' ? 'MongoDB Atlas' : 'MongoDB'}</b> (${esc(sto.database)}). Không có cuộc họp nào trên máy cần đồng bộ.</p></div>` : '';
+}
+async function syncStorage() {
+  const sto = S.storage || await GET('/api/storage').catch(() => null);
+  const n = sto && sto.pending ? sto.pending.length : 0;
+  const ok = await confirmDialog({ title: 'Đồng bộ lên Atlas?', ok: 'Đồng bộ',
+    body: `Chép ${n} cuộc họp ghi lúc mất kết nối (câu thoại, người nói, sản phẩm AI) từ máy lên MongoDB Atlas. Dữ liệu đang có trên Atlas không bị ghi đè.` });
+  if (!ok) return;
+  try {
+    const r = await POST('/api/storage/sync', {});
+    const done = (r.meetings || []).length, conf = (r.conflicts || []).length;
+    toast(`Đã đồng bộ ${done} cuộc họp lên Atlas${(r.already || []).length ? `, ${r.already.length} cuộc họp đã có sẵn` : ''}${conf ? `, ${conf} mục bị bỏ qua vì trùng mã` : ''}.`, conf ? 'err' : undefined);
+    if (S.view === 'hub') await loadHub();
+    const box = $('#storage-box'); if (box) renderStorage(box);
+  } catch (e) { toast(e.message, 'err'); }
+}
+async function renderStorage(box) {
+  if (!box) return;
+  try {
+    S.storage = await GET('/api/storage');
+    const sto = S.storage;
+    const flushed = sto.mode === 'local_file' && sto.last_flush_at ? `<p class="text-[12px] text-muted mt-2">Lần ghi xuống máy gần nhất: ${esc(fmt.date(sto.last_flush_at))}. Thư mục: ${esc(sto.local_dir)}</p>` : '';
+    box.innerHTML = storageNotice(sto, true) + flushed;
+  } catch (e) { box.innerHTML = `<p style="color:rgb(var(--danger))">${esc(e.message)}</p>`; }
+}
 function renderHub() {
+  $('#hub-storage').innerHTML = storageNotice(S.storage);
   const st = S.stats;
   if (st) {
     const parts = [`${st.meetings_total} cuộc họp`];
@@ -2728,11 +2784,16 @@ function openSettings() {
       <div class="flex justify-end gap-2"><button type="button" class="btn btn-ghost" data-act="modal-close">Hủy</button><button class="btn btn-primary" type="submit">Lưu tên gọi</button></div>
     </form>
     <div class="mt-5 pt-4 border-t divider">
+      <h4 class="font-semibold mb-2">Lưu trữ dữ liệu</h4>
+      <div id="storage-box" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang kiểm tra...</div></div>
+    </div>
+    <div class="mt-5 pt-4 border-t divider">
       <div class="flex items-center justify-between gap-2 mb-2"><h4 class="font-semibold">Sử dụng AI</h4><span class="text-[12px] text-muted">Số lần gọi model, số token vào/ra, chi phí ước tính</span></div>
       <div id="usage-box" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang tải...</div></div>
     </div>`, {
     onMount(m) {
       renderUsage($('#usage-box', m));
+      renderStorage($('#storage-box', m));
       const preview = () => { const n = $('#as-name', m).value.trim() || 'Bông'; $('#as-preview', m).textContent = `"${n} ơi, tóm tắt giúp anh các quyết định" hoặc "${n}, tra cứu ticket của Tuấn"`; };
       $('#as-name', m).addEventListener('input', preview); preview();
       $('#as-form', m).addEventListener('submit', async e => {
@@ -2825,6 +2886,11 @@ async function openDiagnostics() {
       ${row('Phân biệt người nói (CAM++)', h.campp.ready, h.campp.status)}
       ${row('Trợ lý AI', h.llm.ready, `${h.llm.provider} (Claude ${h.llm.claude_ready ? 'có' : 'chưa có'} key, Gemini ${h.llm.gemini_ready ? 'có' : 'chưa có'} key)`)}
       ${row('Cơ sở dữ liệu', true, `${h.mongodb.status}`, h.mongodb.is_mock)}
+      ${h.web_search ? row('Tra cứu trên mạng', h.web_search.playwright || h.web_search.claude,
+          h.web_search.provider === 'claude' ? 'Công cụ web_search của Claude'
+            : (h.web_search.playwright ? `Trình duyệt Playwright (Bing)${h.web_search.claude && h.web_search.provider === 'auto' ? ', dự phòng: Claude web_search' : ''}`
+                                       : 'Chưa cài Playwright: pip install playwright, python -m playwright install chromium'),
+          !h.web_search.playwright) : ''}
       ${row('Tự lưu mẫu giọng do AI đoán', true, h.auto_enroll_voices ? 'Đang bật (AUTO_ENROLL_VOICES=1)' : 'Đang tắt: chỉ lưu khi người dùng xác nhận', h.auto_enroll_voices)}
     </ul>
     <p class="text-[12.5px] text-muted mb-4">${h.voices_count} hồ sơ giọng nói, ${h.live_sessions} phiên đang mở trên máy chủ.</p>
@@ -2905,6 +2971,7 @@ document.addEventListener('click', async e => {
     case 'stage-prompter': return togglePrompter();
     case 'stage-present': return PRESENT.on ? stopPresent('Dạ, em dừng thuyết trình.') : startPresent();
     case 'stage-follow': return stageAction('follow', { follow: !(S.room.stage && S.room.stage.follow !== false) });
+    case 'storage-sync': return syncStorage();
     case 'stage-analyze': return analyzeNow();
     case 'voice-toggle': return toggleVoice();
     case 'voice-stop': return stopVoice();

@@ -171,18 +171,73 @@ async def _call_llm_raw(system: str, prompt: str, max_tokens: int = 4000) -> str
 
 
 # ------------------------------------------------------------ tra cứu web ---
+# Hai cách tra cứu: trình duyệt thật (Playwright, đọc Bing + các trang đầu, rẻ hơn) và công cụ web_search của Claude.
+# WEB_SEARCH_PROVIDER=auto (mặc định): trình duyệt trước, lỗi / bị chặn thì chuyển sang Claude.
 WEB_SYSTEM_PROMPT = """Bạn là trợ lý nghiên cứu cho cuộc họp nội bộ UrBox. Hãy tìm trên web để trả lời câu hỏi, rồi viết
 báo cáo ngắn bằng tiếng Việt (markdown): "# Tra cứu: <câu hỏi>", một đoạn KẾT LUẬN 2-3 câu trả lời thẳng (có con số,
 ngày cập nhật dd/mm/yyyy), rồi "## Chi tiết" với 3-6 gạch đầu dòng (số liệu, bối cảnh, lưu ý), và "## Liên quan đến
 cuộc họp" 1-2 câu nếu nội dung họp có liên quan. Ưu tiên nguồn chính thống, mới nhất; ghi rõ thời điểm số liệu. Giá
 tiền Việt Nam ghi dạng 1.000.000đ. Không dùng gạch dài. Không tự thêm mục Nguồn (hệ thống tự thêm từ trích dẫn)."""
 
+WEB_READ_SYSTEM = """Bạn là trợ lý nghiên cứu cho cuộc họp nội bộ UrBox. Bên dưới là nội dung các trang web vừa đọc (đã lọc
+phần liên quan đến câu hỏi). Viết báo cáo ngắn bằng tiếng Việt (markdown): "# Tra cứu: <câu hỏi>", một đoạn KẾT LUẬN 2-3
+câu trả lời thẳng câu hỏi (con số, thời điểm cập nhật dd/mm/yyyy), "## Chi tiết" 3-6 gạch đầu dòng, và "## Liên quan đến
+cuộc họp" 1-2 câu nếu nội dung họp có liên quan.
+Quy tắc:
+- Chỉ dùng thông tin có trong các trang đã đọc; ghi số nguồn [1], [2] ngay sau mỗi số liệu hoặc nhận định.
+- Các nguồn mâu thuẫn nhau: nêu rõ, ưu tiên nguồn chính thức và mới nhất; ghi thời điểm cập nhật của từng con số nếu có.
+- Nguồn không ghi thời điểm cập nhật: nói rõ "chưa rõ thời điểm cập nhật". Số liệu cũ hơn hôm nay: nói rõ là của ngày nào.
+- Các trang không đủ thông tin để trả lời: nói thẳng là chưa tìm thấy, không đoán.
+- Tiền Việt Nam dạng 1.000.000đ, ngày dd/mm/yyyy, không dùng gạch dài, không tự thêm mục Nguồn (hệ thống tự thêm)."""
 
-async def web_research(meeting_id: int, query: str, context_text: str = "") -> Dict[str, Any]:
-    """Tìm trên web bằng công cụ web_search của Claude, lưu kết quả thành báo cáo (kèm nguồn) để chiếu lên màn hình."""
+
+QUERY_SYSTEM = """Đổi câu hỏi nói trong cuộc họp thành từ khóa tìm kiếm trên Bing/Google.
+Trả về đúng một JSON: {"queries": ["từ khóa chính", "từ khóa dự phòng"]}.
+- Mỗi truy vấn 2-8 từ khóa, giữ đúng chủ đề, bỏ từ đệm của câu nói ("hiện tại", "đang", "giúp anh", "coi", "bao nhiêu").
+- Hỏi số liệu mới nhất (giá, tỷ giá, tin tức): thêm "hôm nay" hoặc tháng/năm hiện tại.
+- Chủ đề quốc tế thì truy vấn dự phòng bằng tiếng Anh. Hôm nay là {date}."""
+
+
+async def search_queries(question: str) -> List[str]:
+    """Câu nói -> 1-2 truy vấn tìm kiếm (AI viết, lỗi thì dùng luật đơn giản)."""
+    from meeting import websearch
+    fallback = [websearch.rewrite_heuristic(question)]
+    if not llm_available():
+        return fallback
+    try:
+        raw = await _call_llm(QUERY_SYSTEM.replace("{date}", time.strftime("%d/%m/%Y")), question, max_tokens=200)
+        data = _json_from_text(raw)
+        qs = [str(q).strip() for q in (data.get("queries") if isinstance(data, dict) else None) or [] if str(q).strip()]
+        return qs[:2] or fallback
+    except Exception as e:
+        log.info("meeting.artifacts: không đổi được câu hỏi thành từ khóa (%s), dùng luật đơn giản", e)
+        return fallback
+
+
+def web_provider() -> str:
+    p = os.getenv("WEB_SEARCH_PROVIDER", "auto").strip().lower()
+    return p if p in ("auto", "playwright", "claude") else "auto"
+
+
+def _clean_report(text: str, query: str) -> str:
+    """Nối các khối chữ bị trích dẫn cắt giữa câu, bỏ phần dạo đầu trước báo cáo thật."""
+    body = (text or "").replace(chr(0x2014), "-").replace(chr(0x2013), "-")
+    body = re.sub(r"[ \t]*\n[ \t]*\n[ \t]*\.", ".", body)
+    heads = [m.start() for m in re.finditer(r"^#\s", body, re.M)]
+    if heads:
+        body = body[heads[-1] if len(heads) > 1 and body[heads[-1]:].count("\n## ") >= 1 else heads[0]:]
+    body = re.sub(r"\n{3,}", "\n\n", body).strip()
+    if not body:
+        raise RuntimeError("Không nhận được kết quả tra cứu")
+    if not re.match(r"^\s*#", body):
+        body = f"# Tra cứu: {query}\n\n{body}"
+    return body
+
+
+async def _claude_search(query: str, context_text: str = "") -> Tuple[str, List[Dict[str, str]], int]:
+    """Tìm bằng công cụ web_search của Claude. Trả về (báo cáo markdown, nguồn, số lượt tìm)."""
     if not os.getenv("ANTHROPIC_API_KEY"):
-        raise RuntimeError("Tra cứu web cần ANTHROPIC_API_KEY (công cụ web_search của Claude)")
-    set_meeting(meeting_id, "tra cứu web")
+        raise RuntimeError("Tra cứu bằng Claude cần ANTHROPIC_API_KEY")
     t0 = time.time()
     prompt = f"Câu hỏi cần tra cứu: {query}\n\nNội dung cuộc họp gần đây (để liên hệ, không bắt buộc):\n{context_text[-3000:] or '(không có)'}"
     try:
@@ -214,25 +269,100 @@ async def web_research(meeting_id: int, query: str, context_text: str = "") -> D
                     _add_source(getattr(r, "url", None), getattr(r, "title", None))
     inp, out, est = _usage_of(resp, prompt, "".join(texts))
     _record("claude", CLAUDE_MODEL, inp, out, t0, ok=True, estimated=est)
-    # Các khối text bị trích dẫn cắt giữa câu: nối liền, bỏ phần dạo đầu trước báo cáo thật
-    body = "".join(texts).replace(chr(0x2014), "-").replace(chr(0x2013), "-")
-    body = re.sub(r"[ \t]*\n[ \t]*\n[ \t]*\.", ".", body)
-    heads = [m.start() for m in re.finditer(r"^#\s", body, re.M)]
-    if heads:
-        body = body[heads[-1] if len(heads) > 1 and body[heads[-1]:].count("\n## ") >= 1 else heads[0]:]
-    body = re.sub(r"\n{3,}", "\n\n", body).strip()
-    if not body:
-        raise RuntimeError("Không nhận được kết quả tra cứu")
-    if not re.match(r"^\s*#", body):
-        body = f"# Tra cứu: {query}\n\n{body}"
+    return _clean_report("".join(texts), query), sources, searches
+
+
+def _pages_prompt(query: str, pages: List[Dict[str, Any]], context_text: str = "") -> str:
+    blocks = []
+    for i, pg in enumerate(pages, 1):
+        when = f" (đăng/cập nhật: {pg['published']})" if pg.get("published") else ""
+        blocks.append(f"[{i}] {pg['title']} - {pg['url']}{when}\n{pg['text']}")
+    return (f"Thời điểm hiện tại: {time.strftime('%H:%M %d/%m/%Y')}\nCâu hỏi: {query}\n\n## Các trang đã đọc\n\n"
+            + "\n\n".join(blocks)
+            + f"\n\n## Nội dung cuộc họp gần đây (để liên hệ, không bắt buộc):\n{context_text[-2000:] or '(không có)'}")
+
+
+async def _browser_search(query: str, context_text: str = "", on_progress=None) -> Tuple[str, List[Dict[str, str]], str]:
+    """Tìm bằng trình duyệt thật rồi để AI tóm tắt. Trả về (báo cáo markdown, nguồn đánh số, ghi chú cách tra)."""
+    from meeting import websearch
+    data = await websearch.research(query, on_progress, queries=await search_queries(query))
+    pages = data["pages"]
+    if not pages:
+        raise RuntimeError("Không đọc được trang kết quả nào")
+    if on_progress:
+        await on_progress(f"Em đã đọc xong {len(pages)} trang, đang tổng hợp kết quả.", "status")
+    raw = await _call_llm(WEB_READ_SYSTEM, _pages_prompt(query, pages, context_text), max_tokens=2500)
+    sources = [{"url": pg["url"], "title": pg["title"], "domain": pg["domain"], "n": i}
+               for i, pg in enumerate(pages, 1)]
+    kw = "; ".join(data.get("queries") or [])
+    return _clean_report(raw, query), sources, f"trình duyệt ({data['engine']}, từ khóa: {kw}), đọc {len(pages)} trang"
+
+
+def _save_web_report(meeting_id: int, query: str, body: str, sources: List[Dict[str, Any]], how: str) -> Dict[str, Any]:
     if sources:
-        body += "\n\n## Nguồn\n" + "\n".join(f"- [{s['title'][:90]}]({s['url']})" for s in sources[:8])
-    body += f"\n\n*Yêu cầu: \"{query}\" - tra cứu lúc {time.strftime('%H:%M %d/%m/%Y')}, {searches} lượt tìm.*"
+        if all("n" in s for s in sources):
+            lines = [f"{s['n']}. [{s['title'][:90]}]({s['url']}) - {s.get('domain', '')}" for s in sources[:10]]
+        else:
+            lines = [f"- [{s['title'][:90]}]({s['url']})" for s in sources[:8]]
+        body += "\n\n## Nguồn\n" + "\n".join(lines)
+    body += f"\n\n*Yêu cầu: \"{query}\" - tra cứu lúc {time.strftime('%H:%M %d/%m/%Y')} bằng {how}.*"
     aid = db.save_artifact(meeting_id=meeting_id, kind="report", title=f"Tra cứu web: {query[:60]}", content=body,
                            prompt_trigger=query)
     art = db.get_artifact(aid)
     art["sources"] = sources
     return art
+
+
+async def web_research(meeting_id: int, query: str, context_text: str = "", on_progress=None) -> Dict[str, Any]:
+    """"Search giúp anh ...": tra cứu trên web, lưu thành báo cáo có nguồn để chiếu lên màn hình."""
+    from meeting import websearch
+    set_meeting(meeting_id, "tra cứu web")
+    provider = web_provider()
+    if provider == "playwright" and not websearch.available():
+        raise RuntimeError("Chưa cài Playwright: pip install playwright rồi python -m playwright install chromium")
+    if provider in ("auto", "playwright") and websearch.available():
+        try:
+            body, sources, how = await _browser_search(query, context_text, on_progress)
+            return _save_web_report(meeting_id, query, body, sources, how)
+        except Exception as e:
+            log.warning("meeting.artifacts: tra cứu bằng trình duyệt lỗi: %s", e)
+            if provider == "playwright" or not os.getenv("ANTHROPIC_API_KEY"):
+                raise RuntimeError(f"tra cứu bằng trình duyệt lỗi ({e})")
+            if on_progress:
+                await on_progress("Trình duyệt chưa lấy được kết quả, em chuyển sang công cụ tìm kiếm của Claude.", "status")
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        raise RuntimeError("Tra cứu web cần Playwright hoặc ANTHROPIC_API_KEY (công cụ web_search của Claude)")
+    body, sources, searches = await _claude_search(query, context_text)
+    return _save_web_report(meeting_id, query, body, sources, f"công cụ tìm kiếm của Claude, {searches} lượt tìm")
+
+
+async def web_search_tool(query: str, on_progress=None) -> Dict[str, Any]:
+    """Công cụ web_search cho agent: nội dung các trang đã đọc (agent tự tổng hợp vào câu trả lời / sản phẩm)."""
+    from meeting import websearch
+    query = (query or "").strip()
+    if not query:
+        return {"error": "thiếu câu cần tìm"}
+    provider = web_provider()
+    if provider in ("auto", "playwright") and websearch.available():
+        try:
+            data = await websearch.research(query, on_progress, queries=await search_queries(query))
+            if data["pages"]:
+                return {"query": query, "engine": data["engine"],
+                        "sources": [{"n": i, "title": pg["title"], "url": pg["url"], "domain": pg["domain"],
+                                     "published": pg.get("published", ""), "excerpt": pg["text"][:1500]}
+                                    for i, pg in enumerate(data["pages"], 1)]}
+        except Exception as e:
+            log.warning("meeting.artifacts: web_search (trình duyệt) lỗi: %s", e)
+            if provider == "playwright":
+                return {"error": f"tra cứu bằng trình duyệt lỗi ({e})"}
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        return {"error": "chưa tra cứu được trên mạng (thiếu Playwright và ANTHROPIC_API_KEY)"}
+    try:
+        body, sources, _ = await _claude_search(query)
+    except Exception as e:
+        return {"error": f"chưa tra cứu được trên mạng ({e})"}
+    return {"query": query, "engine": "Claude web_search", "summary": body[:4000],
+            "sources": [{"n": i, "title": s["title"], "url": s["url"]} for i, s in enumerate(sources[:8], 1)]}
 
 
 # ==============================================================================

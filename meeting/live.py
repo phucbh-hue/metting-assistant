@@ -1294,7 +1294,8 @@ class MeetingSession:
         """"Search giúp anh giá vàng hôm nay": tìm trên web, lưu thành báo cáo có nguồn, chiếu lên màn hình và đọc kết luận."""
         await self._progress(f"Dạ, em tra cứu trên mạng về {query} ngay ạ.", "ack")
         try:
-            art = await artifacts.web_research(self.id, query, llm._context_lines(self.segments, n=30))
+            art = await artifacts.web_research(self.id, query, llm._context_lines(self.segments, n=30),
+                                               on_progress=self._progress)
         except Exception as e:
             log.warning("meeting.live: tra cứu web lỗi: %s", e)
             await self._say(f"Em chưa tra cứu được: {e}", "concerned")
@@ -1303,7 +1304,8 @@ class MeetingSession:
         await self.emit({"type": "artifact_created", "artifact": {k: v for k, v in art.items() if k != "sources"}})
         await self.emit({"type": "stage_command", "action": "open"})
         await self.stage_action("show", artifact_id=art["id"])
-        body = re.sub(r"^#.*$", "", art["content"], flags=re.M)
+        body = re.sub(r"\[\d+(?:\s*[,-]\s*\d+)*\]", "", art["content"])          # bỏ số nguồn [1] khi đọc to
+        body = re.sub(r"^#.*$", "", body, flags=re.M)
         body = body.split("## Chi tiết")[0]
         summary = re.sub(r"\s+", " ", re.sub(r"[*_`#\[\]()]", " ", body)).strip()
         sents = re.split(r"(?<=[.!?])\s+", summary)

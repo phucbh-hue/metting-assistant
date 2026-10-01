@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, Response  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
-from meeting import artifacts, db, live, llm, mcp, tts, voice  # noqa: E402
+from meeting import artifacts, db, live, llm, mcp, tts, voice, websearch  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("meeting.app")
@@ -54,6 +54,7 @@ async def lifespan(_app: FastAPI):
             s.dispose()
         except Exception as e:
             log.warning("meeting.app: đóng session %s lỗi: %s", s.id, e)
+    db.flush()                  # lưu trên máy: ghi nốt phần còn chờ trước khi tắt
 
 
 app = FastAPI(title="Meeting Assistant AI", version="3.2.0", lifespan=lifespan)
@@ -184,6 +185,34 @@ def vesper():
     return FileResponse(HERE.parent / "vesper.html")
 
 
+def _db_status_text(st: Dict[str, Any]) -> str:
+    mode = st.get("mode")
+    if mode == "atlas":
+        return f"Đã kết nối MongoDB Atlas ({st['database']})"
+    if mode in ("mongodb", "mongodb_local"):
+        return f"Đã kết nối MongoDB ({st['database']})"
+    if mode == "local_file":
+        why = f" Lý do: {st['atlas_error']}." if st.get("atlas_error") else ""
+        return "Chưa kết nối được Atlas: đang lưu trên máy (data/local_db), không mất khi tắt server." + why
+    return "In-Memory (dữ liệu mất khi tắt server)"
+
+
+@app.get("/api/storage")
+async def storage():
+    """Đang lưu ở Atlas hay trên máy, lý do, và các cuộc họp trên máy chưa đồng bộ."""
+    return await asyncio.to_thread(db.storage_info)
+
+
+@app.post("/api/storage/sync")
+async def storage_sync(payload: Optional[Dict[str, Any]] = None):
+    """Đưa các cuộc họp ghi lúc mất kết nối Atlas (kho trên máy) lên Atlas."""
+    dry = bool((payload or {}).get("dry_run"))
+    try:
+        return await asyncio.to_thread(db.sync_local_to_atlas, dry)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
 @app.get("/api/health")
 def health():
     db_st = db.get_status()
@@ -193,9 +222,10 @@ def health():
         "campp": voice.get_diagnostics(),
         "soniox": {"status": "Đã cấu hình API key" if soniox_key else "Chưa cấu hình SONIOX_API_KEY",
                    "ready": soniox_key, "model": live.MeetingStream.MODEL},
-        "mongodb": {"status": "In-Memory (dữ liệu mất khi tắt server)" if db_st["is_mock"]
-                    else f"Đã kết nối ({db_st['database']})",
-                    "ready": True, "database": db_st["database"], "is_mock": db_st["is_mock"]},
+        "web_search": {"provider": artifacts.web_provider(), "playwright": websearch.available(),
+                       "claude": bool(os.getenv("ANTHROPIC_API_KEY"))},
+        "mongodb": {"status": _db_status_text(db_st), "ready": True, "database": db_st["database"],
+                    "is_mock": db_st["is_mock"], "mode": db_st["mode"], "atlas_error": db_st["atlas_error"]},
         "llm": {"provider": llm.PROVIDER, "ready": artifacts.llm_available(),
                 "claude_ready": bool(os.getenv("ANTHROPIC_API_KEY")),
                 "gemini_ready": bool(os.getenv("GEMINI_API_KEY"))},

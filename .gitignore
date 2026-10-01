@@ -54,3 +54,6 @@ debug_*.py
 
 # Playwright / test output
 .playwright-mcp/
+
+# Kho dữ liệu trên máy khi mất kết nối Atlas: nội dung họp + vector giọng (dữ liệu sinh trắc học), không đưa lên git
+data/

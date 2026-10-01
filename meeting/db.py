@@ -3,8 +3,10 @@
 Tách biệt hoàn toàn khỏi Database của dự án Interview để tránh trùng dữ liệu:
 - Sử dụng MONGODB_URL từ .env (hỗ trợ MongoDB Atlas Cloud hoặc Local MongoDB).
 - Cơ sở dữ liệu: meeting_assistant.
-- Hỗ trợ auto-fallback sang mongomock nếu chưa bật MongoDB để server không bao giờ bị crash.
+- Không kết nối được MongoDB: chuyển sang kho trên máy (data/local_db, xem meeting/localstore.py) để không mất
+  lịch sử cuộc họp; khi Atlas kết nối lại có thể đồng bộ các cuộc họp đó lên (sync_local_to_atlas).
 - MEETING_DB=mock: ép dùng mongomock (in-memory) - BẮT BUỘC cho test để không ghi vào dữ liệu thật.
+- MEETING_DB=local: bỏ qua Atlas, dùng thẳng kho trên máy (làm việc offline).
 
 Các Collections:
 - voices: Hồ sơ sinh trắc học giọng nói (vector 192 số chuẩn hóa L2, tên, vai trò, phòng ban, consent)
@@ -35,11 +37,58 @@ log = logging.getLogger("meeting.db")
 
 MONGODB_URL = os.getenv("MONGODB_URL", "").strip()
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "meeting_assistant").strip()
-FORCE_MOCK = os.getenv("MEETING_DB", "").strip().lower() in ("mock", "memory", "mongomock")
+_DB_ENV = os.getenv("MEETING_DB", "").strip().lower()
+FORCE_MOCK = _DB_ENV in ("mock", "memory", "mongomock")
+FORCE_LOCAL = _DB_ENV in ("local", "file", "offline")
+LOCAL_DB_DIR = Path(os.getenv("LOCAL_DB_DIR") or (Path(__file__).resolve().parent.parent / "data" / "local_db"))
+# Mã số khởi điểm khi lưu trên máy: tách khỏi dải mã của Atlas để đồng bộ lên sau không bị trùng
+LOCAL_ID_BASE = {"meetings": 9000, "voices": 9000, "inferences": 1_000_000, "artifacts": 1_000_000,
+                 "interactions": 1_000_000, "segments": 100_000_000}
 
 _client: Optional[pymongo.MongoClient] = None
 _db = None
 _is_mock = False
+_mode = ""                 # atlas | mongodb | mongodb_local | local_file | memory
+_atlas_error = ""
+_local_loaded = 0
+
+
+def _explain_mongo_error(e: Exception) -> str:
+    """Lý do không kết nối được MongoDB, viết cho người dùng."""
+    s = str(e)
+    low = s.lower()
+    if "tlsv1_alert_internal_error" in low or "tlsv1 alert internal error" in low:
+        return ("Atlas từ chối kết nối TLS: thường do IP hiện tại của máy chưa có trong Network Access của Atlas "
+                "(hoặc mục IP tạm thời đã hết hạn)")
+    if "bad auth" in low or "authentication failed" in low:
+        return "Sai tài khoản hoặc mật khẩu trong MONGODB_URL"
+    if "getaddrinfo" in low or "dns" in low or "nodename nor servname" in low:
+        return "Không phân giải được tên máy chủ Atlas (kiểm tra mạng / DNS)"
+    if "timed out" in low or "timeout" in low:
+        return "Không kết nối được tới Atlas trong 5 giây (mạng, VPN hoặc tường lửa chặn cổng 27017)"
+    return s[:200]
+
+
+def _open_local():
+    """Kho trên máy: mongomock + ghi xuống data/local_db. Lỗi mở kho thì mới dùng bộ nhớ tạm."""
+    global _client, _db, _is_mock, _mode, _local_loaded
+    from meeting import localstore
+    try:
+        sdb, n = localstore.open_store(LOCAL_DB_DIR, MONGODB_DB_NAME)
+    except Exception as e:
+        log.error("meeting.db: không mở được kho trên máy %s (%s) - dùng bộ nhớ tạm, dữ liệu sẽ mất khi tắt server!",
+                  LOCAL_DB_DIR, e)
+        import mongomock
+        _client = mongomock.MongoClient()
+        _db, _is_mock, _mode = _client[MONGODB_DB_NAME], True, "memory"
+        return _db
+    for name, base in LOCAL_ID_BASE.items():
+        sdb["counters"].update_one({"_id": name}, {"$max": {"seq": base}}, upsert=True)
+    sdb.store.start()
+    _client, _db, _is_mock, _mode, _local_loaded = None, sdb, True, "local_file", n
+    log.warning("meeting.db: ĐANG LƯU TRÊN MÁY tại %s (%d bản ghi đã nạp). Dữ liệu không mất khi tắt server; khi Atlas "
+                "kết nối lại, vào Cài đặt > Lưu trữ để đồng bộ.", LOCAL_DB_DIR, n)
+    return _db
 
 PUBLIC_SEGMENT_FIELDS = {"_id": 0, "raw_embedding": 0}
 
@@ -49,13 +98,18 @@ def _get_db():
     if _db is not None:
         return _db
 
+    global _mode, _atlas_error
     if FORCE_MOCK:
         import mongomock
         _client = mongomock.MongoClient()
         _db = _client[MONGODB_DB_NAME]
         _is_mock = True
+        _mode = "memory"
         log.info("meeting.db: MEETING_DB=mock -> dùng Mongomock (In-Memory)")
         return _db
+    if FORCE_LOCAL:
+        log.info("meeting.db: MEETING_DB=local -> dùng kho trên máy, không kết nối Atlas")
+        return _open_local()
 
     # 1. Thử kết nối tới MONGODB_URL nếu được cấu hình
     if MONGODB_URL:
@@ -70,12 +124,15 @@ def _get_db():
             _client = client
             _db = client[MONGODB_DB_NAME]
             _is_mock = False
+            _mode = "atlas" if ("mongodb.net" in MONGODB_URL or "+srv" in MONGODB_URL) else "mongodb"
+            _atlas_error = ""
             log.info("meeting.db: Đã kết nối thành công tới MongoDB (%s / db: %s)",
                      MONGODB_URL.split("@")[-1] if "@" in MONGODB_URL else MONGODB_URL,
                      MONGODB_DB_NAME)
             return _db
         except Exception as e:
-            log.warning("meeting.db: Không thể kết nối tới MONGODB_URL (%s). Đang thử fallback.", e)
+            _atlas_error = _explain_mongo_error(e)
+            log.warning("meeting.db: KHÔNG KẾT NỐI ĐƯỢC MONGODB_URL - %s. Chi tiết: %s", _atlas_error, str(e)[:300])
 
     # 2. Thử kết nối tới localhost:27017 mặc định
     try:
@@ -84,18 +141,14 @@ def _get_db():
         _client = client
         _db = client[MONGODB_DB_NAME]
         _is_mock = False
+        _mode = "mongodb_local"
         log.info("meeting.db: Đã kết nối thành công tới Localhost MongoDB (db: %s)", MONGODB_DB_NAME)
         return _db
     except Exception:
         pass
 
-    # 3. Fallback sang mongomock để hệ thống luôn chạy trơn tru kể cả khi chưa bật MongoDB server
-    import mongomock
-    _client = mongomock.MongoClient()
-    _db = _client[MONGODB_DB_NAME]
-    _is_mock = True
-    log.info("meeting.db: Đang sử dụng Mongomock (In-Memory MongoDB) - dữ liệu sẽ mất khi tắt server!")
-    return _db
+    # 3. Không có MongoDB nào: lưu trên máy (data/local_db) để không mất lịch sử cuộc họp
+    return _open_local()
 
 
 def is_mock() -> bool:
@@ -109,8 +162,41 @@ def get_status() -> Dict[str, Any]:
         "engine": "MongoDB",
         "database": MONGODB_DB_NAME,
         "is_mock": _is_mock,
-        "url_configured": bool(MONGODB_URL)
+        "url_configured": bool(MONGODB_URL),
+        "mode": _mode,
+        "atlas_error": _atlas_error,
+        "local_dir": str(LOCAL_DB_DIR) if _mode == "local_file" else "",
     }
+
+
+def storage_info() -> Dict[str, Any]:
+    """Đang lưu ở đâu, vì sao không dùng Atlas, còn cuộc họp nào trên máy chưa đồng bộ."""
+    _get_db()
+    from meeting import localstore
+    info: Dict[str, Any] = {"mode": _mode, "database": MONGODB_DB_NAME, "url_configured": bool(MONGODB_URL),
+                            "atlas_error": _atlas_error, "local_dir": str(LOCAL_DB_DIR), "pending": []}
+    if _mode == "local_file":
+        st = _db.store
+        info.update(local_meetings=_db["meetings"].count_documents({}), local_loaded=_local_loaded,
+                    last_flush_at=st.last_flush_at, last_error=st.last_error)
+    elif _mode in ("atlas", "mongodb", "mongodb_local"):
+        info["pending"] = localstore.pending_meetings(LOCAL_DB_DIR)
+    return info
+
+
+def sync_local_to_atlas(dry_run: bool = False) -> Dict[str, Any]:
+    """Đưa các cuộc họp ghi lúc mất kết nối (kho trên máy) lên MongoDB đang kết nối."""
+    _get_db()
+    if _mode not in ("atlas", "mongodb", "mongodb_local"):
+        raise RuntimeError("Chưa kết nối được MongoDB Atlas nên chưa đồng bộ được. Khắc phục kết nối rồi chạy lại server.")
+    from meeting import localstore
+    return localstore.sync_to(_db, LOCAL_DB_DIR, dry_run=dry_run, db_name=MONGODB_DB_NAME)
+
+
+def flush():
+    """Ghi ngay dữ liệu đang chờ xuống đĩa (chỉ có tác dụng khi lưu trên máy)."""
+    if _mode == "local_file" and _db is not None:
+        _db.store.flush()
 
 
 def _next_id(seq_name: str) -> int:

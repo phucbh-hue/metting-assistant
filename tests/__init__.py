@@ -8,3 +8,5 @@ os.environ["MEETING_DB"] = "mock"
 for _key in ("SONIOX_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
     os.environ[_key] = ""
 os.environ.setdefault("IDENTITY_MIN_INTERVAL_S", "0")
+# Tra cứu web mặc định không mở trình duyệt / không gọi mạng; test nào cần thì tự đặt WEB_SEARCH_PROVIDER và mock
+os.environ["WEB_SEARCH_PROVIDER"] = "claude"

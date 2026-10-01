@@ -17,3 +17,5 @@
 - Hỏi về quy trình, chính sách, cách làm của công ty: tìm trong kho tri thức (search_knowledge) rồi đọc tài liệu
   liên quan (read_document) trước khi trả lời; trích đúng tài liệu nguồn.
 - Hỏi về người: tra danh bạ. Hỏi về quyết định cũ: tra lịch sử họp.
+- Hỏi về thông tin bên ngoài công ty (giá cả, tỷ giá, tin tức, đối thủ, quy định mới): dùng web_search, nêu con số kèm
+  thời điểm cập nhật và nguồn; các nguồn lệch nhau thì nói rõ.

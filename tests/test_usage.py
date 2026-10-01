@@ -76,7 +76,7 @@ class UsageGatewayTests(unittest.IsolatedAsyncioTestCase):
                                    usage=SimpleNamespace(input_tokens=900, output_tokens=200, cache_read_input_tokens=0))
         fm.create = create
         with mock.patch.object(artifacts, "_anthropic", lambda: fake_client(fm)), \
-                mock.patch.dict("os.environ", {"ANTHROPIC_API_KEY": "x"}):
+                mock.patch.dict("os.environ", {"ANTHROPIC_API_KEY": "x", "WEB_SEARCH_PROVIDER": "claude"}):
             art = await artifacts.web_research(self.mid, "giá vàng hôm nay", "A: nói chuyện")
         self.assertEqual(fm.calls[0]["tools"][0]["type"], "web_search_20260209")
         self.assertEqual(art["kind"], "report")
@@ -92,7 +92,7 @@ class UsageGatewayTests(unittest.IsolatedAsyncioTestCase):
                     "sources": [], "version": 1}
         db._get_db()["ai_artifacts"].insert_one(dict(fake_art, meeting_id=self.mid, created_at=1.0))
 
-        async def fake_research(mid, query, ctx=""):
+        async def fake_research(mid, query, ctx="", on_progress=None):
             self.assertEqual(query, "giá vàng hôm nay bao nhiêu")
             return dict(fake_art)
         with mock.patch.object(artifacts, "web_research", fake_research):

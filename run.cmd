@@ -15,7 +15,11 @@ if not exist ".env" goto :noenv
 if not exist "models\speaker.onnx" echo [CANH BAO] Thieu models\speaker.onnx: se khong nhan dien duoc nguoi noi bang giong.
 if not exist "models\tts" call :gettts
 
+call :freeport
+if errorlevel 1 exit /b 0
+
 echo Dang khoi dong Meeting Copilot tai http://127.0.0.1:8080 - bam Ctrl+C de dung.
+echo Neu khong ket noi duoc MongoDB Atlas, du lieu se luu tren may tai data\local_db (khong mat khi tat server).
 start "" /b cmd /c "timeout /t 4 >nul & start "" http://127.0.0.1:8080"
 "%PY%" -m uvicorn meeting.app:app --host 127.0.0.1 --port 8080
 echo.
@@ -28,6 +32,20 @@ echo Dang chay server DEMO du lieu gia lap tai http://127.0.0.1:8090 ...
 start "" /b cmd /c "timeout /t 4 >nul & start "" http://127.0.0.1:8090"
 "%PY%" scripts\demo_replay.py --port 8090 --loop
 pause
+exit /b 0
+
+:freeport
+powershell -NoProfile -Command "if (Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue) { exit 1 } else { exit 0 }"
+if not errorlevel 1 exit /b 0
+echo.
+echo Cong 8080 dang duoc dung: co the server cu van dang chay o mot cua so khac.
+choice /C YN /T 20 /D N /M "Dung server cu va chay lai (Y), hay giu server cu va chi mo trinh duyet (N)? Tu chon N sau 20 giay"
+if errorlevel 2 (
+    start "" http://127.0.0.1:8080
+    exit /b 1
+)
+powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }"
+timeout /t 2 >nul
 exit /b 0
 
 :gettts

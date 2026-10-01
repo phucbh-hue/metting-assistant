@@ -6,16 +6,51 @@ tra cứu dữ liệu nội bộ qua MCP, soạn và trình chiếu slide theo l
 vẽ sơ đồ, dựng dashboard số liệu, báo cáo nhanh và phác thảo trang web. Trợ lý nói bằng giọng tiếng Việt chạy
 ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
 
-- Phiên bản: 3.6 - cập nhật 01/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.7 - cập nhật 02/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
 
-## 1. Có gì mới ở bản 3.6
+## 1. Có gì mới ở bản 3.7
+
+### Không còn mất lịch sử cuộc họp khi Atlas lỗi
+- Nguyên nhân mất lịch sử: máy hiện không kết nối được MongoDB Atlas (Atlas từ chối bắt tay TLS, thường do IP của máy chưa
+  có trong **Network Access** hoặc mục IP tạm thời đã hết hạn). Trước đây server lặng lẽ chuyển sang bộ nhớ tạm, nên mỗi
+  lần tắt `run.cmd` là mất toàn bộ cuộc họp.
+- Bây giờ khi không kết nối được Atlas, server lưu trên máy tại `data/local_db/` (ghi xuống đĩa 2 giây một lần và khi tắt,
+  mỗi cuộc họp một tệp), lần chạy sau nạp lại. Mã cuộc họp lưu trên máy bắt đầu từ 9001 để không trùng với Atlas.
+- Trang danh sách cuộc họp và **Cài đặt > Lưu trữ dữ liệu** hiện rõ đang lưu ở đâu, lý do không vào được Atlas và cách sửa.
+- Khi Atlas kết nối lại: bấm **Đồng bộ lên Atlas** để chép các cuộc họp ghi lúc mất kết nối (câu thoại, người nói, sản
+  phẩm AI, nhật ký gọi AI). Dữ liệu đang có trên Atlas không bị ghi đè; hồ sơ giọng trùng tên thì dùng hồ sơ của Atlas.
+- Khắc phục Atlas: cloud.mongodb.com > project > **Network Access** > **Add IP Address** > **Add Current IP Address**,
+  chờ 1-2 phút rồi chạy lại `run.cmd`.
+- Giới hạn khi lưu trên máy: mẫu giọng đã lưu trên Atlas không có sẵn, nên chưa tự nhận ra tên người quen bằng giọng.
+- `data/` chứa nội dung họp và vector giọng nói (dữ liệu sinh trắc học theo Nghị định 13/2023/NĐ-CP): đã đưa vào
+  `.gitignore`, không chia sẻ thư mục này.
+
+### Tra cứu trên mạng bằng trình duyệt (Playwright)
+- "Search giúp anh ..." giờ mặc định dùng trình duyệt thật: AI đổi câu nói thành từ khóa ("hiện tại giá vàng đang bao
+  nhiêu" thành "giá vàng hôm nay"), Chromium chạy ngầm tìm trên Bing, bỏ kết quả lạc đề, đọc 4 trang ở các nguồn khác
+  nhau (kể cả bảng giá vẽ bằng JavaScript hoặc nằm trong iframe), rồi AI tóm tắt có đánh số nguồn [1], [2].
+- Trình duyệt lỗi hoặc bị chặn thì tự chuyển sang công cụ web_search của Claude (`WEB_SEARCH_PROVIDER=auto`).
+- Google và DuckDuckGo chặn trình duyệt tự động nên dùng Bing.
+- Agent cũng có công cụ `web_search`, dùng được trong yêu cầu khác (ví dụ "so sánh giá vàng các thương hiệu rồi vẽ dashboard").
+- Chạy thử riêng phần tìm kiếm: `python -m meeting.websearch "giá vàng SJC hôm nay"`.
+
+| Cách tra cứu (đo với Opus 4.7, câu hỏi giá vàng) | Thời gian | Chi phí một lần |
+|---|---|---|
+| Trình duyệt Playwright + AI tóm tắt | khoảng 25 giây | khoảng 0,055 USD |
+| Công cụ web_search của Claude | khoảng 36 giây | khoảng 0,18 USD |
+
+### run.cmd
+- Chạy `run.cmd` khi server cũ vẫn còn ở cửa sổ khác: hỏi dừng server cũ (Y) hay giữ server cũ và chỉ mở trình duyệt
+  (N, mặc định sau 20 giây), thay vì báo lỗi trùng cổng 8080.
+
+## 2. Bản 3.6: cổng gọi AI, xuất dữ liệu
 
 ### Tra cứu trên mạng
-- "UrBox ơi, em search giúp anh coi giá vàng đang bao nhiêu": trợ lý tìm trên web (công cụ web_search của Claude, tối đa
-  5 lượt tìm), viết báo cáo "Tra cứu: ..." gồm kết luận, chi tiết, liên hệ với cuộc họp và danh sách nguồn, chiếu lên
+- "UrBox ơi, em search giúp anh coi giá vàng đang bao nhiêu": trợ lý tìm trên web (bản 3.6 dùng công cụ web_search của
+  Claude, tối đa 5 lượt tìm; từ bản 3.7 mặc định dùng trình duyệt, xem mục 1), viết báo cáo "Tra cứu: ..." gồm kết luận, chi tiết, liên hệ với cuộc họp và danh sách nguồn, chiếu lên
   màn hình, đọc kết luận. Yêu cầu và thời điểm tra cứu được ghi ở cuối báo cáo. Cần `ANTHROPIC_API_KEY`.
 - Một lần tra cứu tốn khoảng 25.000-30.000 token vào (kết quả web tính vào input), tức khoảng 0,15-0,20 USD với Opus 4.7.
 
@@ -30,7 +65,7 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
   hồ sơ người nói, sản phẩm AI, nhật ký gọi AI. Dùng khi server đang chạy DB tạm (in-memory) để không mất dữ liệu, hoặc để
   gửi cho người phân tích lỗi nhận diện người nói.
 
-## 2. Bản 3.4: trợ lý thuyết trình, nội dung bám sát, MCP data server
+## 3. Bản 3.4: trợ lý thuyết trình, nội dung bám sát, MCP data server
 
 ### Trợ lý tự thuyết trình
 - "Thanh ơi, thuyết trình giúp anh" / "present slide" / "tự chuyển slide và nói nội dung bên trong": trợ lý đọc nội dung
@@ -70,7 +105,7 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
   thành người nói mới ngay, không bị gộp vào người đang nói; câu ngắn theo người vừa được nhận ra bằng giọng.
 - Model trợ lý mặc định đổi sang `claude-opus-4-7` (`CLAUDE_MODEL` trong `.env`); muốn nhanh và rẻ hơn dùng `claude-sonnet-5-5`.
 
-## 3. Bản 3.3: slide theo lời trình bày, ghép lệnh bị cắt
+## 4. Bản 3.3: slide theo lời trình bày, ghép lệnh bị cắt
 
 ### Slide tự chuyển theo lời trình bày
 
@@ -99,7 +134,7 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
 - Đo trên 5 cuộc họp thật có nhãn đúng gần đúng: 87,0% -> 89,2% câu (#37: 91% -> 100%, #36: 83% -> 86%), các
   cuộc họp khác không đổi.
 
-## 4. Bản 3.2: kết quả luôn hiện ra, dashboard, giọng đọc chạy trên máy
+## 5. Bản 3.2: kết quả luôn hiện ra, dashboard, giọng đọc chạy trên máy
 
 ### Trợ lý trả lời có nội dung thật và luôn hiện kết quả
 
@@ -146,7 +181,7 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
   Mô phỏng trên #31: bấm một lần ở câu đầu của khách mời thì đúng 95% câu.
 - Giới hạn: giọng phát qua loa máy tính bị kênh âm thanh làm giống nhau; họp trực tiếp với người thật tách tốt hơn.
 
-## 5. Bản 3.1: khuôn mặt, màn hình trình chiếu, tên gọi
+## 6. Bản 3.1: khuôn mặt, màn hình trình chiếu, tên gọi
 
 ### Trợ lý có khuôn mặt, giọng nói và màn hình trình chiếu
 
@@ -154,7 +189,7 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
   trình chiếu: bên trái là khuôn mặt trợ lý, bên phải là nội dung đang trình bày (slide, biên bản, sơ đồ, giao diện).
 - Khuôn mặt đổi theo trạng thái: **chờ**, **lắng nghe** (vòng sáng co giãn theo âm lượng mic), **suy nghĩ**
   (vòng nét đứt xoay, mắt nhìn lên), **nói** (miệng mấp máy theo lời). Nét mặt vui hoặc lo lắng theo nội dung.
-- Giọng nói: từ bản 3.2 dùng giọng Piper chạy trên máy chủ (xem mục 4); giọng của trình duyệt chỉ là dự phòng.
+- Giọng nói: từ bản 3.2 dùng giọng Piper chạy trên máy chủ (xem mục 5); giọng của trình duyệt chỉ là dự phòng.
   Giọng trực tuyến "Online (Natural)" của Microsoft Edge chỉ được dùng khi người dùng bấm cho phép (xem mục Lưu ý
   dữ liệu). Nút "Giọng nói" hoặc phím V để bật/tắt; bấm vào khuôn mặt để trợ lý dừng nói.
 - Khi trợ lý đang nói, mic gửi khoảng lặng thay cho âm thanh để giọng trợ lý không lọt vào transcript
@@ -202,7 +237,7 @@ chờ câu yêu cầu tiếp theo trong 8 giây. Câu chỉ nhắc tới tên (v
 - Menu "..." của cuộc họp -> **Phân tích lại người nói**: chạy lại bộ phân vai trên toàn bộ câu đã lưu.
   Tên đã đặt được giữ cho người nói xuất hiện sớm nhất trong nhóm.
 
-## 6. Bản 3.0: sửa lỗi phân biệt người nói
+## 7. Bản 3.0: sửa lỗi phân biệt người nói
 
 | Vấn đề ở bản 2.5 | Nguyên nhân gốc | Cách sửa |
 |---|---|---|
@@ -220,7 +255,7 @@ Khác:
 - Nội dung do AI sinh ra được làm sạch (DOMPurify) và chạy trong iframe sandbox cô lập.
 - Kết thúc cuộc họp trả về ngay, biên bản lập ở chế độ nền.
 
-## 7. Cách phân biệt người nói
+## 8. Cách phân biệt người nói
 
 ```
 Soniox (nhãn người nói theo phiên)  ─┐
@@ -240,7 +275,7 @@ CAM++ (vector giọng 192D mỗi câu)  ──┘          │               │
 
 Ngưỡng được đo trên dữ liệu thật của model CAM++: cùng người câu ngắn 0.3-0.6, câu dài 0.6-0.87; khác người 0.0-0.4.
 
-## 8. Cấu trúc thư mục
+## 9. Cấu trúc thư mục
 
 ```
 meeting-assistant/
@@ -257,9 +292,12 @@ meeting-assistant/
 │   ├── skills/         # Skill cho agent: diagram, slides, report, dashboard, assistant (nối vào system prompt)
 │   ├── artifacts.py    # Biên bản, báo cáo nhanh, dashboard, bộ slide, nhận xét, sơ đồ, trang web, co-design
 │   ├── mcp.py          # Mock MCP: danh bạ, Jira, kiến trúc, lịch sử họp
-│   ├── db.py           # MongoDB (hoặc in-memory khi MEETING_DB=mock)
+│   ├── db.py           # MongoDB Atlas; không kết nối được thì lưu trên máy (localstore), MEETING_DB=mock: in-memory
+│   ├── localstore.py   # Kho trên máy data/local_db (ghi theo từng cuộc họp) + đồng bộ lên Atlas
+│   ├── websearch.py    # Tra cứu web bằng trình duyệt thật (Playwright, Bing): tìm, đọc trang, lọc phần liên quan
 │   └── index.html      # Giao diện web (SPA), gồm màn hình trình chiếu và khuôn mặt trợ lý
 ├── mcp_server/         # MCP data server "urbox-meeting-data" + kho tri thức mẫu (kb/*.md)
+├── data/local_db/      # Dữ liệu lưu trên máy khi mất kết nối Atlas (không commit, có vector giọng)
 ├── tests/              # Test offline (unittest), không gọi API ngoài
 ├── scripts/
 │   ├── demo_replay.py              # Server demo phát lại cuộc họp mẫu (có slide + dashboard mẫu), không cần mic
@@ -270,7 +308,7 @@ meeting-assistant/
 └── static/
 ```
 
-## 9. Chạy
+## 10. Chạy
 
 Cách nhanh nhất: bấm đúp **`run.cmd`** (hoặc gõ `run` trong terminal) -> server chạy ở http://127.0.0.1:8080 và tự mở
 trình duyệt; lần đầu tự tải giọng đọc tiếng Việt nếu chưa có. `run.cmd demo` chạy bản demo dữ liệu giả lập ở cổng 8090.
@@ -305,7 +343,7 @@ màu riêng -> bấm **Đặt tên** (hoặc xác nhận gợi ý của AI, tick
 Trình bày: nhờ trợ lý soạn slide (hoặc chọn tab **Slide**) -> bấm biểu tượng toàn màn hình ở khung AI ->
 nói "<tên gọi> ơi, chuyển slide", "nhắc bài"... Cần giọng Tiếng Việt cài trên Windows để trợ lý nói thành tiếng.
 
-## 10. Cấu hình
+## 11. Cấu hình
 
 Xem `.env.example`. Các biến quan trọng:
 
@@ -314,7 +352,10 @@ Xem `.env.example`. Các biến quan trọng:
 | `SONIOX_API_KEY` | | Bắt buộc để ghi âm |
 | `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` | | Trợ lý AI, đoán tên, biên bản |
 | `MONGODB_URL` | | Không có thì dùng MongoDB local, cuối cùng là in-memory |
-| `MEETING_DB` | | `mock` = luôn dùng in-memory (test/demo) |
+| `MEETING_DB` | | `mock` = luôn dùng in-memory (test/demo); `local` = bỏ qua Atlas, lưu trên máy (làm việc offline) |
+| `LOCAL_DB_DIR` | `data/local_db` | Thư mục lưu trên máy khi không kết nối được Atlas |
+| `WEB_SEARCH_PROVIDER` | `auto` | `auto` = trình duyệt Playwright, lỗi thì Claude web_search; `playwright`; `claude` |
+| `WEB_SEARCH_PAGES` | `4` | Số trang kết quả trình duyệt mở đọc mỗi lần tra cứu |
 | `AUTO_ENROLL_VOICES` | `0` | `1` = tự lưu mẫu giọng khi AI đoán tên từ 85% |
 | `SONIOX_IDLE_CLOSE_S` | `30` | Tắt mic quá ngần này giây thì đóng stream |
 | `SONIOX_LANGUAGE_HINTS` | `vi,en` | Gợi ý ngôn ngữ cho Soniox |
@@ -325,7 +366,7 @@ Xem `.env.example`. Các biến quan trọng:
 | `SLIDES_DIR` | `slides/` | Thư viện slide trên máy cho lệnh "mở slide ở folder ..." |
 | `MCP_SERVER_CMD` / `MCP_SERVER_URL` | | Trỏ trợ lý tới MCP server thật (stdio hoặc http); không đặt thì dùng dữ liệu tại chỗ |
 
-## 11. API chính
+## 12. API chính
 
 | Method | Đường dẫn | Mô tả |
 |---|---|---|
@@ -340,6 +381,8 @@ Xem `.env.example`. Các biến quan trọng:
 | POST | `/api/meetings/{id}/reanalyze` | Phân tích lại người nói trên toàn bộ câu đã lưu |
 | POST | `/api/meetings/{id}/segments/{seq}/split-after` | Từ câu này trở đi là người nói mới |
 | GET | `/api/usage` | Thống kê gọi AI: lần gọi, token vào/ra, chi phí ước tính theo cuộc họp / việc / model |
+| GET | `/api/storage` | Đang lưu ở Atlas hay trên máy, lý do, các cuộc họp trên máy chưa đồng bộ |
+| POST | `/api/storage/sync` | Đồng bộ cuộc họp ghi lúc mất kết nối lên Atlas (`{"dry_run": true}` để chạy thử) |
 | GET | `/api/meetings/{id}/export` | Xuất toàn bộ dữ liệu cuộc họp (kèm vector giọng) dạng JSON |
 | GET / POST | `/api/tts/status`, `/api/tts` | Trạng thái giọng đọc / đọc văn bản thành WAV (chạy trên máy) |
 | POST | `/api/meetings/{id}/command` | Câu lệnh cho trợ lý, xử lý như khi gọi bằng giọng nói; trả về danh sách sự kiện |
@@ -352,7 +395,12 @@ Xem `.env.example`. Các biến quan trọng:
 | WS | `/ws/meeting/{id}/audio` | PCM16 16kHz mono từ mic (một thiết bị ghi mỗi cuộc họp) |
 | WS | `/ws/meeting/{id}/events` | Sự kiện: `segment`, `segments_relabeled`, `speakers`, `speakers_split`, `interim`, `identity_suggestion`, `ai_progress`, `ai_say`, `ai_insights`, `stage_state`, `stage_command`, `stage_prompt`... |
 
-## 12. Lưu ý dữ liệu
+## 13. Lưu ý dữ liệu
+
+- `data/local_db/` (lưu trên máy khi mất kết nối Atlas) chứa nội dung cuộc họp và vector giọng nói: không chia sẻ, không đưa
+  lên git (đã có trong `.gitignore`). Xóa thư mục này khi chưa đồng bộ sẽ mất các cuộc họp trong đó.
+- Tra cứu trên mạng gửi từ khóa tìm kiếm tới Bing và mở các trang kết quả; không đưa nội dung cuộc họp vào từ khóa.
+  Nội dung trang đã đọc (cùng tối đa 2.000 ký tự cuối của cuộc họp để liên hệ) được gửi cho AI để tóm tắt.
 
 - Bộ test của bản 2.5 ghi vector **ngẫu nhiên** vào DB thật (hồ sơ có `consent_by` = `system_admin` hoặc
   `meeting_host`, 1-2 mẫu). Nếu từng chạy các test đó, hãy rà trang **Hồ sơ giọng nói**, xóa hồ sơ không đúng
