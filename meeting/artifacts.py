@@ -333,17 +333,29 @@ def _json_from_text(text: str) -> Any:
 SLIDE_LAYOUTS = ("title", "bullets", "two_column", "quote", "metrics")
 
 SLIDES_SYSTEM = """Bạn là chuyên gia soạn slide thuyết trình cho cuộc họp nội bộ UrBox.
-Dựa vào yêu cầu, nội dung cuộc họp và dữ liệu tra cứu, soạn một bộ slide NGẮN GỌN, dễ trình bày.
+Dựa vào yêu cầu, TOÀN BỘ nội dung cuộc họp và dữ liệu tra cứu, soạn một bộ slide ĐẦY ĐỦ, CHI TIẾT để trợ lý thuyết trình
+lại cho cả phòng: người nghe phải nắm được bối cảnh, từng vấn đề đã bàn, số liệu, quyết định, việc cần làm và rủi ro.
 
 Quy tắc:
-- 4-8 slide. Slide đầu dùng layout "title" (bullets[0] là phụ đề). Các slide sau dùng "bullets",
-  "two_column" (ý chia 2 cột), "metrics" (mỗi ý dạng "Nhãn: Giá trị") hoặc "quote".
-- Mỗi slide tối đa 5 ý, mỗi ý tối đa 14 từ, viết cụ thể bằng tên người, số liệu, mốc thời gian có trong dữ liệu.
-- "notes": lời nhắc cho người trình bày (1-3 câu, nói gì ở slide này), dùng để nhắc bài.
-- Ngày ghi dd/mm/yyyy, tiền ghi dạng 1.000.000đ. Không bịa số liệu không có trong dữ liệu.
+- 8-14 slide (cuộc họp ngắn thì ít hơn, nhưng mỗi chủ đề đã bàn phải có slide riêng; không gộp nhiều chủ đề vào một slide).
+- Slide đầu layout "title" (bullets[0] là phụ đề: ngày họp dd/mm/yyyy, người tham dự). Các slide sau dùng "bullets",
+  "two_column" (so sánh / hai nhóm ý), "metrics" (mỗi ý dạng "Nhãn: Giá trị", dùng khi có từ 3 con số) hoặc "quote".
+- Mỗi slide 3-6 ý, mỗi ý 8-20 từ, là một sự kiện / con số / quyết định cụ thể kèm tên người và mốc thời gian:
+  "Hương: bản mobile còn banner, hoàn thành 03/10/2026", không viết chung chung kiểu "Thảo luận về landing page".
+- "script": LỜI THUYẾT TRÌNH đầy đủ cho slide đó (4-8 câu, 80-160 từ), xưng "em", gọi "anh chị": nói bối cảnh,
+  từng ý với số liệu và tên người, vì sao quan trọng, điểm cần anh chị quyết. Đây là lời trợ lý sẽ đọc to, phải trọn vẹn,
+  đúng trọng tâm, không lặp lại nguyên văn bullets.
+- "notes": 1-2 câu nhắc người trình bày (nhấn gì, hỏi ai).
+- Ngày dd/mm/yyyy, tiền 1.000.000đ, không dùng gạch dài. Không bịa số liệu; thiếu thì ghi "chưa có số liệu".
 
 Chỉ trả về MỘT JSON:
-{"title": "Tên bộ slide", "slides": [{"title": "...", "layout": "bullets", "bullets": ["...", "..."], "notes": "..."}]}"""
+{"title": "Tên bộ slide", "slides": [{"title": "...", "layout": "bullets", "bullets": ["...", "..."], "script": "...", "notes": "..."}]}"""
+
+SCRIPTS_SYSTEM = """Bạn viết LỜI THUYẾT TRÌNH cho từng slide của một bộ slide, để trợ lý AI đọc to trong cuộc họp UrBox.
+Với mỗi slide: 4-8 câu (80-160 từ), xưng "em", gọi "anh chị", nói đủ các ý trên slide theo thứ tự, thêm bối cảnh và
+con số lấy từ nội dung cuộc họp / dữ liệu được cung cấp, nêu điểm cần anh chị lưu ý hoặc quyết định. Không lặp nguyên
+văn bullets, không bịa số liệu, không dùng gạch dài. Ngày dd/mm/yyyy, tiền 1.000.000đ.
+Chỉ trả về MỘT JSON: {"scripts": ["lời cho slide 1", "lời cho slide 2", ...]} đúng số slide, đúng thứ tự."""
 
 SLIDES_REFINE_SYSTEM = """Bạn cùng người dùng chỉnh bộ slide đang trình chiếu trong cuộc họp.
 Áp dụng đúng yêu cầu sửa (thường là cho slide đang xem), giữ nguyên các slide không liên quan, giữ cùng cấu trúc JSON.
@@ -359,7 +371,7 @@ def normalize_deck(data: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(data, dict) or not isinstance(data.get("slides"), list):
         return None
     slides = []
-    for s in data["slides"][:15]:
+    for s in data["slides"][:20]:
         if isinstance(s, str):
             s = {"title": s}
         if not isinstance(s, dict):
@@ -368,22 +380,53 @@ def normalize_deck(data: Any) -> Optional[Dict[str, Any]]:
         bullets = s.get("bullets") or s.get("points") or []
         if isinstance(bullets, str):
             bullets = re.split(r"\n+|•", bullets)
-        bullets = [str(b).strip(" -•\t")[:200] for b in bullets if str(b).strip(" -•\t")][:6]
+        bullets = [str(b).strip(" -•\t")[:220] for b in bullets if str(b).strip(" -•\t")][:7]
         if not title and not bullets:
             continue
         layout = s.get("layout") if s.get("layout") in SLIDE_LAYOUTS else ("title" if not slides else "bullets")
         slides.append({"title": title or f"Slide {len(slides) + 1}", "layout": layout, "bullets": bullets,
-                       "notes": str(s.get("notes") or "").strip()[:600]})
+                       "notes": str(s.get("notes") or "").strip()[:600],
+                       "script": str(s.get("script") or "").strip()[:1500]})
     if not slides:
         return None
     return {"title": str(data.get("title") or slides[0]["title"]).strip()[:120], "slides": slides}
+
+
+def deck_has_scripts(deck: Dict[str, Any]) -> bool:
+    slides = (deck or {}).get("slides") or []
+    return bool(slides) and all(len((s.get("script") or "").split()) >= 25 for s in slides)
+
+
+async def generate_scripts(deck: Dict[str, Any], context_text: str = "", data_text: str = "") -> Dict[str, Any]:
+    """Viết lời thuyết trình chi tiết cho bộ slide chưa có (slide nhập từ tệp, slide bản cũ)."""
+    prompt = (f"## Bộ slide (JSON):\n{json.dumps({'title': deck['title'], 'slides': [{k: v for k, v in s.items() if k != 'script'} for s in deck['slides']]}, ensure_ascii=False)}\n\n"
+              f"## Dữ liệu tra cứu:\n{data_text or '(không có)'}\n\n## Nội dung cuộc họp:\n{context_text or '(chưa có)'}")
+    data = _json_from_text(await _call_llm(with_skill(SCRIPTS_SYSTEM, "slides"), prompt, max_tokens=6000))
+    scripts = data.get("scripts") if isinstance(data, dict) else None
+    if not isinstance(scripts, list) or len(scripts) < len(deck["slides"]):
+        raise RuntimeError("AI chưa viết đủ lời thuyết trình cho các slide")
+    out = json.loads(json.dumps(deck))
+    for s, sc in zip(out["slides"], scripts):
+        s["script"] = str(sc or "").strip()[:1500]
+    return out
+
+
+def import_deck(meeting_id: int, path: str) -> Dict[str, Any]:
+    """Đọc tệp slide trên máy (md/txt/json/pptx) thành sản phẩm "slides" của cuộc họp."""
+    from meeting import decks
+    deck = normalize_deck(decks.read_deck(path))
+    if deck is None:
+        raise RuntimeError(f"Tệp {Path(path).name} không có slide nào đọc được")
+    aid = db.save_artifact(meeting_id=meeting_id, kind="slides", title=f"Slide: {deck['title'][:60]}",
+                           content=json.dumps(deck, ensure_ascii=False), prompt_trigger=f"file:{path}")
+    return db.get_artifact(aid)
 
 
 async def generate_slides(meeting_id: int, prompt_request: str, context_text: str = "",
                           data_text: str = "") -> Dict[str, Any]:
     user_prompt = (f"Yêu cầu: {prompt_request}\n\nDữ liệu tra cứu (nếu có):\n{data_text or '(không có)'}\n\n"
                    f"Nội dung cuộc họp gần nhất:\n{context_text or '(chưa có)'}")
-    deck = normalize_deck(_json_from_text(await _call_llm(with_skill(SLIDES_SYSTEM, "slides"), user_prompt, max_tokens=3500)))
+    deck = normalize_deck(_json_from_text(await _call_llm(with_skill(SLIDES_SYSTEM, "slides"), user_prompt, max_tokens=9000)))
     if deck is None:
         raise RuntimeError("AI chưa tạo được bộ slide hợp lệ, hãy thử lại với yêu cầu cụ thể hơn")
     title = f"Slide: {deck['title'][:60]}"

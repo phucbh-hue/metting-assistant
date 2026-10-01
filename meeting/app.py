@@ -102,6 +102,7 @@ class StageReq(BaseModel):
     query: Optional[str] = None
     follow: Optional[bool] = None
     auto: bool = False
+    kind: Optional[str] = None
 
 
 class AssistantSettings(BaseModel):
@@ -484,7 +485,7 @@ async def control_stage(mid: int, req: StageReq):
     s = await _session_or_404(mid)
     try:
         res = await s.stage_action(req.action, artifact_id=req.artifact_id, slide=req.slide, query=req.query,
-                                   follow=req.follow, auto=req.auto)
+                                   follow=req.follow, auto=req.auto, kind=req.kind)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
     s.dispose_if_idle()

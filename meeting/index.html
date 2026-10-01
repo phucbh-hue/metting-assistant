@@ -2387,7 +2387,8 @@ async function renderStageFrame(animate) {
       <div class="thumbs" aria-label="Danh sách slide">${deck.slides.map((sl, k) => `<button class="thumb" data-act="stage-goto" data-slide="${k}" aria-current="${k === i}">${k + 1}. ${esc(sl.title)}</button>`).join('')}</div>`;
     const cur = $('.thumb[aria-current="true"]', nav); if (cur) cur.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   } else {
-    nav.innerHTML = `<div class="flex flex-wrap items-center justify-end gap-2">${back}${picker}</div>`;
+    const presentBtn = art.kind === 'dashboard' ? `<button class="btn ${PRESENT.on ? 'btn-primary' : 'btn-ghost'} btn-sm" data-act="stage-present" aria-pressed="${PRESENT.on}">${PRESENT.on ? 'Dừng thuyết trình' : 'Thuyết trình'}</button>` : '';
+    nav.innerHTML = `<div class="flex flex-wrap items-center justify-end gap-2">${back}${presentBtn}${picker}</div>`;
     if (art.kind === 'dashboard') {
       const d = parseDash(art.content);
       frame.innerHTML = `<div class="stage-scroll">${dashHtml(d, true)}</div>`;
@@ -2503,6 +2504,7 @@ const PRESENT = { on: false, token: 0, moving: false };
 const ORDINALS = ['Thứ nhất', 'Thứ hai', 'Thứ ba', 'Thứ tư', 'Thứ năm', 'Thứ sáu'];
 function slideNarration(deck, i) {
   const sl = deck.slides[i]; const b = (sl.bullets || []).map(x => String(x).trim()).filter(Boolean);
+  if (sl.script && sl.script.split(/\s+/).length >= 25) return sl.script;   // lời thuyết trình chi tiết do AI soạn
   const parts = [];
   if (sl.layout === 'title') parts.push(`${sl.title}.`, ...b.map(x => `${x}.`));
   else if (sl.layout === 'quote') parts.push(`${sl.title}. ${b[0] || ''}${b[1] ? `, ${b[1]}` : ''}.`);
@@ -2519,12 +2521,25 @@ function slideNarration(deck, i) {
 function voiceIdle() {
   return new Promise(resolve => { const tick = () => (!VOICE.current && !VOICE.queue.length) ? resolve() : setTimeout(tick, 150); tick(); });
 }
+function dashNarration(d) {
+  const parts = [`${d.title || 'Dashboard'}.`];
+  if (d.subtitle) parts.push(`${d.subtitle}.`);
+  (d.kpis || []).forEach(k => parts.push(`${k.label}: ${k.value}${k.unit ? ' ' + k.unit : ''}${k.delta ? ', ' + k.delta : ''}.`));
+  (d.highlights || []).forEach(h => parts.push(String(h).replace(/[.]*$/, '.')));
+  return parts.join(' ');
+}
 async function startPresent(fromSlide) {
   const R = S.room; const art = stageArtifact();
-  if (!R || !art || art.kind !== 'slides') { say('Chưa có bộ slide nào trên màn hình để em thuyết trình.', { mood: 'concerned' }); return; }
+  if (!R || !art || !['slides', 'dashboard'].includes(art.kind)) { say('Chưa có bộ slide hay dashboard nào trên màn hình để em thuyết trình.', { mood: 'concerned' }); return; }
   if (!STAGE.open) openStage(true);
   stopVoice();
   const token = ++PRESENT.token; PRESENT.on = true; renderStageFrame(false);
+  if (art.kind === 'dashboard') {
+    say(dashNarration(parseDash(art.content)), { mood: 'happy', bubble: `Đang trình bày: ${art.title}` });
+    await voiceIdle();
+    if (PRESENT.on && PRESENT.token === token) { PRESENT.on = false; renderStageFrame(false); }
+    return;
+  }
   const deck = parseDeck(art.content);
   let i = Number.isInteger(fromSlide) ? fromSlide : R.stage.slide;
   for (; i < deck.slides.length && PRESENT.on && PRESENT.token === token; i++) {

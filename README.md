@@ -20,6 +20,16 @@ ngay trên máy (miễn phí), vừa làm vừa báo những gì tìm thấy.
 - Dừng: nói "dừng thuyết trình" / "dừng lại", bấm **Dừng thuyết trình**, phím Esc, hoặc tự bấm chuyển slide.
   Trong lúc trợ lý đang nói, mic gửi khoảng lặng nên lệnh bằng giọng chỉ được nghe ở quãng nghỉ giữa hai slide.
 
+### Slide chi tiết, thư viện slide trên máy, quay lại nội dung cũ
+- Bộ slide do AI soạn giờ 8-14 slide, mỗi slide 3-6 ý chi tiết (tên người, số liệu, hạn chót) kèm `script`: lời
+  thuyết trình 4-8 câu mà trợ lý đọc to khi thuyết trình, đúng trọng tâm, không đọc sơ sài. Bộ slide cũ hoặc nhập từ
+  tệp chưa có `script` thì trợ lý tự soạn trước khi thuyết trình (lưu thành bản mới).
+- "Jarvis ơi, mở slide ở folder mega sale": tìm trong thư viện `slides/` (đổi bằng `SLIDES_DIR`) theo tên thư mục /
+  tên tệp, đọc `.md`, `.txt`, `.json`, `.pptx` thành bộ slide và đưa lên màn hình. Xem `slides/README.md`.
+- "Quay lại slide cũ khi nãy em đã present", "quay lại dashboard lúc nãy", "quay lại sơ đồ lúc nãy": về đúng nội dung
+  đã trình bày gần nhất của loại đó (vị trí slide được giữ).
+- Thuyết trình cũng dùng được cho dashboard (đọc KPI và điểm chính).
+
 ### Nội dung bám sát cuộc họp
 - Slide, báo cáo, dashboard, sơ đồ đọc TOÀN BỘ transcript (trước đây chỉ 40 câu cuối) và không còn đưa thống kê
   "ai nói nhiều, ai nói ít" vào trừ khi được hỏi đúng điều đó.
@@ -149,6 +159,8 @@ chạy ngay, không gọi LLM:
 | "mở màn hình trình bày", "thu nhỏ màn hình trình bày" | Mở hoặc thu nhỏ màn hình trình chiếu |
 | "bật tự chuyển slide", "tắt tự chuyển slide" | Bật/tắt slide tự chuyển theo lời trình bày (mặc định bật) |
 | "thuyết trình giúp anh", "present slide", "dừng thuyết trình" | Trợ lý tự đọc từng slide và chuyển tiếp / dừng |
+| "mở slide ở folder mega sale" | Mở bộ slide từ thư viện trên máy (`slides/`) |
+| "quay lại slide cũ khi nãy em đã present", "quay lại dashboard lúc nãy" | Về nội dung đã trình bày gần nhất của loại đó |
 | "nhận xét nhanh về cuộc họp" | Trợ lý xem lại cuộc họp và nêu nhận xét |
 | "sửa slide này thêm số liệu doanh thu" | Sửa đúng slide đang chiếu (có gọi LLM), lưu thành phiên bản mới |
 
@@ -220,6 +232,7 @@ meeting-assistant/
 │   ├── llm.py          # Tên gọi trợ lý, lệnh trình chiếu, vòng tra cứu -> trả lời -> sản phẩm, câu "em tìm thấy..."
 │   ├── tts.py          # Giọng đọc tiếng Việt chạy trên máy (Piper qua sherpa-onnx) + chuẩn hóa số, ngày, tiền
 │   ├── follow.py       # Tự chuyển slide theo lời trình bày (so khớp lời nói với từng slide, chống nhảy)
+│   ├── decks.py        # Thư viện slide trên máy: tìm theo tên thư mục / tệp, đọc md, txt, json, pptx
 │   ├── mcp_client.py   # Client MCP thật (stdio / streamable-http), dùng khi đặt MCP_SERVER_CMD hoặc MCP_SERVER_URL
 │   ├── skills/         # Skill cho agent: diagram, slides, report, dashboard, assistant (nối vào system prompt)
 │   ├── artifacts.py    # Biên bản, báo cáo nhanh, dashboard, bộ slide, nhận xét, sơ đồ, trang web, co-design
@@ -285,6 +298,7 @@ Xem `.env.example`. Các biến quan trọng:
 | `TTS_VOICE` | `vits-piper-vi_VN-vais1000-medium` | Giọng đọc trong `models/tts/` |
 | `TTS_SPEED` | `1.05` | Tốc độ đọc |
 | `TTS_MODEL_DIR` | | Đường dẫn thư mục giọng đọc nếu để ngoài `models/tts/` |
+| `SLIDES_DIR` | `slides/` | Thư viện slide trên máy cho lệnh "mở slide ở folder ..." |
 | `MCP_SERVER_CMD` / `MCP_SERVER_URL` | | Trỏ trợ lý tới MCP server thật (stdio hoặc http); không đặt thì dùng dữ liệu tại chỗ |
 
 ## 10. API chính

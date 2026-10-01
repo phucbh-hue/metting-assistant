@@ -1079,9 +1079,22 @@ class MeetingSession:
                 best, best_score = i, score
         return best if best_score >= 0.5 else None
 
+    async def _history_index(self, kind: Optional[str]) -> Optional[int]:
+        """Vị trí trong lịch sử của nội dung đã trình bày gần nhất thuộc loại kind (None = mục cuối)."""
+        hist = self.stage["history"]
+        if not hist:
+            return None
+        if not kind:
+            return len(hist) - 1
+        for i in range(len(hist) - 1, -1, -1):
+            art = await self._get_artifact(hist[i]["artifact_id"])
+            if art and art.get("kind") == kind:
+                return i
+        return None
+
     async def stage_action(self, action: str, artifact_id: Optional[int] = None, slide: Optional[int] = None,
                            query: Optional[str] = None, follow: Optional[bool] = None,
-                           auto: bool = False) -> Dict[str, Any]:
+                           auto: bool = False, kind: Optional[str] = None) -> Dict[str, Any]:
         """Điều khiển màn hình trình bày: show (đưa nội dung lên), next/prev/goto/topic (chuyển slide), back,
         follow (bật/tắt tự chuyển slide theo lời trình bày). auto=True: do hệ thống tự chuyển theo lời nói."""
         st = self.stage
@@ -1099,8 +1112,11 @@ class MeetingSession:
             n = max(1, len(self._slides_of(art)))
             st["artifact_id"], st["slide"] = art["id"], min(max(int(slide or 0), 0), n - 1)
         elif action == "back":
-            if st["history"]:
-                prev = st["history"].pop()
+            idx = await self._history_index(kind)
+            if idx is not None:
+                prev = st["history"].pop(idx)
+                if kind and st["artifact_id"] is not None:      # quay lại theo loại: giữ chỗ hiện tại để còn quay tiếp
+                    st["history"] = (st["history"] + [{"artifact_id": st["artifact_id"], "slide": st["slide"]}])[-20:]
                 st["artifact_id"], st["slide"] = prev["artifact_id"], prev["slide"]
         elif st["artifact_id"] is not None:
             slides = self._slides_of(await self._get_artifact(st["artifact_id"]))
@@ -1175,19 +1191,36 @@ class MeetingSession:
         if action == "prompt":
             await self.emit({"type": "stage_prompt"})
             return True
+        if action == "open_file":
+            return await self._open_deck_file(intent.get("query", ""))
+        if action == "back" and intent.get("kind"):
+            kind = intent["kind"]
+            if await self._history_index(kind) is None:
+                await self._say(f"Em chưa trình bày {llm.KIND_NAMES.get(kind, kind)} nào trước đó.", "concerned")
+                return True
+            await self.stage_action("back", kind=kind)
+            art = await self._get_artifact(self.stage["artifact_id"])
+            await self._say(f"Dạ, em quay lại {llm.KIND_NAMES.get(kind, kind)} \"{art['title'] if art else ''}\".", quiet=True)
+            return True
         if action in ("present", "present_stop"):
             if action == "present_stop":
                 await self.emit({"type": "stage_present", "action": "stop"})
                 await self._say("Dạ, em dừng thuyết trình.", quiet=True)
                 return True
-            slides = self._slides_of(await self._get_artifact(self.stage["artifact_id"]))
-            if not slides:
+            art = await self._get_artifact(self.stage["artifact_id"])
+            if not self._slides_of(art):
+                if art and art.get("kind") == "dashboard":          # thuyết trình dashboard: đọc KPI và điểm chính
+                    await self.emit({"type": "stage_command", "action": "open"})
+                    await self.emit({"type": "stage_present", "action": "start", "slide": 0})
+                    return True
                 decks = [a for a in await asyncio.to_thread(db.get_artifacts, self.id) if a.get("kind") == "slides"]
                 if not decks:
                     await self._say("Chưa có bộ slide nào để em thuyết trình. Anh chị nhờ em soạn slide trước nhé.", "concerned")
                     return True
                 await self.stage_action("show", artifact_id=decks[0]["id"])
+                art = await self._get_artifact(self.stage["artifact_id"])
             await self.emit({"type": "stage_command", "action": "open"})
+            await self._ensure_scripts(art)
             await self.emit({"type": "stage_present", "action": "start", "slide": self.stage["slide"]})
             return True
         if action in ("follow_on", "follow_off"):
@@ -1233,6 +1266,52 @@ class MeetingSession:
             await self._say(f"Slide {i + 1} trên {len(slides)}: {slides[i]['title']}.", quiet=True)
         else:
             await self._say(f"Đang trình bày {art['title'] if art else 'nội dung trước'}.", quiet=True)
+        return True
+
+    async def _ensure_scripts(self, art: Optional[Dict[str, Any]]):
+        """Bộ slide chưa có lời thuyết trình chi tiết (nhập từ tệp, bản cũ): nhờ LLM viết rồi lưu thành bản mới."""
+        deck = artifacts.normalize_deck(artifacts._json_from_text((art or {}).get("content", ""))) if art else None
+        if not deck or artifacts.deck_has_scripts(deck) or not artifacts.llm_available():
+            return
+        await self._progress("Em soạn lời thuyết trình chi tiết cho từng slide trước, khoảng nửa phút ạ.", "status")
+        try:
+            new_deck = await artifacts.generate_scripts(deck, llm._context_lines(self.segments))
+        except Exception as e:
+            log.warning("meeting.live: viết lời thuyết trình lỗi: %s", e)
+            return
+        aid = await asyncio.to_thread(db.save_artifact, self.id, "slides", art["title"],
+                                      json.dumps(new_deck, ensure_ascii=False), "lời thuyết trình", art["id"])
+        new_art = await asyncio.to_thread(db.get_artifact, aid)
+        self._art_cache[aid] = new_art
+        await self.emit({"type": "artifact_updated", "artifact": new_art})
+        await self.stage_action("show", artifact_id=aid, slide=self.stage["slide"])
+
+    async def _open_deck_file(self, query: str) -> bool:
+        """"Mở slide ở folder A": tìm trong thư viện slide trên máy, nhập vào cuộc họp và đưa lên màn hình."""
+        from meeting import decks
+        found = decks.find_files(query)
+        if not found:
+            fs = decks.folders()
+            hint = f" Thư mục hiện có: {', '.join(fs[:5])}." if fs else f" Thư mục {decks.SLIDES_DIR} đang trống."
+            await self._say(f"Em không thấy tệp slide nào khớp với yêu cầu.{hint}", "concerned")
+            return True
+        if len(found) > 1 and found[1]["score"] >= found[0]["score"]:
+            names = "; ".join(f"{r['name']} trong {r['folder'] or 'thư mục gốc'}" for r in found[:3])
+            await self._say(f"Em thấy nhiều tệp giống nhau: {names}. Anh chị nói rõ tên tệp giúp em.", "concerned")
+            return True
+        hit = found[0]
+        try:
+            art = await asyncio.to_thread(artifacts.import_deck, self.id, hit["path"])
+        except Exception as e:
+            await self._say(f"Em không đọc được tệp {hit['name']}: {e}", "concerned")
+            return True
+        self._art_cache[art["id"]] = art
+        await self.emit({"type": "artifact_created", "artifact": art})
+        await self.emit({"type": "stage_command", "action": "open"})
+        await self.stage_action("show", artifact_id=art["id"])
+        n = len(self._slides_of(art))
+        await self._say(f"Dạ, em mở bộ slide \"{art['title'].replace('Slide: ', '')}\" từ thư mục {hit['folder'] or 'gốc'}, "
+                        f"gồm {n} slide.")
         return True
 
     async def _edit_on_stage(self, command: str):

@@ -142,6 +142,12 @@ TOOL_LABELS = {
 _SLIDE = r"(?:slide|slides|slai|xlai|trang)"
 _NUM_WORDS = {"một": 1, "hai": 2, "ba": 3, "bốn": 4, "tư": 4, "năm": 5, "sáu": 6, "bảy": 7, "tám": 8,
               "chín": 9, "mười": 10}
+KIND_WORDS = {"slide": "slides", "bộ slide": "slides", "sơ đồ": "diagram", "dashboard": "dashboard", "báo cáo": "report",
+              "biên bản": "minutes", "trang web": "web_design", "giao diện": "web_design"}
+_BACK_KIND = re.compile(r"(quay|trở|mở|chiếu|bật)\s*(lại|về)\s*(cái\s*)?(bộ\s*)?(slide|sơ đồ|dashboard|báo cáo|biên bản|trang web|giao diện)"
+                        r"\s*(cũ|khi nãy|hồi nãy|lúc nãy|ban nãy|(mà\s*)?(em\s*)?(đã|vừa|mới)\s*(present|trình bày|chiếu|làm|soạn|tạo|vẽ|dựng))", re.I)
+_OPEN_FILE = re.compile(r"(mở|lấy|tìm|chiếu|trình chiếu|load)\b.*\b(slide|bộ slide|bài|file|tệp)\b.*\b(folder|thư mục|tệp|file|trên máy|ổ)\b|"
+                        r"(mở|lấy|tìm)\s*(file|tệp)\s*slide", re.I)
 _STAGE_PATTERNS = [
     ("follow_off", re.compile(r"(tắt|ngừng|dừng|đừng|không|thôi)\s*(chế độ\s*)?(tự\s*(động\s*)?|tự\s*ý\s*)"
                               r"(chuyển|lật|theo|đổi)", re.I)),
@@ -169,6 +175,11 @@ def stage_intent(command: str) -> Optional[Dict[str, Any]]:
     c = re.sub(r"\s+", " ", (command or "").lower()).strip(" .!?,")
     if not c:
         return None
+    m = _BACK_KIND.search(c)
+    if m:
+        return {"action": "back", "kind": KIND_WORDS.get(m.group(5), "slides")}
+    if _OPEN_FILE.search(c):
+        return {"action": "open_file", "query": c}
     for action, pat in _STAGE_PATTERNS:
         if pat.search(c):
             return {"action": action}
