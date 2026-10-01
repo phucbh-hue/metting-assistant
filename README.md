@@ -252,6 +252,10 @@ meeting-assistant/
 
 ## 8. Chạy
 
+Cách nhanh nhất: bấm đúp **`run.cmd`** (hoặc gõ `run` trong terminal) -> server chạy ở http://127.0.0.1:8080 và tự mở
+trình duyệt; lần đầu tự tải giọng đọc tiếng Việt nếu chưa có. `run.cmd demo` chạy bản demo dữ liệu giả lập ở cổng 8090.
+Chạy tay:
+
 ```powershell
 cd "C:\work\cralwer with ai\ASR\meeting-assistant"
 $py = "C:\work\cralwer with ai\ASR\interviewer-assistant-AI-circle\.venv\Scripts\python.exe"
