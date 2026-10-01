@@ -45,8 +45,8 @@ def detect_wake_word(text: str) -> Optional[Tuple[str, str]]:
         if m:
             wake_word = m.group(0)
             command = text[m.end():].strip()
-            # Bỏ dấu phẩy, dấu hai chấm ở đầu câu lệnh
-            command = re.sub(r"^[,:\-\s]+", "", command).strip()
+            # Bỏ dấu câu và tiếng gọi ("ơi", "à"...) ở đầu câu lệnh: "Jarvis ơi, liệt kê..." -> "liệt kê..."
+            command = re.sub(r"^[,:;.!?\-\s]*((ơi|à|ạ|này|nhé)\b[,:;.!?\-\s]*)?", "", command, flags=re.IGNORECASE).strip()
             return wake_word, command
     return None
 

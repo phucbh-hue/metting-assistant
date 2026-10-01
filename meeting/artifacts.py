@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from meeting import db, mcp
@@ -22,33 +23,68 @@ AGENT_MODEL = os.getenv("AGENT_MODEL", "gemini-3.6-flash")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5")
 PROVIDER = (os.getenv("LLM_PROVIDER") or "claude").strip().lower()
 
+_anthropic_client = None
+_gemini_client = None
+
+
+def llm_available() -> bool:
+    return bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("GEMINI_API_KEY"))
+
+
+def _anthropic():
+    global _anthropic_client
+    if _anthropic_client is None:
+        import anthropic
+        _anthropic_client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    return _anthropic_client
+
+
+def _gemini():
+    global _gemini_client
+    if _gemini_client is None:
+        from google import genai
+        _gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+    return _gemini_client
+
 
 async def _call_llm(system: str, prompt: str, max_tokens: int = 4000) -> str:
-    """Gọi LLM (Claude Sonnet 5 hoặc Gemini 3.6 Flash) với fallback."""
-    if PROVIDER == "claude" and os.getenv("ANTHROPIC_API_KEY"):
+    """Gọi LLM (Claude hoặc Gemini theo LLM_PROVIDER) với fallback sang provider còn lại."""
+    if not llm_available():
+        raise RuntimeError("Chưa cấu hình ANTHROPIC_API_KEY hoặc GEMINI_API_KEY")
+    use_claude_first = PROVIDER == "claude" or not os.getenv("GEMINI_API_KEY")
+    errors = []
+    if use_claude_first and os.getenv("ANTHROPIC_API_KEY"):
         try:
-            import anthropic
-            client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-            resp = await client.messages.create(
+            resp = await _anthropic().messages.create(
                 model=CLAUDE_MODEL,
                 max_tokens=max_tokens,
                 system=system,
                 messages=[{"role": "user", "content": prompt}]
             )
-            texts = [b.text for b in resp.content if getattr(b, "type", None) == "text" or hasattr(b, "text")]
-            return "\n".join(texts)
+            return "\n".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
         except Exception as e:
+            errors.append(f"Claude: {e}")
             log.warning("meeting.artifacts: Claude error (%s), fallback to Gemini", e)
 
-    from google import genai
-    g_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-    resp = await asyncio.to_thread(
-        g_client.interactions.create,
-        model=AGENT_MODEL,
-        system_instruction=system,
-        input=prompt
-    )
-    return resp.output_text
+    if os.getenv("GEMINI_API_KEY"):
+        try:
+            resp = await asyncio.to_thread(
+                _gemini().interactions.create,
+                model=AGENT_MODEL,
+                system_instruction=system,
+                input=prompt
+            )
+            return resp.output_text
+        except Exception as e:
+            errors.append(f"Gemini: {e}")
+            log.warning("meeting.artifacts: Gemini error (%s)", e)
+
+    if not use_claude_first and os.getenv("ANTHROPIC_API_KEY"):
+        resp = await _anthropic().messages.create(
+            model=CLAUDE_MODEL, max_tokens=max_tokens, system=system,
+            messages=[{"role": "user", "content": prompt}])
+        return "\n".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+    raise RuntimeError("; ".join(errors) or "Không gọi được LLM")
 
 
 # ==============================================================================
@@ -79,12 +115,29 @@ Cấu trúc bắt buộc (định dạng Markdown):
 Yêu cầu: Viết tiếng Việt chuẩn xác, tên người nói và nhiệm vụ phải đối chiếu đúng với nhân sự công ty."""
 
 
-async def generate_meeting_minutes(meeting_id: int, segments: List[Dict[str, Any]],
-                                   title: str = "Cuộc họp nội bộ") -> Dict[str, Any]:
-    lines = [f"{s.get('speaker_label', 'Unknown')}: {s.get('text', '')}" for s in segments]
-    transcript_text = "\n".join(lines) if lines else "(Chưa có nội dung)"
+def _fmt_date(ts: Any) -> str:
+    try:
+        return time.strftime("%d/%m/%Y %H:%M", time.localtime(float(ts)))
+    except Exception:
+        return ""
 
-    prompt = f"Tiêu đề: {title}\n\nTranscript cuộc họp:\n{transcript_text}\n\nHãy lập biên bản cuộc họp chi tiết theo cấu trúc."
+
+async def generate_meeting_minutes(meeting_id: int, segments: List[Dict[str, Any]],
+                                   title: str = "Cuộc họp nội bộ", meeting: Optional[Dict[str, Any]] = None,
+                                   speakers: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    lines = [f"{s.get('speaker_label', 'Không rõ')}: {s.get('text', '')}" for s in segments]
+    transcript_text = "\n".join(lines) if lines else "(Chưa có nội dung)"
+    meeting = meeting or {}
+    people = "\n".join(
+        f"- {p.get('label')}" + (f" ({p.get('role')})" if p.get("role") else "")
+        + f": {p.get('n_segments', 0)} câu" for p in (speakers or [])) or "(không rõ)"
+    agenda = "\n".join(f"- {a}" for a in (meeting.get("agenda") or []) if isinstance(a, str)) or "(không có)"
+
+    prompt = (f"Tiêu đề: {title}\nThời gian bắt đầu: {_fmt_date(meeting.get('started_at'))}\n"
+              f"Loại cuộc họp: {meeting.get('meeting_type', '')}\nChương trình:\n{agenda}\n\n"
+              f"Người nói trong buổi họp (nhãn 'Người nói N' là người chưa xác định được tên):\n{people}\n\n"
+              f"Transcript cuộc họp:\n{transcript_text}\n\nHãy lập biên bản cuộc họp chi tiết theo cấu trúc. "
+              "Ngày tháng ghi theo dd/mm/yyyy.")
     content = await _call_llm(MINUTES_SYSTEM, prompt, max_tokens=3500)
 
     # Lưu vào DB

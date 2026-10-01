@@ -1,65 +1,103 @@
 """Meeting Audio Streaming, Soniox STT Realtime & Multi-Speaker Orchestration.
 
 Xử lý luồng âm thanh PCM16 16kHz:
-1. Kết nối Soniox Realtime API (stt-rt-v5) hỗ trợ Diarization và Custom Vocabulary.
+1. Kết nối Soniox Realtime API (stt-rt-v5) có Diarization và Custom Vocabulary.
+   - Mỗi lần mở kết nối là một "epoch": nhãn người nói của Soniox chỉ có nghĩa trong epoch đó.
+   - Mất kết nối -> tự nối lại và PHÁT LẠI phần audio chưa được chốt (không mất chữ).
+   - Tắt mic -> gửi finalize để chốt chữ cuối, nghỉ quá SONIOX_IDLE_CLOSE_S giây thì đóng stream (Soniox tính phí theo
+     thời lượng stream mở).
 2. Cắt lát audio từng câu để trích xuất CAM++ 192-dim vector (voice.embed).
-3. Đưa vào MeetingSpeakers để định danh người quen / người lạ.
+3. Đưa vào MeetingSpeakers (voice.py) để phân vai theo HỒ SƠ NGƯỜI NÓI ổn định, lưu vào meeting_speakers.
 4. Phát hiện Wake-Word kích hoạt trợ lý AI (llm.think_and_act).
-5. Kích hoạt Identity Inference Engine (identity.process_unknown_speakers) để đoán danh tính người lạ.
+5. IdentityEngine (identity.py) đoán tên người nói chưa định danh qua ngữ cảnh hội thoại.
 6. Phát tán sự kiện thời gian thực qua WebSockets cho Web UI.
 """
 import asyncio
-import audioop
 import json
 import logging
 import os
 import time
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import websockets
 
-from meeting import db, identity, llm, voice
+from meeting import artifacts, db, identity, llm, voice
 
 log = logging.getLogger("meeting.live")
 
 RATE = 16000
-SEGMENT_GAP_S = 0.8       # Giảm ngắt từ 1.2s xuống 0.8s để chốt câu nhanh, mượt mà
-AUDIO_KEEP_S = 120
-LOUD_RMS = 200
+BPS = RATE * 2                  # bytes / giây (PCM16 mono)
+SEGMENT_GAP_S = 0.8             # Ngắt câu khi im lặng quá ngần này giây
+MAX_SEGMENT_S = 20.0            # Câu dài hơn: cắt tại dấu câu để transcript cập nhật đều
+AUDIO_KEEP_S = 180              # Giữ tối đa ngần này giây audio để cắt clip / phát lại
+REPLAY_MAX_S = 15.0             # Tối đa số giây audio phát lại sau khi nối lại Soniox
+IDLE_CLOSE_S = float(os.getenv("SONIOX_IDLE_CLOSE_S", "30"))
+MIN_ENROLL_S = voice.MIN_ANCHOR_S
+AUTO_ENROLL_AI = os.getenv("AUTO_ENROLL_VOICES", "0").strip().lower() in ("1", "true", "yes", "on")
 
-LIVE_MEETINGS: Dict[int, "MeetingSession"] = {}
+SESSIONS: Dict[int, "MeetingSession"] = {}
+LIVE_MEETINGS = SESSIONS        # Tên cũ (tương thích)
+_session_locks: Dict[int, asyncio.Lock] = {}
 
 
+# ==============================================================================
+# SONIOX REALTIME STREAM
+# ==============================================================================
 class MeetingStream:
     """Luồng nhận âm thanh PCM và gửi sang Soniox Realtime STT."""
     RT_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
-    MODEL = "stt-rt-v5"
+    MODEL = os.getenv("SONIOX_MODEL", "stt-rt-v5")
 
     def __init__(self, name: str, session: "MeetingSession", diarize: bool = True):
         self.name = name
         self.session = session
         self.diarize = diarize
         self.ws = None
-        self.task = None
-        self.t0 = None
-        self.cur = None
-        self.closed = False
-        self.down = False
-        self.reconnecting = False
-        self.tok_off = 0.0
+        self.epoch = -1
+        self.conn_off = 0.0           # Vị trí audio (giây) nơi kết nối Soniox hiện tại bắt đầu
+        self.final_pos = 0.0          # Vị trí audio (giây) Soniox đã chốt chữ xong
         self.audio = bytearray()
-        self.audio_base = 0
-        self.fed = 0
+        self.audio_base = 0           # Số byte đã bị cắt khỏi đầu bộ đệm
+        self.fed = 0                  # Tổng số byte audio đã nhận từ mic
+        self.runs: List[Tuple[int, float]] = []   # (vị trí byte, giờ cuộc họp) mỗi lần mic bật lại
+        self.cur: Optional[Dict[str, Any]] = None
+        self.closed = False
+        self.down = True
+        self.reconnecting = False
+        self.paused = True
         self.last_audio = 0.0
+        self.state = "idle"
+        self._idle_task: Optional[asyncio.Task] = None
+        self._recv_task: Optional[asyncio.Task] = None
+        self._closing: Set[Any] = set()
+        self._last_interim = None
+        self._open_lock = asyncio.Lock()
+        self._fatal = ""              # Lỗi không thể tự khắc phục (sai API key, hết hạn mức...)
+        self._reconnects: List[float] = []
 
-    async def open(self):
+    # ------------------------------------------------------------ status ---
+    def _set_state(self, state: str, message: str = ""):
+        if self.state == state and not message:
+            return
+        self.state = state
+        asyncio.ensure_future(self.session.emit({"type": "stream_status", "stream": self.name,
+                                                 "state": state, "message": message}))
+
+    @property
+    def is_open(self) -> bool:
+        return self.ws is not None and not self.down
+
+    # -------------------------------------------------------- connection ---
+    async def open(self, replay_from: Optional[int] = None):
+        async with self._open_lock:
+            await self._open_locked(replay_from)
+
+    async def _open_locked(self, replay_from: Optional[int] = None):
         api_key = os.getenv("SONIOX_API_KEY", "")
         if not api_key:
-            log.warning("meeting.live: Chưa có SONIOX_API_KEY")
-            return
-
-        cfg = {
+            raise RuntimeError("Chưa cấu hình SONIOX_API_KEY trong .env")
+        cfg: Dict[str, Any] = {
             "api_key": api_key,
             "model": self.MODEL,
             "audio_format": "pcm_s16le",
@@ -68,237 +106,403 @@ class MeetingStream:
             "enable_speaker_diarization": self.diarize,
             "enable_language_identification": True,
             "enable_endpoint_detection": True,
-            "language_hints": ["vi"]
+            "language_hints": [x.strip() for x in os.getenv("SONIOX_LANGUAGE_HINTS", "vi,en").split(",") if x.strip()],
         }
-        if self.session.vocab:
-            cfg["context"] = {"terms": self.session.vocab[:100]}
+        terms = self.session.context_terms()
+        if terms:
+            cfg["context"] = {"terms": terms[:100]}
 
-        self.ws = await websockets.connect(self.RT_URL, open_timeout=20, max_size=None)
-        await self.ws.send(json.dumps(cfg))
-        if self.t0 is None:
-            self.t0 = self.session.clock()
-        self.last_audio = time.monotonic()
+        self._set_state("connecting")
+        # Tắt ping của thư viện websockets: Soniox có cơ chế keepalive riêng, ping/pong dễ timeout khi server đang
+        # xử lý hàng đợi audio -> gây ngắt kết nối giả.
+        ws = await websockets.connect(self.RT_URL, open_timeout=20, max_size=None, ping_interval=None, close_timeout=5)
+        await ws.send(json.dumps(cfg))
+        self.ws = ws
+        self.down = True
+        self.epoch = self.session.next_epoch()
+        start = self.fed if replay_from is None else max(int(replay_from), self.audio_base,
+                                                        self.fed - int(REPLAY_MAX_S * BPS))
+        start -= start % 2
+        self.conn_off = start / BPS
+        self.final_pos = self.conn_off
+        self._recv_task = asyncio.create_task(self._recv(ws, self.epoch, self.conn_off))
+        asyncio.create_task(self._keepalive(ws))
+        # Phát lại phần audio chưa được chốt (mất kết nối) rồi mới nhận audio trực tiếp
+        sent = start
+        while sent < self.fed:
+            end = min(self.fed, sent + BPS)
+            await ws.send(bytes(self.audio[sent - self.audio_base:end - self.audio_base]))
+            sent = end
         self.down = False
-        self.task = asyncio.create_task(self._recv())
-        asyncio.create_task(self._keepalive(self.ws))
-        log.info("meeting.live: Mở luồng Soniox thành công cho session %d", self.session.id)
+        self.last_audio = time.monotonic()
+        self._set_state("live" if not self.paused else "paused")
+        log.info("meeting.live: mở Soniox session %d stream %s epoch %d (phát lại %.1fs)",
+                 self.session.id, self.name, self.epoch, (self.fed - start) / BPS)
+
+    async def ensure_open(self):
+        if self.closed:
+            raise RuntimeError("Stream đã đóng")
+        self._fatal = ""   # người dùng chủ động bật lại mic -> thử lại
+        for _ in range(100):
+            if not self.reconnecting:
+                break
+            await asyncio.sleep(0.1)
+        async with self._open_lock:
+            if self.ws is None or (self.down and not self.reconnecting):
+                await self._open_locked(replay_from=int(self.final_pos * BPS) if self.fed else None)
 
     async def _keepalive(self, ws):
-        """Duy trì kết nối WebSocket với Soniox bằng keepalive ping định kỳ (chống timeout 8s)."""
-        while not self.closed and self.ws is ws and not self.down:
-            await asyncio.sleep(4.0)
-            if time.monotonic() - self.last_audio > 4.0 and not self.closed and self.ws is ws:
+        """Duy trì kết nối với Soniox bằng keepalive khi không có audio (chống timeout)."""
+        while not self.closed and self.ws is ws:
+            await asyncio.sleep(3.0)
+            if self.ws is not ws or self.closed:
+                return
+            if time.monotonic() - self.last_audio > 3.0:
                 try:
                     await ws.send(json.dumps({"type": "keepalive"}))
                 except Exception:
                     return
 
     def _lost(self, reason: str):
-        """Khi kết nối Soniox bị gián đoạn: đánh dấu và tự động nối lại ngầm."""
-        if self.closed or self.reconnecting:
+        if self.closed or self.reconnecting or self._fatal:
+            return
+        now = time.monotonic()
+        self._reconnects = [t for t in self._reconnects if now - t < 300] + [now]
+        if len(self._reconnects) > 8:
+            self._fatal = f"Soniox ngắt kết nối liên tục ({reason})"
+            self.down = True
+            self._set_state("error", self._fatal + ". Hãy tắt rồi bật lại mic.")
             return
         self.down = True
         self.reconnecting = True
         log.warning("session %d stream %s: %s - đang tự động nối lại Soniox...", self.session.id, self.name, reason)
-        asyncio.create_task(self._reconnect(reason))
+        self._set_state("reconnecting", reason)
+        asyncio.create_task(self._reconnect(int(self.final_pos * BPS)))
 
-    async def _reconnect(self, reason: str):
-        await self._flush()
-        for i, wait in enumerate([1, 2, 4, 8, 8], 1):
-            await asyncio.sleep(wait)
-            if self.closed:
-                return
+    async def _reconnect(self, replay_from: int):
+        old, self.ws = self.ws, None
+        if old is not None:
+            self._closing.add(old)
             try:
-                old_ws = self.ws
-                await self.open()
-                self.tok_off = self.fed / (RATE * 2)
-                self.down = False
-                self.reconnecting = False
+                await old.close()
+            except Exception:
+                pass
+        try:
+            for i, wait in enumerate([0.5, 1, 2, 4, 8, 8, 15], 1):
+                await asyncio.sleep(wait)
+                if self.closed or self._fatal:
+                    return
                 try:
-                    if old_ws:
-                        await old_ws.close()
-                except Exception:
-                    pass
-                log.info("session %d stream %s: Đã nối lại Soniox thành công sau lần %d", self.session.id, self.name, i)
-                return
-            except Exception as e:
-                log.warning("session %d: Nối lại Soniox lần %d thất bại: %s", self.session.id, i, e)
-        self.reconnecting = False
+                    async with self._open_lock:
+                        await self._open_locked(replay_from=replay_from)
+                    log.info("session %d stream %s: đã nối lại Soniox sau lần %d", self.session.id, self.name, i)
+                    return
+                except Exception as e:
+                    log.warning("session %d: nối lại Soniox lần %d thất bại: %s", self.session.id, i, e)
+            self._set_state("error", "Không nối lại được Soniox. Hãy tắt rồi bật lại mic.")
+        finally:
+            self.reconnecting = False
 
-    async def feed(self, pcm: bytes):
-        if not self.ws or self.closed or self.down:
+    async def _close_ws(self):
+        """Đóng kết nối Soniox có chốt chữ: gửi tín hiệu hết audio và chờ phản hồi 'finished'."""
+        ws, self.ws = self.ws, None
+        self.down = True
+        if ws is None:
             return
+        self._closing.add(ws)
+        try:
+            await ws.send("")
+        except Exception:
+            pass
+        task = self._recv_task
+        if task is not None and not task.done():
+            # Soniox xử lý theo thời gian thực: chờ thêm đúng bằng phần audio còn tồn chưa chốt (tối đa 25s)
+            backlog = max(0.0, self.fed / BPS - self.final_pos)
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=min(25.0, 4.0 + backlog))
+            except Exception:
+                pass
+        try:
+            await ws.close()
+        except Exception:
+            pass
+        await self._flush()
+
+    # -------------------------------------------------------------- audio ---
+    async def feed(self, pcm: bytes):
+        if self.closed or not pcm:
+            return
+        if self.paused or not self.runs:
+            self.runs.append((self.fed, self.session.clock()))
+            self.paused = False
+            if self._idle_task:
+                self._idle_task.cancel()
+                self._idle_task = None
+            if self.is_open:
+                self._set_state("live")
         self.last_audio = time.monotonic()
-        self.fed += len(pcm)
         self.audio += pcm
-        keep = AUDIO_KEEP_S * RATE * 2
-        if len(self.audio) > keep + 10 * RATE * 2:
+        self.fed += len(pcm)
+        keep = int(AUDIO_KEEP_S * BPS)
+        if len(self.audio) > keep + 10 * BPS:
             drop = len(self.audio) - keep
             del self.audio[:drop]
             self.audio_base += drop
-
+        if self.ws is None and not self.reconnecting and not self._open_lock.locked():
+            self._lost("chưa có kết nối Soniox")
+            return
+        if self.down or self.ws is None:
+            return
         try:
             await self.ws.send(pcm)
         except Exception as e:
             self._lost(f"gửi audio lỗi ({type(e).__name__})")
 
-    def clip(self, t: float, dur: float) -> bytes:
-        a = int((t - self.t0) * RATE) * 2 - self.audio_base
-        b = a + int(dur * RATE) * 2
-        if a < 0 or b > len(self.audio) or b <= a:
+    async def pause(self):
+        """Mic tắt: chốt chữ còn treo, giữ kết nối thêm IDLE_CLOSE_S giây rồi đóng để không tốn phí."""
+        if self.closed or self.paused:
+            return
+        self.paused = True
+        if self.is_open:
+            try:
+                await self.ws.send(json.dumps({"type": "finalize"}))
+            except Exception:
+                pass
+        self._set_state("paused")
+
+        async def _idle():
+            try:
+                await asyncio.sleep(IDLE_CLOSE_S)
+                if self.paused and not self.closed:
+                    log.info("meeting.live: mic nghỉ %.0fs -> đóng Soniox session %d", IDLE_CLOSE_S, self.session.id)
+                    await self._close_ws()
+                    self._set_state("idle")
+            except asyncio.CancelledError:
+                pass
+        self._idle_task = asyncio.create_task(_idle())
+
+    def clip(self, start_s: float, end_s: float) -> bytes:
+        a = int(start_s * RATE) * 2 - self.audio_base
+        b = int(end_s * RATE) * 2 - self.audio_base
+        a = max(a, 0)
+        b = min(b, len(self.audio))
+        if b - a < int(0.3 * BPS):
             return b""
         return bytes(self.audio[a:b])
 
-    async def _recv(self):
+    def meeting_t(self, pos_s: float) -> float:
+        pos_b = pos_s * BPS
+        for rp, rt in reversed(self.runs):
+            if rp <= pos_b + 2:
+                return rt + (pos_b - rp) / BPS
+        return self.runs[0][1] if self.runs else pos_s
+
+    # ------------------------------------------------------------ receive ---
+    async def _recv(self, ws, epoch: int, conn_off: float):
         lost = None
         try:
-            async for raw in self.ws:
+            async for raw in ws:
+                if isinstance(raw, bytes):
+                    continue
                 m = json.loads(raw)
                 if m.get("error_code"):
-                    await self.session.emit({"type": "error", "text": f"Soniox {m['error_code']}: {m.get('error_message','')}"})
+                    lost = f"Soniox {m.get('error_code')}: {m.get('error_message', '')}"
+                    if int(m.get("error_code") or 0) in (400, 401, 402, 403):
+                        self._fatal = lost   # lỗi cấu hình/tài khoản: nối lại cũng vô ích
+                        self._set_state("error", lost)
+                    await self.session.emit({"type": "error", "text": lost})
                     break
-
-                interim = ""
+                interim, interim_raw = "", None
                 for tok in m.get("tokens", []):
-                    if tok.get("text") == "<end>":
-                        if tok.get("is_final"):
-                            await self._add_final(tok)
+                    txt = tok.get("text", "")
+                    if txt in ("<end>", "<fin>"):
+                        await self._flush()
                         continue
                     if tok.get("is_final"):
-                        await self._add_final(tok)
+                        await self._add_final(tok, epoch, conn_off)
                     else:
-                        interim += tok.get("text", "")
-
-                if interim:
-                    await self.session.emit({"type": "interim", "stream": self.name, "text": interim})
-
+                        interim += txt
+                        if tok.get("speaker") not in (None, ""):
+                            interim_raw = str(tok["speaker"])
+                if m.get("final_audio_proc_ms") is not None and ws is self.ws:
+                    self.final_pos = max(self.final_pos, conn_off + m["final_audio_proc_ms"] / 1000)
+                await self._emit_interim(interim, interim_raw, epoch)
                 if m.get("finished"):
                     break
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             lost = f"Soniox recv {type(e).__name__}: {e}"
         finally:
             await self._flush()
-            if lost and not self.closed:
-                self._lost(lost)
+            await self._emit_interim("", None, epoch)
+            if ws is self.ws and ws not in self._closing and not self.closed:
+                self._lost(lost or "Soniox đóng kết nối")
 
-    async def _add_final(self, tok: Dict[str, Any]):
-        text = tok.get("text", "")
-        if text == "<end>":
-            await self._flush()
+    async def _emit_interim(self, interim: str, raw: Optional[str], epoch: int):
+        c = self.cur
+        text = ((c["text"] if c else "") + interim).strip()
+        raw = raw or (c["raw"] if c else None)
+        key = (text, raw)
+        if key == self._last_interim:
             return
+        self._last_interim = key
+        prof = self.session.speakers.peek(raw, epoch, self.name) if raw is not None else None
+        await self.session.emit({
+            "type": "interim", "stream": self.name, "text": text,
+            "speaker_key": prof.sid if prof else None,
+            "speaker_label": prof.label if prof else None,
+        })
 
-        spk = str(tok.get("speaker", "0"))
-        start = self.t0 + tok.get("start_ms", 0) / 1000
-        end = self.t0 + tok.get("end_ms", 0) / 1000
+    async def _add_final(self, tok: Dict[str, Any], epoch: int, conn_off: float):
+        text = tok.get("text", "")
+        spk = tok.get("speaker")
+        raw = str(spk) if spk not in (None, "") else None
+        start = conn_off + tok.get("start_ms", 0) / 1000
+        end = conn_off + tok.get("end_ms", 0) / 1000
 
         c = self.cur
-        if c and (c["raw_speaker"] != spk or start - (c["t"] + c["dur"]) > SEGMENT_GAP_S):
+        if c and (c["epoch"] != epoch or c["raw"] != raw or start - c["end"] > SEGMENT_GAP_S):
             await self._flush()
             c = None
-
         if c is None:
-            self.cur = c = {
-                "t": round(start, 2),
-                "dur": 0.0,
-                "raw_speaker": spk,
-                "text": ""
-            }
+            self.cur = c = {"epoch": epoch, "raw": raw, "start": start, "end": end, "text": ""}
         c["text"] += text
-        c["dur"] = round(max(c["dur"], end - c["t"]), 2)
+        c["end"] = max(c["end"], end)
+        if c["end"] - c["start"] >= MAX_SEGMENT_S and text.strip()[-1:] in (".", "?", "!", ",", ";"):
+            await self._flush()
 
     async def _flush(self):
-        c = self.cur
-        self.cur = None
+        c, self.cur = self.cur, None
         if not c or not c["text"].strip():
             return
-
-        clip_pcm = self.clip(c["t"], c["dur"])
+        t0 = self.meeting_t(c["start"])
         await self.session.on_segment_finalized(
-            t_start=c["t"],
-            t_end=c["t"] + c["dur"],
-            raw_speaker=c["raw_speaker"],
+            t_start=round(t0, 2),
+            t_end=round(t0 + max(0.0, c["end"] - c["start"]), 2),
+            raw_speaker=c["raw"],
             text=c["text"].strip(),
-            clip_pcm=clip_pcm
+            clip_pcm=self.clip(c["start"], c["end"]),
+            epoch=c["epoch"],
+            stream=self.name,
         )
 
     async def close(self):
+        if self.closed:
+            return
+        if self._idle_task:
+            self._idle_task.cancel()
+        await self._close_ws()
         self.closed = True
-        await self._flush()
-        if self.ws:
-            try:
-                await self.ws.close()
-            except Exception:
-                pass
+        self._set_state("closed")
 
 
 # ==============================================================================
 # MEETING SESSION (QUẢN LÝ CUỘC HỌP TOÀN DIỆN)
 # ==============================================================================
+def _public_segment(s: Dict[str, Any]) -> Dict[str, Any]:
+    keys = ("seq", "meeting_id", "t_start", "t_end", "speaker_key", "speaker_label", "speaker_id",
+            "text", "is_inferred", "raw_speaker", "confidence")
+    return {k: s.get(k) for k in keys}
+
+
 class MeetingSession:
-    def __init__(self, meeting_id: int, title: str, vocab: Optional[List[str]] = None,
-                 host_id: Optional[int] = None):
-        self.id = meeting_id
-        self.title = title
-        self.vocab = vocab or []
-        self.host_id = host_id
-        self.started_at = time.monotonic()
+    def __init__(self, meeting: Dict[str, Any], anchors: Optional[Dict[int, Dict[str, Any]]] = None,
+                 profiles: Optional[List[Dict[str, Any]]] = None,
+                 segments: Optional[List[Dict[str, Any]]] = None):
+        self.id = int(meeting["id"])
+        self.meeting = meeting
+        self.title = meeting.get("title", "")
+        self.vocab = meeting.get("vocab") or []
+        self.host_id = meeting.get("host_id")
+        self.started_at = float(meeting.get("started_at") or time.time())
         self.streams: Dict[str, MeetingStream] = {}
         self.subscribers: Set[asyncio.Queue] = set()
+        self.audio_owner: Optional[object] = None
+        self.disposed = False
+
+        segments = segments or []
+        self.speakers = voice.MeetingSpeakers(anchors=anchors or {}, expected_host_id=self.host_id)
+        self.speakers.load_state(profiles or [], segments)
         self.segments: List[Dict[str, Any]] = []
-        self.next_seg_idx = 1
-        self._inference_lock = asyncio.Lock()
+        self._by_seq: Dict[Any, Dict[str, Any]] = {}
+        backfill = []
+        for s in segments:
+            seg = _public_segment(s)
+            sid = self.speakers.sid_of(seg["seq"])
+            prof = self.speakers.profile(sid)
+            if prof is not None and (seg.get("speaker_key") != prof.sid or seg.get("speaker_label") != prof.label):
+                seg.update({"speaker_key": prof.sid, "speaker_label": prof.label, "speaker_id": prof.voice_id})
+                backfill.append({"seq": seg["seq"], "speaker_key": prof.sid,
+                                 "speaker_label": prof.label, "speaker_id": prof.voice_id})
+            self.segments.append(seg)
+            self._by_seq[seg["seq"]] = seg
+        self.next_seq = max([int(s["seq"]) for s in self.segments if s.get("seq") is not None] + [0]) + 1
+        self._epoch = max([int(s.get("epoch") or 0) for s in segments] + [-1]) + 1
+        self._pending_enroll: Dict[int, Dict[str, Any]] = {}
+        self._queue: asyncio.Queue = asyncio.Queue()
+        self._db_queue: asyncio.Queue = asyncio.Queue()
+        self._workers: List[asyncio.Task] = []
+        self.identity = identity.IdentityEngine(self)
+        self._backfill = backfill
+        self._restored_profiles = bool(profiles)
+        SESSIONS[self.id] = self
 
-        # Nạp danh sách Anchor voices đã lưu trong DB
+    # ------------------------------------------------------------ loading ---
+    @classmethod
+    def from_db(cls, meeting: Dict[str, Any]) -> "MeetingSession":
+        """Nạp toàn bộ trạng thái cuộc họp từ DB (chạy trong thread vì truy vấn mạng)."""
+        mid = int(meeting["id"])
         anchors = {}
-        first_vid = None
-        for v in db.list_voices():
-            full = db.get_voice(v["id"])
-            if full and full.get("embedding"):
-                try:
-                    vec = np.asarray(full["embedding"], dtype=np.float32)
-                    if first_vid is None:
-                        first_vid = v["id"]
-                    anchors[v["id"]] = {
-                        "name": v["name"],
-                        "vector": voice.unit(vec),
-                        "role": v.get("role", ""),
-                        "department": v.get("department", "")
-                    }
-                except Exception:
-                    pass
+        for v in db.list_voices(with_embedding=True):
+            emb = v.get("embedding")
+            if emb and voice.is_valid_vector(emb):
+                anchors[v["id"]] = {"name": v["name"], "vector": np.asarray(emb, dtype=np.float32),
+                                    "role": v.get("role", ""), "department": v.get("department", "")}
+        profiles = db.list_speakers(mid, with_vector=False)
+        db.backfill_segment_seq(mid)
+        segments = db.get_segments(mid, with_embedding=True)
+        return cls(meeting, anchors=anchors, profiles=profiles, segments=segments)
 
-        # Gán Host mặc định nếu chưa chọn (ví dụ Bùi Hồng Phúc)
-        if host_id is None and first_vid is not None:
-            host_id = first_vid
-        self.host_id = host_id
-        self.speakers = voice.MeetingSpeakers(anchors=anchors, expected_host_id=host_id)
-        LIVE_MEETINGS[meeting_id] = self
+    def _ensure_workers(self):
+        if self._workers or self.disposed:
+            return
+        self._workers = [asyncio.create_task(self._proc_loop()), asyncio.create_task(self._db_loop())]
+        if self._backfill:
+            self._db(db.update_segments_speaker_by_seqs, self.id, self._backfill)
+            self._backfill = []
+        if not self._restored_profiles and self.speakers.profiles:
+            self._db(db.upsert_speakers, self.id, self.speakers.export_profiles())
+            self._restored_profiles = True
 
     def clock(self) -> float:
-        return time.monotonic() - self.started_at
+        return time.time() - self.started_at
 
-    def set_host(self, host_id: int):
-        self.host_id = host_id
-        self.speakers.host_id = host_id
-        if host_id in self.speakers.anchors:
-            self.speakers.last_speaker_name = self.speakers.anchors[host_id]["name"]
-            self.speakers.last_speaker_id = host_id
-        log.info("meeting.live: Đã chuyển Host sang voice_id=%d (%s)",
-                 host_id, self.speakers.last_speaker_name)
+    def next_epoch(self) -> int:
+        e = self._epoch
+        self._epoch += 1
+        return e
 
-    async def add_stream(self, name: str, diarize: bool = True) -> MeetingStream:
-        stream = MeetingStream(name, self, diarize=diarize)
-        self.streams[name] = stream
-        await stream.open()
-        return stream
+    def is_live(self) -> bool:
+        return self.meeting.get("status") != "ended"
 
-    async def feed(self, pcm: bytes, stream_name: str = "mic"):
-        if stream_name in self.streams:
-            await self.streams[stream_name].feed(pcm)
+    def context_terms(self) -> List[str]:
+        names = [p.name for p in self.speakers.active_profiles() if p.name]
+        names += [a["name"] for a in self.speakers.anchors.values()]
+        names += [n for n in (self.meeting.get("expected_attendees") or []) if isinstance(n, str)]
+        seen, out = set(), []
+        for t in list(self.vocab) + names:
+            k = str(t).strip()
+            if k and k.casefold() not in seen:
+                seen.add(k.casefold())
+                out.append(k)
+        return out
 
+    # --------------------------------------------------------- pub / sub ---
     async def subscribe(self) -> asyncio.Queue:
-        q = asyncio.Queue()
+        q: asyncio.Queue = asyncio.Queue(maxsize=2000)
         self.subscribers.add(q)
+        self._ensure_workers()
         return q
 
     def unsubscribe(self, q: asyncio.Queue):
@@ -308,181 +512,378 @@ class MeetingSession:
         for q in list(self.subscribers):
             try:
                 q.put_nowait(event)
-            except Exception:
-                pass
+            except asyncio.QueueFull:
+                log.warning("meeting.live: hàng đợi sự kiện client đầy, bỏ qua sự kiện %s", event.get("type"))
 
-    async def on_segment_finalized(self, t_start: float, t_end: float, raw_speaker: str,
-                                   text: str, clip_pcm: bytes):
-        """Xử lý khi một câu vừa được chốt - SONG SONG PHI CHẶN (ZERO-LAG)."""
-        seg_idx = self.next_seg_idx
-        self.next_seg_idx += 1
+    def public_speakers(self) -> List[Dict[str, Any]]:
+        out = []
+        for p in self.speakers.visible_profiles():
+            d = p.to_dict(with_vector=False)
+            d["pending_enroll"] = p.sid in self._pending_enroll
+            out.append(d)
+        return out
 
-        # 1. Gán danh tính dự đoán tức thời (Host hoặc người nói gần nhất) để hiển thị không trễ
-        provisional_name = self.speakers.last_speaker_name or (
-            self.speakers.anchors[self.host_id]["name"] if (self.host_id and self.host_id in self.speakers.anchors) else "Người nói"
-        )
-        provisional_id = self.speakers.last_speaker_id or self.host_id
-
-        seg_rec = {
-            "id": seg_idx,
-            "meeting_id": self.id,
-            "t_start": t_start,
-            "t_end": t_end,
-            "speaker_id": provisional_id,
-            "speaker_label": provisional_name,
-            "text": text,
-            "confidence": 0.85,
-            "is_inferred": False
+    def snapshot(self) -> Dict[str, Any]:
+        return {
+            "type": "init",
+            "meeting": self.meeting,
+            "segments": self.segments,
+            "speakers": self.public_speakers(),
+            "suggestions": self.identity.pending_suggestions(),
+            "streams": {n: s.state for n, s in self.streams.items()},
+            "mic_active": self.audio_owner is not None,
         }
-        self.segments.append(seg_rec)
 
-        # 2. PHÁT NGAY LẬP TỨC CHO GIAO DIỆN (Zero Latency < 30ms)
-        await self.emit({
-            "type": "segment",
-            "segment": seg_rec
-        })
+    # ----------------------------------------------------------- workers ---
+    def _db(self, fn: Callable, *args, **kwargs):
+        """Ghi DB tuần tự theo thứ tự phát sinh (insert luôn trước update)."""
+        self._ensure_workers()
+        self._db_queue.put_nowait((fn, args, kwargs))
 
-        # 3. Chạy xử lý nhận diện CAM++ và lưu MongoDB song song trong thread pool
-        asyncio.create_task(self._async_process_voice_and_save(
-            seg_idx, t_start, t_end, raw_speaker, text, clip_pcm, seg_rec
-        ))
+    async def _db_loop(self):
+        while True:
+            fn, args, kwargs = await self._db_queue.get()
+            try:
+                await asyncio.to_thread(fn, *args, **kwargs)
+            except Exception as e:
+                log.warning("meeting.live: ghi DB lỗi (%s): %s", getattr(fn, "__name__", fn), e)
+            finally:
+                self._db_queue.task_done()
 
-        # 4. Kiểm tra Wake-Word
-        wake_res = llm.detect_wake_word(text)
-        if wake_res:
-            wake_word, command = wake_res
-            log.info("meeting.live: Bắt được wake-word '%s' với lệnh: '%s'", wake_word, command)
-            asyncio.create_task(self._handle_ai_activation(command, text))
+    async def _proc_loop(self):
+        while True:
+            item = await self._queue.get()
+            try:
+                await self._process(item)
+            except Exception:
+                log.exception("meeting.live: lỗi xử lý câu %s", item.get("seq"))
+            finally:
+                self._queue.task_done()
 
-    async def _async_process_voice_and_save(self, seg_idx: int, t_start: float, t_end: float,
-                                            raw_speaker: str, text: str, clip_pcm: bytes,
-                                            seg_rec: Dict[str, Any]):
-        """Xử lý tính vector giọng nói, gom cụm và lưu MongoDB ngầm song song."""
-        vector = None
-        voiced_time = 0.0
-        if clip_pcm:
-            voiced_time = voice.voiced_s(clip_pcm)
-            if voiced_time >= voice.MIN_SEG_S:
-                # Chạy CAM++ trên CPU worker thread để không chặn luồng chính
-                vector = await asyncio.to_thread(voice.embed, clip_pcm)
+    async def drain(self, timeout: float = 30.0):
+        """Chờ xử lý xong mọi câu và ghi xong DB."""
+        self._ensure_workers()
+        try:
+            await asyncio.wait_for(self._queue.join(), timeout)
+            await asyncio.wait_for(self._db_queue.join(), timeout)
+        except asyncio.TimeoutError:
+            log.warning("meeting.live: drain timeout cho session %d", self.id)
 
-        # Định danh lại qua MeetingSpeakers
-        changes = self.speakers.add(
-            key=seg_idx,
-            v=vector,
-            raw_label=raw_speaker,
-            t=t_start,
-            voiced=voiced_time,
-            text=text
-        )
-        assigned_name, assigned_id = changes.get(seg_idx, (seg_rec["speaker_label"], seg_rec["speaker_id"]))
+    # --------------------------------------------------------- segments ---
+    async def on_segment_finalized(self, t_start: float, t_end: float, raw_speaker: Optional[str], text: str,
+                                   clip_pcm: bytes = b"", epoch: int = 0, stream: str = "mic",
+                                   vector: Optional[np.ndarray] = None, voiced: Optional[float] = None) -> int:
+        """Một câu vừa được Soniox chốt: xếp hàng xử lý tuần tự (giữ đúng thứ tự câu)."""
+        seq = self.next_seq
+        self.next_seq += 1
+        self._ensure_workers()
+        await self._queue.put({"seq": seq, "t_start": t_start, "t_end": t_end, "raw": raw_speaker,
+                               "text": text, "clip": clip_pcm, "epoch": epoch, "stream": stream,
+                               "vector": vector, "voiced": voiced})
+        return seq
 
-        # Nếu nhận dạng giọng nói trả về danh tính chính xác hơn, cập nhật ngay lên UI
-        if assigned_name != seg_rec["speaker_label"] or assigned_id != seg_rec["speaker_id"]:
-            seg_rec["speaker_label"] = assigned_name
-            seg_rec["speaker_id"] = assigned_id
-            await self.emit({
-                "type": "segment_updated",
-                "segment_id": seg_idx,
-                "speaker_label": assigned_name,
-                "speaker_id": assigned_id
-            })
+    async def _process(self, it: Dict[str, Any]):
+        seq, clip, vector, voiced = it["seq"], it["clip"] or b"", it["vector"], it["voiced"]
+        if voiced is None:
+            voiced = voice.voiced_s(clip) if clip else 0.0
+        if vector is None and clip and voiced >= voice.MIN_SEG_S and voice.available():
+            vector = await asyncio.to_thread(voice.embed, clip)
+        changes = self.speakers.add(key=seq, v=vector, raw_label=it["raw"], t=it["t_start"], voiced=voiced,
+                                    text=it["text"], epoch=it["epoch"], dur=it["t_end"] - it["t_start"],
+                                    stream=it["stream"])
+        prof = self.speakers.profile(self.speakers.sid_of(seq))
+        seg = {
+            "seq": seq, "meeting_id": self.id, "t_start": it["t_start"], "t_end": it["t_end"],
+            "speaker_key": prof.sid, "speaker_label": prof.label, "speaker_id": prof.voice_id,
+            "text": it["text"], "is_inferred": prof.origin == "ai", "raw_speaker": it["raw"],
+            "confidence": round(float(prof.confidence or 0.0), 2),
+        }
+        self.segments.append(seg)
+        self._by_seq[seq] = seg
+        await self.emit({"type": "segment", "segment": seg})
+        self._db(db.add_segment, self.id, it["t_start"], it["t_end"], prof.label, it["text"],
+                 speaker_id=prof.voice_id, confidence=seg["confidence"], is_inferred=seg["is_inferred"],
+                 raw_embedding=vector.tolist() if vector is not None else None, seq=seq,
+                 speaker_key=prof.sid, raw_speaker=it["raw"], epoch=it["epoch"], stream=it["stream"],
+                 voiced=round(float(voiced), 2))
+        await self._apply_relabels([k for k in changes if k != seq])
+        await self._sync_speakers()
 
-        # Cập nhật các câu cũ nếu cụm được gộp
-        for old_k, (new_lbl, new_vid) in changes.items():
-            if old_k != seg_idx:
-                for s in self.segments:
-                    if s["id"] == old_k and s["speaker_label"] != new_lbl:
-                        s["speaker_label"] = new_lbl
-                        s["speaker_id"] = new_vid
-                        await self.emit({
-                            "type": "segment_updated",
-                            "segment_id": old_k,
-                            "speaker_label": new_lbl,
-                            "speaker_id": new_vid
-                        })
+        wake = llm.detect_wake_word(it["text"])
+        if wake:
+            log.info("meeting.live: bắt được wake-word '%s' với lệnh '%s'", *wake)
+            asyncio.create_task(self._handle_ai_activation(wake[1], it["text"]))
+        self.identity.notify(seg)
 
-        # Lưu vào MongoDB trong worker thread (không gây nghẽn kết nối mạng)
-        await asyncio.to_thread(
-            db.add_segment,
-            self.id,
-            t_start,
-            t_end,
-            assigned_name,
-            text,
-            assigned_id,
-            0.95 if assigned_id else 0.5,
-            False,
-            vector.tolist() if vector is not None else None
-        )
+    async def _apply_relabels(self, keys: List[Any], is_inferred: Optional[bool] = None) -> int:
+        items = []
+        for k in keys:
+            seg = self._by_seq.get(k)
+            sid = self.speakers.sid_of(k)
+            prof = self.speakers.profile(sid)
+            if seg is None or prof is None:
+                continue
+            inferred = prof.origin == "ai" if is_inferred is None else is_inferred
+            if (seg["speaker_key"], seg["speaker_label"], seg["speaker_id"], seg.get("is_inferred")) == \
+                    (prof.sid, prof.label, prof.voice_id, inferred):
+                continue
+            seg.update({"speaker_key": prof.sid, "speaker_label": prof.label, "speaker_id": prof.voice_id,
+                        "is_inferred": inferred})
+            items.append({"seq": k, "speaker_key": prof.sid, "speaker_label": prof.label,
+                          "speaker_id": prof.voice_id, "is_inferred": inferred})
+        if items:
+            await self.emit({"type": "segments_relabeled", "items": items})
+            self._db(db.update_segments_speaker_by_seqs, self.id, items)
+        return len(items)
 
-        # Kích hoạt suy luận danh tính nếu có nhãn chưa định danh
-        lbl_lower = assigned_name.lower()
-        if any(prefix in lbl_lower for prefix in ["người lạ", "người nói", "speaker", "unknown"]):
-            asyncio.create_task(self._check_unknown_speakers())
+    async def _sync_speakers(self):
+        dirty = self.speakers.pop_dirty()
+        merges = self.speakers.pop_merges()
+        for src, dst, auto in merges:
+            self._pending_enroll.pop(src, None)
+            await self.emit({"type": "speakers_merged", "source_sid": src, "target_sid": dst, "auto": auto})
+        if not dirty:
+            return
+        self._db(db.upsert_speakers, self.id, [p.to_dict(with_vector=True) for p in dirty])
+        await self.emit({"type": "speakers", "speakers": self.public_speakers()})
+        # Hồ sơ đã có tên, đang chờ đủ dữ liệu giọng để lưu mẫu
+        for p in dirty:
+            if p.sid in self._pending_enroll and p.active and p.weight >= MIN_ENROLL_S:
+                opts = self._pending_enroll.pop(p.sid)
+                asyncio.create_task(self.save_profile_voice(p.sid, **opts))
 
+    # ---------------------------------------------------- speaker actions ---
+    async def rename_speaker(self, sid: int, name: str, role: str = "", email: str = "",
+                             save_voice: bool = False, origin: str = "manual", confidence: float = 1.0,
+                             consent_by: str = "meeting_host_confirm") -> Dict[str, Any]:
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("Tên không được để trống")
+        before = self.speakers.profile(sid)
+        if before is None:
+            raise KeyError(f"Không tìm thấy người nói {sid}")
+        old_label = before.label
+        # Tên trùng một hồ sơ giọng đã lưu -> liên kết, trừ khi giọng khác hẳn (2 người trùng tên)
+        known = await asyncio.to_thread(db.get_voice_by_name, name)
+        voice_id = None
+        if known and self._voice_compatible(before, known):
+            voice_id = known["id"]
+        p, keys = self.speakers.rename(sid, name, voice_id=voice_id, role=role or (known or {}).get("role", ""),
+                                       origin=origin, confidence=confidence)
+        n = await self._apply_relabels(keys)
+        await self._sync_speakers()
+        voice_info = None
+        if save_voice:
+            voice_info = await self.save_profile_voice(p.sid, email=email, consent_by=consent_by)
+        await self.emit({"type": "speaker_renamed", "sid": p.sid, "old_label": old_label, "new_name": p.label,
+                         "origin": origin, "confidence": confidence, "voice_id": p.voice_id})
+        return {"success": True, "speaker": p.to_dict(with_vector=False), "updated_segments": n,
+                "old_label": old_label, "new_name": p.label, "voice_id": p.voice_id, "voice": voice_info}
+
+    async def save_profile_voice(self, sid: int, email: str = "", consent_by: str = "meeting_host_confirm") -> Dict[str, Any]:
+        """Lưu mẫu giọng của hồ sơ vào Voice Registry để các buổi sau tự nhận ra."""
+        p = self.speakers.profile(sid)
+        if p is None or not p.name:
+            return {"saved": False, "reason": "Người nói chưa có tên"}
+        vs, ws = self.speakers.vectors_of(p.sid)
+        have = float(sum(ws))
+        if not vs or have < MIN_ENROLL_S:
+            self._pending_enroll[p.sid] = {"email": email, "consent_by": consent_by}
+            self.speakers.dirty.add(p.sid)
+            await self._sync_speakers()
+            return {"saved": False, "pending": True, "have_s": round(have, 1), "need_s": MIN_ENROLL_S}
+        centroid = voice.merge_vectors(vs, ws)
+        known = await asyncio.to_thread(db.get_voice_by_name, p.name)
+        if known and not self._voice_compatible(p, known):
+            return {"saved": False, "conflict": True,
+                    "reason": f"Đã có hồ sơ giọng '{known['name']}' nhưng giọng nói khác hẳn - có thể là người trùng tên. "
+                              "Hãy đặt tên phân biệt (ví dụ thêm họ hoặc phòng ban) rồi lưu lại."}
+        vid = await asyncio.to_thread(db.save_voice, p.name, centroid.tolist(), p.role, "", email,
+                                      consent_by, True, len(vs), "merge")
+        full = await asyncio.to_thread(db.get_voice, vid)
+        p.voice_id = vid
+        self.speakers.dirty.add(p.sid)
+        anchor = {vid: {"name": p.name, "vector": np.asarray(full["embedding"], dtype=np.float32),
+                        "role": p.role, "department": ""}} if full and full.get("embedding") else {}
+        for s in list(SESSIONS.values()):
+            s.speakers.update_anchors(anchor, rebind=s is not self)
+        await self._apply_relabels(self.speakers.keys_of(p.sid))
+        await self._sync_speakers()
+        log.info("meeting.live: đã lưu mẫu giọng '%s' (voice_id=%s, %.1fs)", p.name, vid, have)
+        return {"saved": True, "voice_id": vid, "seconds": round(have, 1)}
+
+    async def merge_speakers(self, src_sid: int, dst_sid: int) -> Dict[str, Any]:
+        src, dst = self.speakers.profile(src_sid), self.speakers.profile(dst_sid)
+        if src is None or dst is None:
+            raise KeyError("Không tìm thấy người nói")
+        if src.sid == dst.sid:
+            return {"success": True, "moved": 0}
+        keys = self.speakers.merge(src.sid, dst.sid)
+        n = await self._apply_relabels(keys)
+        await self._sync_speakers()
+        return {"success": True, "moved": n, "target": dst.to_dict(with_vector=False)}
+
+    async def reassign_segment(self, seq: int, target_sid: Optional[int]) -> Dict[str, Any]:
+        if self._by_seq.get(seq) is None:
+            raise KeyError(f"Không tìm thấy câu {seq}")
+        dst, _ = self.speakers.reassign(seq, target_sid)
+        if dst is None:
+            raise KeyError("Không tìm thấy người nói đích")
+        await self._apply_relabels([seq])
+        await self._sync_speakers()
+        return {"success": True, "seq": seq, "speaker": dst.to_dict(with_vector=False)}
+
+    VOICE_CONFLICT_MAX = 0.30   # cosine dưới mức này với mẫu giọng trùng tên -> coi là người khác
+
+    def _voice_compatible(self, p: voice.SpeakerProfile, known: Dict[str, Any]) -> bool:
+        """Hồ sơ người nói có thể là cùng người với hồ sơ giọng `known` (trùng tên) hay không."""
+        if p.voice_id is not None and p.voice_id == known.get("id"):
+            return True
+        emb = known.get("embedding")
+        c = p.centroid()
+        if c is None or not emb or not voice.is_valid_vector(emb) or p.weight < 2.0:
+            return True   # chưa đủ dữ liệu để phản bác
+        return voice.cosine_sim(c, voice.unit(np.asarray(emb, dtype=np.float32))) >= self.VOICE_CONFLICT_MAX
+
+    def forget_voice(self, voice_id: int):
+        self.speakers.forget_voice(voice_id)
+
+    def set_host(self, host_id: int):
+        self.host_id = host_id
+        self.speakers.host_id = host_id
+        self.meeting["host_id"] = host_id
+
+    # ------------------------------------------------------------- audio ---
+    async def start_audio(self, owner: object, name: str = "mic", diarize: bool = True) -> MeetingStream:
+        stream = self.streams.get(name)
+        if stream is None or stream.closed:
+            stream = MeetingStream(name, self, diarize=diarize)
+            self.streams[name] = stream
+        await stream.ensure_open()
+        self.audio_owner = owner
+        return stream
+
+    async def stop_audio(self, owner: object, name: str = "mic"):
+        if self.audio_owner is not owner:
+            return
+        self.audio_owner = None
+        stream = self.streams.get(name)
+        if stream is not None:
+            await stream.pause()
+
+    async def feed(self, pcm: bytes, stream_name: str = "mic"):
+        if stream_name in self.streams:
+            await self.streams[stream_name].feed(pcm)
+
+    # ----------------------------------------------------------------- AI ---
     async def _handle_ai_activation(self, command: str, full_sentence: str):
         """Kích hoạt Thinking Engine khi gọi tên trợ lý."""
         prompt = command if len(command) > 5 else full_sentence
+        await self.emit({"type": "ai_activated", "wake_word": "Jarvis", "prompt": prompt})
 
-        await self.emit({
-            "type": "ai_activated",
-            "wake_word": "Jarvis",
-            "prompt": prompt
-        })
+        async def _thinking(thought: str):
+            await self.emit({"type": "ai_thinking", "text": thought})
 
-        async def _thinking_callback(thought: str):
-            await self.emit({
-                "type": "ai_thinking",
-                "text": thought
-            })
+        async def _tool(tool_info: Dict[str, Any]):
+            await self.emit({"type": "ai_tool_call", "tool": tool_info.get("tool"), "args": tool_info.get("args")})
 
-        async def _tool_callback(tool_info: Dict[str, Any]):
-            await self.emit({
-                "type": "ai_tool_call",
-                "tool": tool_info.get("tool"),
-                "args": tool_info.get("args")
-            })
+        try:
+            res = await llm.think_and_act(meeting_id=self.id, prompt=prompt, segments=self.segments,
+                                          on_thinking=_thinking, on_tool=_tool)
+            await self.emit({"type": "ai_response", "response": res})
+        except Exception as e:
+            log.warning("meeting.live: trợ lý AI lỗi: %s", e)
+            await self.emit({"type": "ai_error", "text": f"Trợ lý AI lỗi: {e}"})
 
-        res = await llm.think_and_act(
-            meeting_id=self.id,
-            prompt=prompt,
-            segments=self.segments,
-            on_thinking=_thinking_callback,
-            on_tool=_tool_callback
-        )
+    # --------------------------------------------------------- lifecycle ---
+    async def finish(self, generate_minutes: bool = True) -> Dict[str, Any]:
+        """Kết thúc cuộc họp: chốt chữ cuối, lưu trạng thái 'ended', lập biên bản ở chế độ nền."""
+        for s in list(self.streams.values()):
+            await s.close()
+        self.audio_owner = None
+        await self.drain()
+        await asyncio.to_thread(db.end_meeting, self.id)
+        fresh = await asyncio.to_thread(db.get_meeting, self.id)
+        if fresh:
+            self.meeting = fresh
+        else:
+            self.meeting["status"] = "ended"
+        has_minutes = any(a.get("kind") == "minutes" for a in await asyncio.to_thread(db.get_artifacts, self.id))
+        minutes_status = "pending" if (generate_minutes and self.segments and not has_minutes
+                                       and artifacts.llm_available()) else None
+        if minutes_status:
+            self.meeting["minutes_status"] = minutes_status
+            await asyncio.to_thread(db.update_meeting, self.id, {"minutes_status": "pending"}, True)
+        await self.emit({"type": "meeting_status", "status": "ended", "meeting": self.meeting,
+                         "minutes_status": minutes_status})
+        if minutes_status:
+            asyncio.create_task(self._finalize_minutes())
+        else:
+            self.dispose_if_idle()
+        return {"status": "ended", "minutes_status": minutes_status}
 
-        await self.emit({
-            "type": "ai_response",
-            "response": res
-        })
+    async def _finalize_minutes(self):
+        status = "failed"
+        try:
+            try:
+                await self.identity.run(force=True)
+            except Exception as e:
+                log.warning("meeting.live: đoán tên lần cuối lỗi: %s", e)
+            art = await artifacts.generate_meeting_minutes(self.id, self.segments, self.title,
+                                                           meeting=self.meeting, speakers=self.public_speakers())
+            status = "done"
+            await self.emit({"type": "artifact_created", "artifact": art})
+        except Exception as e:
+            log.warning("meeting.live: lập biên bản lỗi: %s", e)
+            await self.emit({"type": "error", "text": f"Không lập được biên bản tự động: {e}"})
+        finally:
+            self.meeting["minutes_status"] = status
+            await asyncio.to_thread(db.update_meeting, self.id, {"minutes_status": status}, True)
+            await self.emit({"type": "meeting_status", "status": "ended", "meeting": self.meeting,
+                             "minutes_status": status})
+            self.dispose_if_idle()
 
-    async def _check_unknown_speakers(self):
-        """Kiểm tra và suy luận người lạ trong buổi họp."""
-        async with self._inference_lock:
-            async def _on_renamed(payload: Dict[str, Any]):
-                # Cập nhật segments trong bộ nhớ
-                old_lbl = payload["old_label"]
-                new_nm = payload["new_name"]
-                for s in self.segments:
-                    if s.get("speaker_label") == old_lbl:
-                        s["speaker_label"] = new_nm
-                await self.emit(payload)
+    def dispose_if_idle(self):
+        if self.is_live() or self.subscribers or self.audio_owner is not None:
+            return
+        if self.meeting.get("minutes_status") == "pending":
+            return
+        if not self._queue.empty() or not self._db_queue.empty():
+            return
+        self.dispose()
 
-            async def _on_suggest(payload: Dict[str, Any]):
-                await self.emit(payload)
-
-            await identity.process_unknown_speakers(
-                meeting_id=self.id,
-                meeting_speakers=self.speakers,
-                segments=self.segments,
-                on_renamed=_on_renamed,
-                on_suggest=_on_suggest
-            )
+    def dispose(self):
+        self.disposed = True
+        for t in self._workers:
+            t.cancel()
+        self._workers = []
+        if SESSIONS.get(self.id) is self:
+            SESSIONS.pop(self.id, None)
+        log.info("meeting.live: giải phóng session %d", self.id)
 
     async def close(self):
+        """Dừng toàn bộ stream và giải phóng session (dùng khi xóa cuộc họp)."""
         for s in list(self.streams.values()):
             await s.close()
         self.streams.clear()
-        LIVE_MEETINGS.pop(self.id, None)
-        log.info("meeting.live: Đã đóng session %d", self.id)
+        self.dispose()
+
+
+async def get_session(mid: int, create: bool = True) -> Optional[MeetingSession]:
+    """Lấy session đang chạy hoặc nạp lại từ DB (an toàn khi nhiều kết nối mở cùng lúc)."""
+    s = SESSIONS.get(mid)
+    if s is not None and not s.disposed:
+        return s
+    if not create:
+        return None
+    lock = _session_locks.setdefault(mid, asyncio.Lock())
+    async with lock:
+        s = SESSIONS.get(mid)
+        if s is not None and not s.disposed:
+            return s
+        meeting = await asyncio.to_thread(db.get_meeting, mid)
+        if not meeting:
+            return None
+        s = await asyncio.to_thread(MeetingSession.from_db, meeting)
+        SESSIONS[mid] = s
+        return s

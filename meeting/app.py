@@ -1,61 +1,165 @@
 """FastAPI Server cho Meeting Assistant AI.
 
 Phục vụ:
-- REST API: Quản lý cuộc họp, đăng ký giọng nói, tra cứu MCP, xuất Artifacts
-- WebSocket /ws/meeting/{id}/audio: Nhận luồng âm thanh PCM16 từ mic máy tính
-- WebSocket /ws/meeting/{id}/events: Bắn sự kiện thời gian thực (transcript, wake-word,
+- REST API: Quản lý cuộc họp, hồ sơ người nói, đăng ký giọng nói, tra cứu MCP, xuất Artifacts
+- WebSocket /ws/meeting/{id}/audio: Nhận luồng âm thanh PCM16 16kHz từ mic máy tính
+- WebSocket /ws/meeting/{id}/events: Bắn sự kiện thời gian thực (transcript, hồ sơ người nói, wake-word,
   suy luận danh tính, thinking trace, sinh web/diagram, co-design chat duplex)
 """
 import asyncio
+import io
 import json
 import logging
 import os
-import time
+import wave
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
-
-from meeting import artifacts, db, identity, live, llm, mcp, voice
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s"
-)
+import numpy as np  # noqa: E402
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.responses import FileResponse  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
+
+from meeting import artifacts, db, live, llm, mcp, voice  # noqa: E402
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("meeting.app")
 
 HERE = Path(__file__).resolve().parent
+DEFAULT_VOCAB = ["UrBox", "Kubernetes", "PostgreSQL", "Redis", "webhook", "idempotent", "voucher",
+                 "merchant", "sprint", "DevOps", "latency", "schema", "microservices"]
 
-app = FastAPI(title="Meeting Assistant AI", version="2.0.0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    await asyncio.to_thread(db.init)
+    await asyncio.to_thread(mcp.seed_mock_data)
+    voice.ensure_model_async()
+    log.info("meeting.app: Server khởi động hoàn tất")
+    yield
+    for s in list(live.SESSIONS.values()):
+        try:
+            for st in list(s.streams.values()):
+                await st.close()
+            await s.drain(timeout=5)
+            s.dispose()
+        except Exception as e:
+            log.warning("meeting.app: đóng session %s lỗi: %s", s.id, e)
 
+
+app = FastAPI(title="Meeting Assistant AI", version="3.0.0", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.mount("/static", StaticFiles(directory=str(HERE.parent / "static")), name="static")
 
 
-@app.on_event("startup")
-async def on_startup():
-    db.init()
-    mcp.seed_mock_data()
-    voice.ensure_model_async()
-    log.info("meeting.app: Server khởi động hoàn tất")
+# ==============================================================================
+# REQUEST MODELS
+# ==============================================================================
+class MeetingCreate(BaseModel):
+    title: str = "Cuộc họp nội bộ"
+    description: str = ""
+    meeting_type: str = "Technical Review"
+    host_id: Optional[int] = None
+    agenda: List[str] = Field(default_factory=list)
+    expected_attendees: List[str] = Field(default_factory=list)
+    vocab: Optional[List[str]] = None
+    source: str = "mic"
 
 
+class RenameReq(BaseModel):
+    name: str
+    role: str = ""
+    email: str = ""
+    save_voice: bool = False
+
+
+class MergeReq(BaseModel):
+    target_sid: int
+
+
+class ReassignReq(BaseModel):
+    target_sid: Optional[int] = None  # None = tạo người nói mới cho câu này
+
+
+class AcceptReq(BaseModel):
+    save_voice: bool = False
+    name: Optional[str] = None
+
+
+class VoiceUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    department: Optional[str] = None
+    email: Optional[str] = None
+
+
+# ==============================================================================
+# HELPERS
+# ==============================================================================
+async def _session_or_404(mid: int) -> live.MeetingSession:
+    s = await live.get_session(mid)
+    if s is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc họp")
+    return s
+
+
+async def _finish_op(s: live.MeetingSession):
+    """Sau thao tác REST: chờ ghi DB xong rồi giải phóng session nếu cuộc họp đã kết thúc."""
+    await s.drain()
+    s.dispose_if_idle()
+
+
+def _suggestion_from_inference(inf: Dict[str, Any]) -> Dict[str, Any]:
+    return {"type": "identity_suggestion", "inference_id": inf["id"], "sid": inf.get("speaker_key"),
+            "label": inf.get("unknown_label"), "suggested_name": inf.get("predicted_name"),
+            "role": inf.get("predicted_role", ""), "confidence": inf.get("confidence", 0),
+            "reasoning": inf.get("reasoning", ""), "evidence": inf.get("evidence", []), "conflict": False}
+
+
+def _decode_audio(raw: bytes) -> bytes:
+    """Nhận PCM16 16kHz mono thô hoặc file WAV (tự chuyển về 16kHz mono)."""
+    if not raw.startswith(b"RIFF"):
+        return raw
+    try:
+        with wave.open(io.BytesIO(raw), "rb") as w:
+            if w.getsampwidth() != 2:
+                raise HTTPException(status_code=400, detail="Chỉ hỗ trợ WAV 16-bit PCM")
+            rate, ch = w.getframerate(), w.getnchannels()
+            x = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="File WAV không hợp lệ")
+    if ch > 1:
+        x = x.reshape(-1, ch).mean(axis=1)
+    if rate != voice.RATE and len(x) > 1:
+        n = int(len(x) * voice.RATE / rate)
+        x = np.interp(np.linspace(0, len(x) - 1, n), np.arange(len(x)), x)
+    return np.clip(x, -32768, 32767).astype(np.int16).tobytes()
+
+
+def _anchor_for(vid: int) -> Dict[int, Dict[str, Any]]:
+    full = db.get_voice(vid)
+    if not full or not full.get("embedding") or not voice.is_valid_vector(full["embedding"]):
+        return {}
+    return {vid: {"name": full["name"], "vector": np.asarray(full["embedding"], dtype=np.float32),
+                  "role": full.get("role", ""), "department": full.get("department", "")}}
+
+
+# ==============================================================================
+# PAGES & HEALTH
+# ==============================================================================
 @app.get("/")
 def index():
-    return FileResponse(HERE / "index.html")
+    # no-cache: trình duyệt luôn kiểm tra lại để nhận ngay bản giao diện mới sau khi cập nhật
+    return FileResponse(HERE / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/vesper")
@@ -66,38 +170,37 @@ def vesper():
 @app.get("/api/health")
 def health():
     db_st = db.get_status()
-    campp_diag = voice.get_diagnostics()
     soniox_key = bool(os.getenv("SONIOX_API_KEY"))
-    claude_key = bool(os.getenv("ANTHROPIC_API_KEY"))
-    gemini_key = bool(os.getenv("GEMINI_API_KEY"))
-    voices_cnt = len(db.list_voices())
-
     return {
         "status": "ok",
-        "campp": campp_diag,
-        "soniox": {
-            "status": "Sẵn sàng kết nối" if soniox_key else "Chưa cấu hình API Key",
-            "ready": soniox_key,
-            "model": "stt-rt-v5"
-        },
-        "mongodb": {
-            "status": f"Đã kết nối ({db_st['database']})" if not db_st["is_mock"] else "In-Memory Mock",
-            "ready": True,
-            "database": db_st["database"],
-            "is_mock": db_st["is_mock"]
-        },
-        "llm": {
-            "provider": llm.PROVIDER,
-            "claude_ready": claude_key,
-            "gemini_ready": gemini_key,
-            "status": f"{llm.PROVIDER.capitalize()} sẵn sàng"
-        },
-        "voices_count": voices_cnt
+        "campp": voice.get_diagnostics(),
+        "soniox": {"status": "Đã cấu hình API key" if soniox_key else "Chưa cấu hình SONIOX_API_KEY",
+                   "ready": soniox_key, "model": live.MeetingStream.MODEL},
+        "mongodb": {"status": "In-Memory (dữ liệu mất khi tắt server)" if db_st["is_mock"]
+                    else f"Đã kết nối ({db_st['database']})",
+                    "ready": True, "database": db_st["database"], "is_mock": db_st["is_mock"]},
+        "llm": {"provider": llm.PROVIDER, "ready": artifacts.llm_available(),
+                "claude_ready": bool(os.getenv("ANTHROPIC_API_KEY")),
+                "gemini_ready": bool(os.getenv("GEMINI_API_KEY"))},
+        "auto_enroll_voices": live.AUTO_ENROLL_AI,
+        "voices_count": len(db.list_voices()),
+        "live_sessions": len(live.SESSIONS),
     }
 
 
+@app.get("/api/stats")
+def stats():
+    return db.get_stats()
+
+
+@app.get("/api/directory")
+def directory():
+    """Danh bạ nhân sự (Mock MCP) để chọn nhanh khi đặt tên người nói."""
+    return {"employees": mcp.call_tool("query_employee_directory", {"query": ""}).get("employees", [])}
+
+
 # ==============================================================================
-# VOICES API (QUẢN LÝ & TỰ THU MẪU SINH TRẮC HỌC GIỌNG NÓI)
+# VOICES API (QUẢN LÝ & THU MẪU SINH TRẮC HỌC GIỌNG NÓI)
 # ==============================================================================
 @app.get("/api/voices")
 def get_voices():
@@ -105,328 +208,162 @@ def get_voices():
 
 
 @app.post("/api/voices/enroll-audio")
-async def enroll_voice_audio(name: str = Form(...), role: str = Form(""),
-                             department: str = Form(""), email: str = Form(""),
-                             audio: UploadFile = File(...)):
-    """API tự thu mẫu giọng nói trực tiếp từ microphone của người dùng."""
-    if not name.strip():
+async def enroll_voice_audio(name: str = Form(...), role: str = Form(""), department: str = Form(""),
+                             email: str = Form(""), audio: UploadFile = File(...)):
+    """Thu mẫu giọng trực tiếp từ microphone (Voice Studio) - người được thu tự đồng ý."""
+    name = name.strip()
+    if not name:
         raise HTTPException(status_code=400, detail="Vui lòng nhập họ và tên")
-
-    raw_data = await audio.read()
-    if not raw_data:
+    pcm = _decode_audio(await audio.read())
+    if not pcm:
         raise HTTPException(status_code=400, detail="Dữ liệu âm thanh trống")
-
-    # Nếu gửi lên dạng WAV có header RIFF, bỏ qua header 44 bytes để lấy PCM thô
-    pcm = raw_data
-    if pcm.startswith(b"RIFF") and len(pcm) > 44:
-        pcm = pcm[44:]
-
     v_sec = voice.voiced_s(pcm)
-    if v_sec < 2.0:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Mẫu giọng quá ngắn (chỉ có {v_sec:.1f}s tiếng nói thực, cần ít nhất 2.5s). Vui lòng đọc to và rõ ràng hơn."
-        )
-
-    vec = voice.embed(pcm, min_voiced=2.0)
+    if v_sec < voice.MIN_ANCHOR_S:
+        raise HTTPException(status_code=400, detail=(
+            f"Mẫu giọng quá ngắn: chỉ có {v_sec:.1f}s tiếng nói rõ, cần ít nhất {voice.MIN_ANCHOR_S:.0f}s. "
+            "Hãy đọc to, rõ và gần micro hơn."))
+    vec = await asyncio.to_thread(voice.embed, pcm, voice.MIN_ANCHOR_S)
     if vec is None:
         raise HTTPException(status_code=400, detail="Không trích xuất được vector đặc trưng giọng nói")
-
-    vid = db.save_voice(
-        name=name.strip(),
-        embedding=vec.tolist(),
-        role=role.strip() or "Thành viên",
-        department=department.strip(),
-        email=email.strip(),
-        consent_by="self_enrolled_mic",
-        auto_learned=False
-    )
-
-    # Cập nhật anchor ngay lập tức cho các cuộc họp đang chạy
-    for ls in live.LIVE_MEETINGS.values():
-        ls.speakers.update_anchors({
-            vid: {
-                "name": name.strip(),
-                "vector": vec,
-                "role": role.strip(),
-                "department": department.strip()
-            }
-        })
-
-    log.info("meeting.app: Đã tự thu và lưu mẫu giọng cho '%s' (ID: %d, %0.1fs tiếng nói)", name, vid, v_sec)
-    return {
-        "success": True,
-        "voice_id": vid,
-        "name": name.strip(),
-        "role": role.strip(),
-        "voiced_seconds": round(v_sec, 2),
-        "dimension": 192
-    }
+    vid = await asyncio.to_thread(db.save_voice, name, vec.tolist(), role.strip() or "Thành viên",
+                                  department.strip(), email.strip(), "self_enrolled_mic", False, 1, "replace")
+    anchor = await asyncio.to_thread(_anchor_for, vid)
+    for s in list(live.SESSIONS.values()):
+        s.speakers.update_anchors(anchor, rebind=True)
+        await s._sync_speakers()
+    log.info("meeting.app: đã thu mẫu giọng cho '%s' (ID %d, %.1fs tiếng nói)", name, vid, v_sec)
+    return {"success": True, "voice_id": vid, "name": name, "role": role.strip(),
+            "voiced_seconds": round(v_sec, 2), "dimension": voice.DIM}
 
 
 @app.post("/api/voices")
-async def register_voice(name: str = Form(...), role: str = Form(""),
-                         department: str = Form(""), email: str = Form(""),
-                         audio: Optional[UploadFile] = File(None)):
+async def register_voice(name: str = Form(...), role: str = Form(""), department: str = Form(""),
+                         email: str = Form(""), audio: Optional[UploadFile] = File(None)):
     if not name.strip():
         raise HTTPException(status_code=400, detail="Tên không được để trống")
-
     embedding = None
-    if audio:
-        raw_pcm = await audio.read()
-        if raw_pcm.startswith(b"RIFF") and len(raw_pcm) > 44:
-            raw_pcm = raw_pcm[44:]
-        if len(raw_pcm) >= 16000 * 2 * voice.MIN_ANCHOR_S:
-            vec = voice.embed(raw_pcm, min_voiced=voice.MIN_ANCHOR_S)
-            if vec is not None:
-                embedding = vec.tolist()
+    if audio is not None:
+        pcm = _decode_audio(await audio.read())
+        vec = await asyncio.to_thread(voice.embed, pcm, voice.MIN_ANCHOR_S) if pcm else None
+        if vec is not None:
+            embedding = vec.tolist()
+    vid = await asyncio.to_thread(db.save_voice, name.strip(), embedding, role.strip(), department.strip(),
+                                  email.strip(), "admin", False, 1, "replace" if embedding else "merge")
+    return {"success": True, "id": vid, "name": name.strip(), "has_embedding": embedding is not None}
 
-    if embedding is None:
-        # Nếu chưa có audio mẫu, tạo vector dummy khởi tạo
-        embedding = [0.0] * 192
 
-    vid = db.save_voice(
-        name=name.strip(),
-        embedding=embedding,
-        role=role.strip(),
-        department=department.strip(),
-        email=email.strip(),
-        consent_by="admin@urbox.vn",
-        auto_learned=False
-    )
-    return {"success": True, "id": vid, "name": name}
+@app.patch("/api/voices/{vid}")
+async def edit_voice(vid: int, req: VoiceUpdate):
+    fields = {k: v for k, v in req.model_dump().items() if v is not None}
+    if "name" in fields and not fields["name"].strip():
+        raise HTTPException(status_code=400, detail="Tên không được để trống")
+    ok = await asyncio.to_thread(db.update_voice, vid, fields)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ giọng nói")
+    anchor = await asyncio.to_thread(_anchor_for, vid)
+    for s in list(live.SESSIONS.values()):
+        s.speakers.update_anchors(anchor, rebind=False)
+    v = await asyncio.to_thread(db.get_voice, vid) or {}
+    v.pop("embedding", None)
+    return {"success": True, "voice": v}
 
 
 @app.delete("/api/voices/{vid}")
-def remove_voice(vid: int):
-    ok = db.delete_voice(vid)
+async def remove_voice(vid: int):
+    ok = await asyncio.to_thread(db.delete_voice, vid)
+    for s in list(live.SESSIONS.values()):
+        s.forget_voice(vid)
+        await s._sync_speakers()
     return {"success": ok}
 
 
 # ==============================================================================
-# MEETINGS API (QUẢN LÝ CUỘC HỌP & LỊCH SỬ)
+# MEETINGS API
 # ==============================================================================
 @app.get("/api/meetings")
 def get_meetings():
     return {"meetings": db.list_meetings_with_stats()}
 
 
-@app.get("/api/dashboard/stats")
-def get_dashboard_stats():
-    """Tính toán toàn bộ số liệu thống kê thực tế từ MongoDB Atlas cho Dashboard."""
-    db_obj = db._get_db()
-
-    # 1. Total meetings & duration
-    meetings = list(db_obj["meetings"].find())
-    meetings_count = len(meetings)
-    ended_meetings = [m for m in meetings if m.get("status") == "ended" and m.get("started_at") and m.get("ended_at")]
-    if ended_meetings:
-        avg_dur_min = max(5, int(sum(m["ended_at"] - m["started_at"] for m in ended_meetings) / (len(ended_meetings) * 60)))
-    else:
-        avg_dur_min = 38
-
-    # 2. Segments & Speaking Distribution
-    all_segs = list(db_obj["meeting_segments"].find())
-    total_utterances = len(all_segs)
-
-    recent_segs = all_segs[-50:] if all_segs else []
-    speaker_counts: Dict[str, int] = {}
-    for s in recent_segs:
-        spk = s.get("speaker_label", "Unknown")
-        speaker_counts[spk] = speaker_counts.get(spk, 0) + 1
-
-    total_recent = sum(speaker_counts.values()) or 1
-    speakers_dist = []
-    color_classes = ["from-emerald-500 to-lime-400", "bg-lime-400", "bg-teal-400", "bg-purple-400", "bg-indigo-400"]
-    for i, (spk, cnt) in enumerate(sorted(speaker_counts.items(), key=lambda kv: kv[1], reverse=True)[:3]):
-        pct = round((cnt / total_recent) * 100)
-        speakers_dist.append({
-            "name": spk,
-            "pct": pct,
-            "count": cnt,
-            "bar_class": color_classes[i % len(color_classes)]
-        })
-    if not speakers_dist:
-        speakers_dist = [
-            {"name": "Bùi Hồng Phúc (Host)", "pct": 65, "count": 7, "bar_class": "from-emerald-500 to-lime-400"},
-            {"name": "Lê Văn Tuấn (DevOps)", "pct": 25, "count": 2, "bar_class": "bg-lime-400"},
-            {"name": "Đỗ Minh Quân (Backend)", "pct": 10, "count": 1, "bar_class": "bg-teal-400"}
-        ]
-
-    # 3. Voices & Biometrics
-    voices = list(db_obj["voices"].find())
-    voices_count = len(voices)
-    inferences = list(db_obj["identity_inferences"].find())
-    confidences = [inf["confidence"] for inf in inferences if inf.get("confidence")]
-    if confidences:
-        precision_pct = round(sum(confidences) / len(confidences) * 100, 1)
-    else:
-        precision_pct = 98.0
-
-    # 4. Jira Sprint 38 Decisions
-    jira_res = mcp.call_tool("query_jira_issues", {})
-    issues = jira_res.get("issues", [])
-    total_tasks = len(issues) or 6
-    done_count = sum(1 for it in issues if it.get("status") in ("Done", "Completed"))
-    review_count = sum(1 for it in issues if it.get("status") in ("In Review", "Review"))
-    prog_count = sum(1 for it in issues if it.get("status") in ("In Progress", "Progress"))
-
-    pct_done = round((done_count / total_tasks) * 100) if total_tasks else 0
-    pct_review = round(((review_count + prog_count) / total_tasks) * 100) if total_tasks else 65
-    pct_todo = max(0, 100 - pct_done - pct_review)
-
-    # 5. Words In / Out (Deep Synthesis Ratio)
-    total_words_in = sum(len(s.get("text", "").split()) for s in all_segs)
-    if total_words_in == 0:
-        total_words_in = 1580
-
-    artifacts = list(db_obj["ai_artifacts"].find())
-    total_words_out = sum(len(a.get("content", "").split()) for a in artifacts if a.get("kind") == "minutes")
-    if total_words_out == 0:
-        total_words_out = 420
-
-    synthesis_ratio = min(95, max(60, round((1.0 - (total_words_out / max(1, total_words_in))) * 100)))
-
-    # 6. Meeting Health & Intelligence Index
-    speaker_diversity = min(1.0, len(speaker_counts) / 3.0)
-    health_score = int(72 + (speaker_diversity * 16) + (10 if precision_pct >= 90 else 0))
-    health_label = "Strong" if health_score >= 80 else "Good"
-
-    intel_index = min(96, int((precision_pct * 0.4) + (synthesis_ratio * 0.3) + 22))
-
-    # Last 2 real segments for mini preview
-    last_two_segs = []
-    for s in recent_segs[-2:]:
-        last_two_segs.append({
-            "speaker": s.get("speaker_label", "Người nói"),
-            "time": s.get("t_start", 0),
-            "text": s.get("text", "")
-        })
-
-    return {
-        "total_utterances": total_utterances or 72,
-        "speakers_distribution": speakers_dist,
-        "voices_count": voices_count,
-        "meetings_count": meetings_count,
-        "precision_pct": precision_pct,
-        "total_tasks": total_tasks,
-        "tasks_done_pct": pct_done,
-        "tasks_review_pct": pct_review,
-        "tasks_todo_pct": pct_todo,
-        "avg_duration_min": avg_dur_min,
-        "health_score": health_score,
-        "health_label": health_label,
-        "engagement_pct": min(95, int(65 + (speaker_diversity * 25))),
-        "words_in": total_words_in,
-        "words_out": total_words_out,
-        "synthesis_ratio": synthesis_ratio,
-        "intelligence_index": intel_index,
-        "recent_segments": last_two_segs
-    }
-
-
 @app.post("/api/meetings")
-def create_meeting(payload: Dict[str, Any]):
-    title = payload.get("title", "Cuộc họp kỹ thuật").strip()
-    desc = payload.get("description", "").strip()
-    meeting_type = payload.get("meeting_type", "Technical Review").strip()
-    host_id = payload.get("host_id")
-    agenda = payload.get("agenda") or []
-    expected_attendees = payload.get("expected_attendees") or []
-    vocab = payload.get("vocab") or [
-        "UrBox", "Kubernetes", "PostgreSQL", "Redis", "webhook", "idempotent",
-        "voucher", "merchant", "sprint", "DevOps", "latency", "schema", "microservices"
-    ]
-    source = payload.get("source", "mic")
+def create_meeting(req: MeetingCreate):
+    title = req.title.strip() or "Cuộc họp nội bộ"
     mid = db.create_meeting(
         title=title,
-        description=desc,
-        host_id=host_id,
-        meeting_type=meeting_type,
-        agenda=agenda,
-        expected_attendees=expected_attendees,
-        vocab=vocab,
-        source=source
+        description=req.description.strip(),
+        host_id=req.host_id,
+        meeting_type=req.meeting_type.strip(),
+        agenda=[a.strip() for a in req.agenda if a and a.strip()],
+        expected_attendees=[a.strip() for a in req.expected_attendees if a and a.strip()],
+        vocab=req.vocab if req.vocab else DEFAULT_VOCAB,
+        source=req.source,
     )
     return {"success": True, "meeting_id": mid, "title": title}
 
 
 @app.get("/api/meetings/{mid}")
-def get_meeting_details(mid: int):
-    m = db.get_meeting(mid)
+async def get_meeting_details(mid: int):
+    m = await asyncio.to_thread(db.get_meeting, mid)
     if not m:
         raise HTTPException(status_code=404, detail="Không tìm thấy cuộc họp")
-    segs = db.get_segments(mid)
-    arts = db.get_artifacts(mid)
-    inferences = db.get_inferences(mid)
-
-    # Thống kê thời lượng và số câu theo từng người nói
-    total_time = sum(max(0.1, s.get("t_end", 0) - s.get("t_start", 0)) for s in segs)
-    speaker_stats: Dict[str, Dict[str, Any]] = {}
-    for s in segs:
-        spk = s.get("speaker_label", "Unknown")
-        dur = max(0.1, s.get("t_end", 0) - s.get("t_start", 0))
-        if spk not in speaker_stats:
-            speaker_stats[spk] = {"name": spk, "dur": 0.0, "count": 0, "pct": 0.0}
-        speaker_stats[spk]["dur"] += dur
-        speaker_stats[spk]["count"] += 1
-
-    if total_time > 0:
-        for st in speaker_stats.values():
-            st["pct"] = round((st["dur"] / total_time) * 100, 1)
-
+    s = live.SESSIONS.get(mid)
+    if s is None and m.get("status") != "ended":
+        s = await live.get_session(mid)
+    if s is None:
+        speakers = [d for d in await asyncio.to_thread(db.list_speakers, mid)
+                    if d.get("merged_into") is None and (d.get("n_segments") or 0) > 0]
+        segs = await asyncio.to_thread(db.get_segments, mid)
+        if segs and (not speakers or any(x.get("speaker_key") is None for x in segs)):
+            s = await live.get_session(mid)  # dữ liệu cũ: dựng hồ sơ người nói từ nhãn rồi lưu lại
+    if s is not None:
+        await s.drain()
+        segs, speakers = s.segments, s.public_speakers()
+        suggestions = s.identity.pending_suggestions()
+        s.dispose_if_idle()
+    else:
+        suggestions = [_suggestion_from_inference(i) for i in await asyncio.to_thread(db.get_inferences, mid, "pending")]
     return {
         "meeting": m,
         "segments": segs,
-        "artifacts": arts,
-        "inferences": inferences,
-        "speaker_stats": list(speaker_stats.values()),
-        "total_speaking_time": round(total_time, 1)
+        "speakers": speakers,
+        "suggestions": suggestions,
+        "artifacts": await asyncio.to_thread(db.get_artifacts, mid),
     }
 
 
 @app.put("/api/meetings/{mid}")
 def update_meeting_details(mid: int, payload: Dict[str, Any]):
+    if not db.get_meeting(mid):
+        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc họp")
     ok = db.update_meeting(mid, payload)
+    s = live.SESSIONS.get(mid)
+    if s is not None and ok:
+        s.meeting.update({k: v for k, v in payload.items() if k in db.MEETING_EDITABLE})
+        s.title = s.meeting.get("title", s.title)
     return {"success": ok}
 
 
 @app.delete("/api/meetings/{mid}")
-def delete_meeting_record(mid: int):
-    ls = live.LIVE_MEETINGS.get(mid)
-    if ls:
-        live.LIVE_MEETINGS.pop(mid, None)
-    ok = db.delete_meeting(mid)
-    return {"success": ok}
+async def delete_meeting_record(mid: int):
+    s = live.SESSIONS.get(mid)
+    if s is not None:
+        await s.close()
+    return {"success": await asyncio.to_thread(db.delete_meeting, mid)}
 
 
 @app.post("/api/meetings/{mid}/archive")
 async def archive_meeting(mid: int):
-    """Kết thúc và tự động tổng hợp biên bản lưu trữ cuộc họp."""
-    ls = live.LIVE_MEETINGS.get(mid)
-    if ls:
-        await ls.close()
-    db.end_meeting(mid)
-
-    # Tự động lập biên bản nếu chưa có
-    segs = db.get_segments(mid)
-    arts = db.get_artifacts(mid)
-    has_minutes = any(a.get("kind") == "minutes" for a in arts)
-    if not has_minutes and len(segs) > 0:
-        m = db.get_meeting(mid)
-        title = m.get("title", "Cuộc họp") if m else "Cuộc họp"
-        await artifacts.generate_meeting_minutes(mid, segs, title)
-
-    return {"success": True, "meeting_id": mid, "status": "ended"}
+    """Kết thúc cuộc họp và lập biên bản ở chế độ nền (sự kiện artifact_created khi xong)."""
+    s = await _session_or_404(mid)
+    res = await s.finish(generate_minutes=True)
+    return {"success": True, "meeting_id": mid, **res}
 
 
 @app.post("/api/meetings/{mid}/end")
 async def end_meeting(mid: int):
-    ls = live.LIVE_MEETINGS.get(mid)
-    if ls:
-        await ls.close()
-    db.end_meeting(mid)
-    return {"success": True, "meeting_id": mid}
+    s = await _session_or_404(mid)
+    res = await s.finish(generate_minutes=False)
+    return {"success": True, "meeting_id": mid, **res}
 
 
 @app.post("/api/meetings/{mid}/set-host")
@@ -434,67 +371,120 @@ def set_meeting_host(mid: int, payload: Dict[str, Any]):
     host_id = payload.get("host_id")
     if not host_id:
         raise HTTPException(status_code=400, detail="Thiếu host_id")
-    ls = live.LIVE_MEETINGS.get(mid)
-    if ls:
-        ls.set_host(int(host_id))
+    db.update_meeting(mid, {"host_id": int(host_id)})
+    s = live.SESSIONS.get(mid)
+    if s is not None:
+        s.set_host(int(host_id))
     return {"success": True, "host_id": host_id}
 
 
 # ==============================================================================
-# STRANGER CONFIRMATION & RETROACTIVE RENAMING
+# SPEAKERS: ĐỔI TÊN, GỘP, SỬA NGƯỜI NÓI CỦA TỪNG CÂU, LƯU GIỌNG
 # ==============================================================================
-@app.post("/api/meetings/{mid}/confirm-identity")
-async def confirm_identity(mid: int, payload: Dict[str, Any]):
-    """Người dùng bấm xác nhận hoặc sửa tên người lạ trên Web UI."""
-    unknown_label = payload.get("unknown_label")
-    confirmed_name = payload.get("confirmed_name")
-    role = payload.get("role", "")
-    email = payload.get("email", "")
+@app.get("/api/meetings/{mid}/speakers")
+async def list_meeting_speakers(mid: int):
+    s = await _session_or_404(mid)
+    out = s.public_speakers()
+    s.dispose_if_idle()
+    return {"speakers": out}
 
-    if not unknown_label or not confirmed_name:
-        raise HTTPException(status_code=400, detail="Thiếu unknown_label hoặc confirmed_name")
 
-    ls = live.LIVE_MEETINGS.get(mid)
-    res = await identity.confirm_speaker_identity(
-        meeting_id=mid,
-        unknown_label=unknown_label,
-        confirmed_name=confirmed_name,
-        meeting_speakers=ls.speakers if ls else None,
-        role=role,
-        email=email
-    )
-
-    if ls:
-        for s in ls.segments:
-            if s.get("speaker_label") == unknown_label:
-                s["speaker_label"] = confirmed_name
-                if res.get("voice_id"):
-                    s["speaker_id"] = res["voice_id"]
-
-        await ls.emit({
-            "type": "speaker_renamed",
-            "meeting_id": mid,
-            "old_label": unknown_label,
-            "new_name": confirmed_name,
-            "role": role,
-            "confidence": 1.0,
-            "reasoning": "Người dùng đã xác nhận hoặc sửa tay",
-            "voice_id": res.get("voice_id")
-        })
-
+@app.post("/api/meetings/{mid}/speakers/{sid}/rename")
+async def rename_meeting_speaker(mid: int, sid: int, req: RenameReq):
+    s = await _session_or_404(mid)
+    try:
+        res = await s.rename_speaker(sid, req.name, role=req.role, email=req.email, save_voice=req.save_voice)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await _finish_op(s)
     return res
 
 
+@app.post("/api/meetings/{mid}/speakers/{sid}/merge")
+async def merge_meeting_speaker(mid: int, sid: int, req: MergeReq):
+    s = await _session_or_404(mid)
+    try:
+        res = await s.merge_speakers(sid, req.target_sid)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    await _finish_op(s)
+    return res
+
+
+@app.post("/api/meetings/{mid}/speakers/{sid}/save-voice")
+async def save_speaker_voice(mid: int, sid: int):
+    s = await _session_or_404(mid)
+    res = await s.save_profile_voice(sid)
+    await _finish_op(s)
+    return res
+
+
+@app.post("/api/meetings/{mid}/segments/{seq}/speaker")
+async def reassign_meeting_segment(mid: int, seq: int, req: ReassignReq):
+    s = await _session_or_404(mid)
+    try:
+        res = await s.reassign_segment(seq, req.target_sid)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    await _finish_op(s)
+    return res
+
+
+# ==============================================================================
+# SUY LUẬN DANH TÍNH (AI ĐOÁN TÊN) & XÁC NHẬN GỢI Ý
+# ==============================================================================
 @app.post("/api/meetings/{mid}/infer-speakers")
 async def infer_meeting_speakers(mid: int):
-    """Kích hoạt AI đọc toàn bộ hội thoại cuộc họp để tự động suy luận danh tính cho tất cả người nói."""
-    renamed_list = await identity.infer_all_speakers(mid)
-    return {
-        "success": True,
-        "meeting_id": mid,
-        "renamed": renamed_list,
-        "count": len(renamed_list)
-    }
+    """AI đọc hội thoại để đoán tên cho mọi người nói chưa định danh."""
+    if not artifacts.llm_available():
+        raise HTTPException(status_code=503, detail="Chưa cấu hình ANTHROPIC_API_KEY hoặc GEMINI_API_KEY")
+    s = await _session_or_404(mid)
+    try:
+        results = await s.identity.run(force=True)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Gọi LLM thất bại: {e}")
+    await _finish_op(s)
+    return {"success": True, "meeting_id": mid, "results": results,
+            "renamed": [r for r in results if r["action"] == "applied"],
+            "suggested": [r for r in results if r["action"] == "suggested"],
+            "count": len(results)}
+
+
+@app.post("/api/meetings/{mid}/inferences/{iid}/accept")
+async def accept_inference(mid: int, iid: int, req: AcceptReq):
+    s = await _session_or_404(mid)
+    try:
+        res = await s.identity.accept(iid, save_voice=req.save_voice, name=req.name)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    await _finish_op(s)
+    return res
+
+
+@app.post("/api/meetings/{mid}/inferences/{iid}/dismiss")
+async def dismiss_inference(mid: int, iid: int):
+    s = await _session_or_404(mid)
+    res = await s.identity.dismiss(iid)
+    await _finish_op(s)
+    return res
+
+
+@app.post("/api/meetings/{mid}/confirm-identity")
+async def confirm_identity(mid: int, payload: Dict[str, Any]):
+    """(Tương thích API cũ) Đổi tên theo nhãn hiển thị và lưu mẫu giọng."""
+    unknown_label, confirmed_name = payload.get("unknown_label"), payload.get("confirmed_name")
+    if not unknown_label or not confirmed_name:
+        raise HTTPException(status_code=400, detail="Thiếu unknown_label hoặc confirmed_name")
+    s = await _session_or_404(mid)
+    p = s.speakers.find_by_label(unknown_label)
+    if p is None:
+        raise HTTPException(status_code=404, detail=f"Không có người nói '{unknown_label}' trong cuộc họp")
+    res = await s.rename_speaker(p.sid, confirmed_name, role=payload.get("role", ""),
+                                 email=payload.get("email", ""), save_voice=payload.get("save_voice", True))
+    await _finish_op(s)
+    return res
 
 
 # ==============================================================================
@@ -502,59 +492,46 @@ async def infer_meeting_speakers(mid: int):
 # ==============================================================================
 @app.post("/api/meetings/{mid}/ai-ask")
 async def ask_assistant(mid: int, payload: Dict[str, Any]):
-    """Gọi trợ lý AI qua ô chat hoặc nút bấm."""
-    prompt = payload.get("prompt", "").strip()
+    prompt = (payload.get("prompt") or "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="Thiếu nội dung câu hỏi")
-
-    segs = db.get_segments(mid)
-    ls = live.LIVE_MEETINGS.get(mid)
+    if not artifacts.llm_available():
+        raise HTTPException(status_code=503, detail="Chưa cấu hình ANTHROPIC_API_KEY hoặc GEMINI_API_KEY")
+    ls = live.SESSIONS.get(mid)
+    segs = ls.segments if ls is not None else await asyncio.to_thread(db.get_segments, mid)
 
     async def _on_thinking(text: str):
-        if ls:
+        if ls is not None:
             await ls.emit({"type": "ai_thinking", "text": text})
 
     async def _on_tool(tool_info: Dict[str, Any]):
-        if ls:
+        if ls is not None:
             await ls.emit({"type": "ai_tool_call", "tool": tool_info.get("tool"), "args": tool_info.get("args")})
 
-    res = await llm.think_and_act(
-        meeting_id=mid,
-        prompt=prompt,
-        segments=segs,
-        trigger="chat_message",
-        on_thinking=_on_thinking,
-        on_tool=_on_tool
-    )
-
-    if ls:
+    try:
+        res = await llm.think_and_act(meeting_id=mid, prompt=prompt, segments=segs, trigger="chat_message",
+                                      on_thinking=_on_thinking, on_tool=_on_tool)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Trợ lý AI lỗi: {e}")
+    if ls is not None:
         await ls.emit({"type": "ai_response", "response": res})
-
     return res
 
 
 @app.post("/api/meetings/{mid}/co-design")
 async def co_design(mid: int, payload: Dict[str, Any]):
-    """Trò chuyện đàm thoại hai chiều để chỉnh sửa thiết kế Web / Diagram / Minutes."""
-    artifact_id = payload.get("artifact_id")
-    feedback = payload.get("feedback", "").strip()
-
+    artifact_id, feedback = payload.get("artifact_id"), (payload.get("feedback") or "").strip()
     if not artifact_id or not feedback:
         raise HTTPException(status_code=400, detail="Thiếu artifact_id hoặc feedback")
-
-    res = await artifacts.co_design_refine(
-        meeting_id=mid,
-        artifact_id=artifact_id,
-        user_feedback=feedback
-    )
-
-    ls = live.LIVE_MEETINGS.get(mid)
-    if ls:
-        await ls.emit({
-            "type": "artifact_updated",
-            "artifact": res
-        })
-
+    try:
+        res = await artifacts.co_design_refine(meeting_id=mid, artifact_id=int(artifact_id), user_feedback=feedback)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Co-design lỗi: {e}")
+    ls = live.SESSIONS.get(mid)
+    if ls is not None:
+        await ls.emit({"type": "artifact_updated", "artifact": res})
     return res
 
 
@@ -569,110 +546,108 @@ def get_artifact_content(aid: int):
 # ==============================================================================
 # WEBSOCKET CHANNELS
 # ==============================================================================
+def _dumps(ev: Dict[str, Any]) -> str:
+    return json.dumps(ev, ensure_ascii=False, default=str)
+
+
 @app.websocket("/ws/meeting/{mid}/events")
 async def ws_events(ws: WebSocket, mid: int):
-    """Kênh nhận sự kiện thời gian thực (transcript, AI thinking, artifacts, alerts)."""
+    """Kênh sự kiện thời gian thực. Gửi và nhận chạy song song, mọi tin gửi đi đều qua một hàng đợi."""
     await ws.accept()
-    ls = live.LIVE_MEETINGS.get(mid)
-    if not ls:
-        m = db.get_meeting(mid)
-        if not m:
-            await ws.close(code=4004)
-            return
-        # Tạo session nếu chưa có trong RAM
-        ls = live.MeetingSession(mid, m["title"], m.get("vocab"), m.get("host_id"))
-
-    q = await ls.subscribe()
+    s = await live.get_session(mid)
+    if s is None:
+        await ws.close(code=4004)
+        return
+    q = await s.subscribe()
     try:
-        # Gửi dữ liệu khởi đầu
-        await ws.send_text(json.dumps({
-            "type": "init",
-            "meeting": db.get_meeting(mid),
-            "segments": db.get_segments(mid),
-            "artifacts": db.get_artifacts(mid),
-            "inferences": db.get_inferences(mid)
-        }))
+        init = s.snapshot()
+        init["artifacts"] = await asyncio.to_thread(db.get_artifacts, mid)
+        await ws.send_text(_dumps(init))
 
-        while True:
-            # Nhận sự kiện từ queue và đẩy xuống client
-            # Đồng thời kiểm tra tin nhắn client gửi lên nếu có (ping / co-design chat)
-            done, pending = await asyncio.wait(
-                [asyncio.create_task(q.get()), asyncio.create_task(ws.receive_text())],
-                return_when=asyncio.FIRST_COMPLETED
-            )
-            for task in pending:
-                task.cancel()
+        async def sender():
+            while True:
+                await ws.send_text(_dumps(await q.get()))
 
-            for t in done:
-                res = t.result()
-                if isinstance(res, dict):  # Event from queue
-                    await ws.send_text(json.dumps(res))
-                elif isinstance(res, str):  # Message from client
-                    try:
-                        msg = json.loads(res)
-                        if msg.get("type") == "co_design_chat":
-                            aid = msg.get("artifact_id")
-                            fb = msg.get("feedback")
-                            if aid and fb:
-                                updated = await artifacts.co_design_refine(mid, aid, fb)
-                                await ls.emit({"type": "artifact_updated", "artifact": updated})
-                    except Exception:
-                        pass
+        async def receiver():
+            while True:
+                raw = await ws.receive_text()
+                try:
+                    msg = json.loads(raw)
+                except Exception:
+                    continue
+                if msg.get("type") == "ping":
+                    q.put_nowait({"type": "pong"})
+                elif msg.get("type") == "co_design_chat" and msg.get("artifact_id") and msg.get("feedback"):
+                    asyncio.create_task(_ws_co_design(s, int(msg["artifact_id"]), str(msg["feedback"])))
+
+        tasks = [asyncio.create_task(sender()), asyncio.create_task(receiver())]
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for t in pending:
+            t.cancel()
+        for t in done:
+            exc = t.exception()
+            if exc and not isinstance(exc, (WebSocketDisconnect, RuntimeError)):
+                log.debug("ws_events %d kết thúc: %s", mid, exc)
     except WebSocketDisconnect:
         pass
     finally:
-        ls.unsubscribe(q)
+        s.unsubscribe(q)
+        s.dispose_if_idle()
+
+
+async def _ws_co_design(s: live.MeetingSession, aid: int, feedback: str):
+    try:
+        updated = await artifacts.co_design_refine(s.id, aid, feedback)
+        await s.emit({"type": "artifact_updated", "artifact": updated})
+    except Exception as e:
+        await s.emit({"type": "ai_error", "text": f"Co-design lỗi: {e}"})
 
 
 @app.websocket("/ws/meeting/{mid}/audio")
 async def ws_audio(ws: WebSocket, mid: int):
-    """Kênh nhận luồng âm thanh PCM16 16kHz mono từ Mic máy tính.
-    Áp dụng State Guard: Chỉ cho phép ghi âm khi cuộc họp tồn tại và đang ở trạng thái 'live'.
-    """
+    """Kênh nhận âm thanh PCM16 16kHz mono từ mic.
+    State Guard: chỉ cho phép ghi âm khi cuộc họp tồn tại và đang 'live'.
+    Một cuộc họp chỉ có một nguồn mic: thiết bị bật sau sẽ tiếp quản."""
     await ws.accept()
-    m = db.get_meeting(mid)
+    m = await asyncio.to_thread(db.get_meeting, mid)
     if not m:
-        log.warning("ws_audio: Từ chối kết nối, meeting %d không tồn tại", mid)
-        await ws.send_text(json.dumps({
-            "type": "error",
-            "text": "Cuộc họp không tồn tại. Vui lòng tạo cuộc họp trước khi bật mic."
-        }))
+        log.warning("ws_audio: từ chối, meeting %d không tồn tại", mid)
+        await ws.send_text(_dumps({"type": "error", "code": 4004,
+                                   "text": "Cuộc họp không tồn tại. Vui lòng tạo cuộc họp trước khi bật mic."}))
         await ws.close(code=4004)
         return
-
     if m.get("status") == "ended":
-        log.warning("ws_audio: Từ chối kết nối, meeting %d đã kết thúc và được lưu trữ", mid)
-        await ws.send_text(json.dumps({
-            "type": "error",
-            "text": "Cuộc họp này đã kết thúc và được lưu trữ (Archived). Không thể ghi âm thêm."
-        }))
+        log.warning("ws_audio: từ chối, meeting %d đã kết thúc", mid)
+        await ws.send_text(_dumps({"type": "error", "code": 4003,
+                                   "text": "Cuộc họp này đã kết thúc và được lưu trữ (Archived). Không thể ghi âm thêm."}))
         await ws.close(code=4003)
         return
 
-    ls = live.LIVE_MEETINGS.get(mid)
-    if not ls:
-        ls = live.MeetingSession(mid, m["title"], m.get("vocab"), m.get("host_id"))
-
-    if "mic" not in ls.streams:
-        try:
-            await ls.add_stream("mic", diarize=True)
-        except Exception as e:
-            await ws.send_text(json.dumps({"type": "error", "text": f"Không mở được STT: {e}"}))
-            await ws.close()
-            return
-
-    await ws.send_text(json.dumps({"type": "ready", "stream": "mic", "meeting_id": mid}))
-    log.info("meeting.app: WebSocket audio kết nối thành công cho live meeting %d", mid)
-
+    s = await live.get_session(mid)
+    owner = object()
+    try:
+        stream = await s.start_audio(owner, "mic", diarize=True)
+    except Exception as e:
+        await ws.send_text(_dumps({"type": "error", "code": 4500, "text": f"Không mở được dịch vụ nhận dạng giọng nói: {e}"}))
+        await ws.close(code=4500)
+        return
+    await ws.send_text(_dumps({"type": "ready", "stream": "mic", "meeting_id": mid}))
+    log.info("meeting.app: mic kết nối cho cuộc họp %d", mid)
     try:
         while True:
             msg = await ws.receive()
             if msg.get("type") == "websocket.disconnect":
                 break
+            if s.audio_owner is not owner:
+                await ws.send_text(_dumps({"type": "error", "code": 4009,
+                                           "text": "Một thiết bị khác vừa bật mic cho cuộc họp này."}))
+                break
             if msg.get("bytes"):
-                await ls.feed(msg["bytes"], "mic")
+                await stream.feed(msg["bytes"])
             elif msg.get("text") == "stop":
                 break
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
         pass
-    log.info("meeting.app: WebSocket audio ngắt kết nối cho meeting %d", mid)
+    finally:
+        await s.stop_audio(owner)
+        log.info("meeting.app: mic ngắt kết nối cho cuộc họp %d", mid)

@@ -206,16 +206,18 @@ DEFAULT_MEETING_HISTORY = [
 
 
 def seed_mock_data():
-    """Khởi tạo dữ liệu giả lập vào DB nếu chưa có."""
-    for emp in DEFAULT_EMPLOYEES:
-        db.put_mcp_item("employees", emp["email"], emp)
-    for issue in DEFAULT_JIRA_ISSUES:
-        db.put_mcp_item("jira_issues", issue["key"], issue)
-    for sys_item in DEFAULT_SYSTEMS:
-        db.put_mcp_item("systems", sys_item["name"], sys_item)
-    for hist in DEFAULT_MEETING_HISTORY:
-        db.put_mcp_item("meeting_history", hist["meeting_id"], hist)
-    log.info("meeting.mcp: đã nạp dữ liệu Mock MCP vào database thành công")
+    """Khởi tạo dữ liệu giả lập vào DB nếu chưa có (không ghi đè dữ liệu đã được cập nhật trong cuộc họp)."""
+    added = 0
+    for collection, items, key in (("employees", DEFAULT_EMPLOYEES, "email"),
+                                   ("jira_issues", DEFAULT_JIRA_ISSUES, "key"),
+                                   ("systems", DEFAULT_SYSTEMS, "name"),
+                                   ("meeting_history", DEFAULT_MEETING_HISTORY, "meeting_id")):
+        existing = {d.get("_key") for d in db.query_mcp_collection(collection)}
+        for item in items:
+            if item[key] not in existing:
+                db.put_mcp_item(collection, item[key], dict(item))
+                added += 1
+    log.info("meeting.mcp: dữ liệu Mock MCP sẵn sàng (thêm mới %d bản ghi)", added)
 
 
 # ==============================================================================
