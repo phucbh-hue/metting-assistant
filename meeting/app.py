@@ -135,10 +135,12 @@ class ProviderReq(BaseModel):
     provider: str
     api_fallback: Optional[bool] = None
     model: Optional[str] = Field(None, max_length=80)
+    models: Optional[Dict[str, str]] = None      # {nguồn: model} cho nhiều nguồn một lần; "" = dùng mặc định
 
 
 class ProviderTestReq(BaseModel):
     provider: Optional[str] = None
+    model: Optional[str] = Field(None, max_length=80)
 
 
 class VoiceUpdate(BaseModel):
@@ -391,14 +393,14 @@ async def present_mode(mid: int, req: PresentModeReq):
 # ------------------------------------------------------------ nguồn AI: API key hoặc gói đăng ký ---
 def _providers_info() -> Dict[str, Any]:
     api = [{"id": "claude", "kind": "api", "label": "Claude API (Anthropic)", "installed": True,
-            "logged_in": bool(os.getenv("ANTHROPIC_API_KEY")), "model": artifacts.CLAUDE_MODEL,
-            "login": "Đặt ANTHROPIC_API_KEY trong tệp .env"},
+            "logged_in": bool(os.getenv("ANTHROPIC_API_KEY")), "login": "Đặt ANTHROPIC_API_KEY trong tệp .env"},
            {"id": "gemini", "kind": "api", "label": "Gemini API (Google)", "installed": True,
-            "logged_in": bool(os.getenv("GEMINI_API_KEY")), "model": artifacts.AGENT_MODEL,
-            "login": "Đặt GEMINI_API_KEY trong tệp .env"}]
+            "logged_in": bool(os.getenv("GEMINI_API_KEY")), "login": "Đặt GEMINI_API_KEY trong tệp .env"}]
     subs = cli_llm.status()
-    for it in subs:
+    for it in api + subs:
         it["model_setting"] = artifacts.provider_model(it["id"])
+        it["model_default"] = artifacts.default_model(it["id"])
+        it["model"] = artifacts.effective_model(it["id"]) or "mặc định của gói"
     return {"current": artifacts.provider(), "api_fallback": artifacts.api_fallback(),
             "ready": artifacts.llm_available(), "providers": api + subs}
 
@@ -411,31 +413,44 @@ async def llm_providers():
 @app.put("/api/llm/provider")
 async def set_llm_provider(req: ProviderReq):
     try:
-        await asyncio.to_thread(artifacts.set_provider, req.provider, req.api_fallback, req.model)
+        await asyncio.to_thread(artifacts.set_provider, req.provider, req.api_fallback, req.model, req.models)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return await asyncio.to_thread(_providers_info)
+
+
+@app.get("/api/llm/models")
+async def llm_models(provider: str, refresh: bool = False):
+    """Model chọn được của một nguồn AI: API key thì lấy từ nhà cung cấp (không tốn token), gói đăng ký thì từ CLI."""
+    try:
+        return await artifacts.list_models(provider, refresh=refresh)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/api/llm/test")
 async def test_llm_provider(req: ProviderTestReq):
     """Gửi một câu hỏi rất ngắn qua nguồn AI để kiểm tra đăng nhập / API key (tốn rất ít hạn mức)."""
     name = (req.provider or artifacts.provider()).strip().lower()
+    model = (req.model or "").strip() or None
+    if model and not artifacts.MODEL_RE.fullmatch(model):
+        raise HTTPException(status_code=400, detail=f"Tên model không hợp lệ: {model}")
     t0 = time.time()
     artifacts.set_meeting(None, "kiểm tra nguồn AI")
+    sys_p, ask = "Trả lời bằng tiếng Việt, đúng một câu ngắn.", "Chào một câu ngắn để kiểm tra kết nối."
     try:
         if name in cli_llm.PROVIDERS:
-            text = await artifacts._cli_text(name, "Trả lời bằng tiếng Việt, đúng một câu ngắn.", "Chào một câu ngắn để kiểm tra kết nối.")
+            text = await artifacts._cli_text(name, sys_p, ask, model=model)
         elif name == "claude" and os.getenv("ANTHROPIC_API_KEY"):
-            text = await artifacts._claude_text("Trả lời bằng tiếng Việt, đúng một câu ngắn.", "Chào một câu ngắn để kiểm tra kết nối.", 60)
+            text = await artifacts._claude_text(sys_p, ask, 60, model=model)
         elif name == "gemini" and os.getenv("GEMINI_API_KEY"):
-            text = await artifacts._gemini_text("Trả lời bằng tiếng Việt, đúng một câu ngắn.", "Chào một câu ngắn để kiểm tra kết nối.")
+            text = await artifacts._gemini_text(sys_p, ask, model=model)
         else:
             raise RuntimeError("Nguồn này chưa có API key trong .env" if name in artifacts.API_PROVIDERS else f"Nguồn AI không hợp lệ: {name}")
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
-    return {"ok": True, "provider": name, "text": (text or "").strip()[:300],
-            "seconds": round(time.time() - t0, 1)}
+    return {"ok": True, "provider": name, "model": model or artifacts.effective_model(name),
+            "text": (text or "").strip()[:300], "seconds": round(time.time() - t0, 1)}
 
 
 @app.get("/api/directory")

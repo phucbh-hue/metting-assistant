@@ -22,7 +22,9 @@ from meeting import cli_llm, db, mcp
 log = logging.getLogger("meeting.artifacts")
 
 AGENT_MODEL = os.getenv("AGENT_MODEL", "gemini-3.6-flash")
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5")
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5-5")
+RECOMMENDED_CLAUDE = "claude-sonnet-5-5"     # nhanh, rẻ hơn Opus 60% mỗi token; đổi trong Cài đặt > Nguồn AI
+MODEL_RE = re.compile(r"[A-Za-z0-9._:/@\[\]-]{0,80}")   # tên model hợp lệ (cả "claude-fable-5-1[1m]")
 PROVIDER = (os.getenv("LLM_PROVIDER") or "claude").strip().lower()
 
 _anthropic_client = None
@@ -85,19 +87,54 @@ def api_fallback() -> bool:
 
 
 def provider_model(name: str) -> str:
-    """Model chọn trong Cài đặt cho một gói đăng ký (trống = mặc định của CLI / biến môi trường)."""
+    """Model chọn trong Cài đặt cho một nguồn AI (trống = mặc định trong .env / của CLI)."""
     return _setting(f"llm_model_{name}").strip()
 
 
-def set_provider(name: str, fallback: Optional[bool] = None, model: Optional[str] = None) -> Dict[str, Any]:
+def default_model(name: str) -> str:
+    """Model khi chưa chọn trong Cài đặt: CLAUDE_MODEL / AGENT_MODEL trong .env, hoặc mặc định của CLI."""
+    if name == "claude":
+        return CLAUDE_MODEL
+    if name == "gemini":
+        return AGENT_MODEL
+    return cli_llm.model_of(name)
+
+
+def effective_model(name: str) -> str:
+    return provider_model(name) or default_model(name)
+
+
+def claude_model() -> str:
+    return provider_model("claude") or CLAUDE_MODEL
+
+
+def gemini_model() -> str:
+    return provider_model("gemini") or AGENT_MODEL
+
+
+def _valid_provider(name: str) -> str:
     name = (name or "").strip().lower()
     if name not in API_PROVIDERS and name not in cli_llm.PROVIDERS:
         raise ValueError(f"Nguồn AI không hợp lệ: {name}")
-    if model is not None and name in cli_llm.PROVIDERS:
-        model = model.strip()
-        if not re.fullmatch(r"[A-Za-z0-9._:/@-]{0,80}", model):
-            raise ValueError(f"Tên model không hợp lệ: {model}")
-        db.set_setting(f"llm_model_{name}", model)
+    return name
+
+
+def _valid_model(model: str) -> str:
+    model = (model or "").strip()
+    if not MODEL_RE.fullmatch(model):
+        raise ValueError(f"Tên model không hợp lệ: {model}")
+    return model
+
+
+def set_provider(name: str, fallback: Optional[bool] = None, model: Optional[str] = None,
+                 models: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    """Chọn nguồn AI; models = {nguồn: model} lưu model cho nhiều nguồn một lần (chuỗi rỗng = dùng mặc định)."""
+    name = _valid_provider(name)
+    picks = {_valid_provider(k): _valid_model(v) for k, v in (models or {}).items() if v is not None}
+    if model is not None:
+        picks[name] = _valid_model(model)
+    for k, v in picks.items():
+        db.set_setting(f"llm_model_{k}", v)
     db.set_setting("llm_provider", name)
     if fallback is not None:
         db.set_setting("llm_api_fallback", "1" if fallback else "0")
@@ -138,10 +175,12 @@ CURRENT_MEETING: ContextVar[Optional[int]] = ContextVar("llm_meeting_id", defaul
 CURRENT_PURPOSE: ContextVar[str] = ContextVar("llm_purpose", default="khác")
 # USD cho 1 triệu token (vào, ra, hệ số giá đọc cache) theo trang Pricing của Anthropic (lấy ngày 02/10/2026).
 # Ghi cache 5 phút = 1,25 lần giá vào. Model không có trong bảng thì ghi 0.
-PRICES_USD = {"claude-opus-4-7": (5.0, 25.0, 0.1), "claude-opus-4-8": (5.0, 25.0, 0.1), "claude-opus-5": (5.0, 25.0, 0.1),
-              "claude-opus-5-5": (4.0, 20.0, 0.05), "claude-sonnet-5": (2.0, 10.0, 0.1),
-              "claude-sonnet-5-5": (2.0, 10.0, 0.1), "claude-sonnet-4-6": (3.0, 15.0, 0.1),
-              "claude-haiku-4-5": (1.0, 5.0, 0.1), "claude-fable-5-1": (10.0, 50.0, 0.025)}
+PRICES_USD = {"claude-fable-5-1": (10.0, 50.0, 0.025), "claude-fable-5": (10.0, 50.0, 0.1),
+              "claude-opus-5-5": (4.0, 20.0, 0.05), "claude-opus-5": (5.0, 25.0, 0.1), "claude-opus-4-8": (5.0, 25.0, 0.1),
+              "claude-opus-4-7": (5.0, 25.0, 0.1), "claude-opus-4-6": (5.0, 25.0, 0.1), "claude-opus-4-5": (5.0, 25.0, 0.1),
+              "claude-sonnet-5-5": (2.0, 10.0, 0.1), "claude-sonnet-5": (2.0, 10.0, 0.1),
+              "claude-sonnet-4-6": (3.0, 15.0, 0.1), "claude-sonnet-4-5": (3.0, 15.0, 0.1),
+              "claude-haiku-4-5": (1.0, 5.0, 0.1)}
 CACHE_WRITE_X = 1.25
 WEB_SEARCH_USD = 0.01           # công cụ web_search của Claude: 10 USD / 1.000 lượt tìm
 CACHE = {"type": "ephemeral"}   # điểm cache 5 phút (mỗi lần đọc làm mới thời hạn)
@@ -154,9 +193,16 @@ def set_meeting(meeting_id: Optional[int], purpose: Optional[str] = None) -> Non
         CURRENT_PURPOSE.set(purpose)
 
 
+def _price(model: str) -> Tuple[float, float, float]:
+    """Giá (vào, ra, hệ số đọc cache) của một model; tên có hậu tố ngày ("claude-haiku-4-5-20251001") hoặc "[1m]"
+    dùng giá của tên gốc. Model không có trong bảng: 0."""
+    m = re.sub(r"\[[^\]]*\]$", "", (model or "").strip())
+    return PRICES_USD.get(m) or PRICES_USD.get(re.sub(r"-\d{8}$", "", m)) or (0.0, 0.0, 0.1)
+
+
 def _cost_usd(model: str, inp: int, out: int, cache_read: int = 0, cache_write: int = 0) -> float:
     """inp = token vào không cache; cache_read / cache_write tính theo hệ số riêng của model."""
-    pin, pout, read_x = PRICES_USD.get(model, (0.0, 0.0, 0.1))
+    pin, pout, read_x = _price(model)
     return (inp * pin + cache_write * pin * CACHE_WRITE_X + cache_read * pin * read_x + out * pout) / 1_000_000
 
 
@@ -175,8 +221,15 @@ def _record(provider: str, model: str, inp: int, out: int, t0: float, ok: bool, 
 def _usage_of(resp: Any, fallback_in: str = "", fallback_out: str = "") -> Dict[str, Any]:
     """Token của một lần gọi: input (không cache), cache_read, cache_write, output, estimated."""
     u = getattr(resp, "usage", None)
-    inp = getattr(u, "input_tokens", None) or getattr(u, "prompt_tokens", None) or getattr(u, "prompt_token_count", None)
-    out = getattr(u, "output_tokens", None) or getattr(u, "completion_tokens", None) or getattr(u, "candidates_token_count", None)
+
+    def first(*names):              # 0 token là số thật (câu trả lời rỗng), chỉ bỏ qua khi thiếu hẳn
+        for n in names:
+            v = getattr(u, n, None)
+            if v is not None:
+                return v
+        return None
+    inp = first("input_tokens", "prompt_tokens", "prompt_token_count")
+    out = first("output_tokens", "completion_tokens", "candidates_token_count")
     if inp is None or out is None:
         return {"input": len(fallback_in) // 4, "output": len(fallback_out) // 4, "cache_read": 0, "cache_write": 0,
                 "estimated": True}
@@ -235,44 +288,47 @@ async def _call_llm(system: Any, prompt: Any, max_tokens: int = 4000) -> str:
     return (await _call_llm_raw(system, prompt, max_tokens) or "").replace(chr(0x2014), "-")   # quy ước nội dung: "-" thay cho gạch dài
 
 
-async def _claude_text(system: Any, prompt: Any, max_tokens: int) -> str:
+async def _claude_text(system: Any, prompt: Any, max_tokens: int, model: Optional[str] = None) -> str:
     t0 = time.time()
+    model = model or claude_model()
     try:
         resp = await _anthropic().messages.create(
-            model=CLAUDE_MODEL, max_tokens=max_tokens, system=getattr(system, "blocks", None) or system,
+            model=model, max_tokens=max_tokens, system=getattr(system, "blocks", None) or system,
             messages=[{"role": "user", "content": getattr(prompt, "blocks", None) or prompt}])
     except Exception:
-        _record("claude", CLAUDE_MODEL, len(_as_text(system) + _as_text(prompt)) // 4, 0, t0, ok=False, estimated=True)
+        _record("claude", model, len(_as_text(system) + _as_text(prompt)) // 4, 0, t0, ok=False, estimated=True)
         raise
     text = "\n".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
     u = _usage_of(resp, _as_text(system) + _as_text(prompt), text)
-    _record("claude", CLAUDE_MODEL, u["input"], u["output"], t0, ok=True, estimated=u["estimated"],
+    _record("claude", model, u["input"], u["output"], t0, ok=True, estimated=u["estimated"],
             cache_read=u["cache_read"], cache_write=u["cache_write"])
     return text
 
 
-async def _gemini_text(system: Any, prompt: Any) -> str:
+async def _gemini_text(system: Any, prompt: Any, model: Optional[str] = None) -> str:
     t0 = time.time()
+    model = model or gemini_model()
     system, prompt = _as_text(system), _as_text(prompt)
     try:
-        resp = await asyncio.to_thread(_gemini().interactions.create, model=AGENT_MODEL, system_instruction=system, input=prompt)
+        resp = await asyncio.to_thread(_gemini().interactions.create, model=model, system_instruction=system, input=prompt)
     except Exception:
-        _record("gemini", AGENT_MODEL, len(system + prompt) // 4, 0, t0, ok=False, estimated=True)
+        _record("gemini", model, len(system + prompt) // 4, 0, t0, ok=False, estimated=True)
         raise
     text = resp.output_text
     u = _usage_of(resp, system + prompt, text or "")
-    _record("gemini", AGENT_MODEL, u["input"], u["output"], t0, ok=True, estimated=u["estimated"])
+    _record("gemini", model, u["input"], u["output"], t0, ok=True, estimated=u["estimated"])
     return text
 
 
-async def _cli_text(name: str, system: Any, prompt: Any) -> str:
+async def _cli_text(name: str, system: Any, prompt: Any, model: Optional[str] = None) -> str:
     """Gọi qua gói đăng ký bằng CLI chính chủ (không prompt cache theo khối, không giới hạn max_tokens)."""
     t0 = time.time()
     sys_t, prm_t = _as_text(system), _as_text(prompt)
+    model = model or provider_model(name) or None
     try:
-        r = await asyncio.to_thread(cli_llm.run, name, sys_t, prm_t, None, provider_model(name) or None)
+        r = await asyncio.to_thread(cli_llm.run, name, sys_t, prm_t, None, model)
     except Exception:
-        _record(name, provider_model(name) or cli_llm.model_of(name), len(sys_t + prm_t) // 4, 0, t0, ok=False,
+        _record(name, model or cli_llm.model_of(name), len(sys_t + prm_t) // 4, 0, t0, ok=False,
                 estimated=True, free=True)
         raise
     _record(name, r["model"], r["input"], r["output"], t0, ok=True, estimated=r["estimated"],
@@ -311,6 +367,96 @@ async def _call_llm_raw(system: Any, prompt: Any, max_tokens: int = 4000) -> str
     if not use_claude_first and os.getenv("ANTHROPIC_API_KEY"):
         return await _claude_text(system, prompt, max_tokens)
     raise RuntimeError("; ".join(errors) or "Không gọi được LLM")
+
+
+# ------------------------------------------------------------ danh sách model để chọn ---
+_MODELS_CACHE: Dict[str, Any] = {}
+_CLAUDE_FAMILY = (("fable", "mạnh nhất, đắt nhất"), ("mythos", "mạnh nhất, giới hạn truy cập"),
+                  ("opus", "suy luận sâu, đắt hơn Sonnet"), ("sonnet", "cân bằng tốc độ và chất lượng"),
+                  ("haiku", "nhanh, rẻ, cho việc đơn giản"))
+CLAUDE_BUILTIN = ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1", "claude-haiku-4-5", "claude-opus-4-7",
+                  "claude-sonnet-5", "claude-opus-5", "claude-opus-4-8", "claude-sonnet-4-6"]
+GEMINI_BUILTIN = ["gemini-flash-latest", "gemini-pro-latest", "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash",
+                  "gemini-3.1-pro-preview", "gemini-2.5-pro"]
+_GEMINI_SKIP = re.compile(r"tts|image|robotics|computer-use|transcribe|embedding|live|audio|customtools", re.I)
+
+
+def _usd(v: float) -> str:
+    return f"{v:g}".replace(".", ",")
+
+
+def pretty_model(mid: str) -> str:
+    """"claude-sonnet-5-5" -> "Claude Sonnet 5.5", "gemini-3.8-flash" -> "Gemini 3.8 Flash"."""
+    base = re.sub(r"-\d{8}$", "", mid or "")
+    m = re.fullmatch(r"claude-([a-z]+)-(\d+)(?:-(\d+))?", base)
+    if m:
+        return f"Claude {m.group(1).title()} {m.group(2)}{'.' + m.group(3) if m.group(3) else ''}"
+    return " ".join(w if re.match(r"\d", w) else w.title() for w in base.split("-")) if base else mid
+
+
+def claude_entry(mid: str, label: str = "") -> Dict[str, Any]:
+    pin, pout, _ = _price(mid)
+    family = next((n for k, n in _CLAUDE_FAMILY if k in mid), "")
+    price = f"{_usd(pin)} / {_usd(pout)} USD cho 1 triệu token vào / ra" if pin else "chưa có giá trong bảng"
+    return {"id": mid, "label": label or pretty_model(mid), "note": f"{family}, {price}" if family else price,
+            "recommended": re.sub(r"-\d{8}$", "", mid) == RECOMMENDED_CLAUDE}
+
+
+def _gemini_sort(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def key(e):
+        v = re.search(r"gemini-(\d+(?:\.\d+)?)", e["id"])
+        return (0 if e["id"].endswith("-latest") else 1, -(float(v.group(1)) if v else 0.0), e["id"])
+    return sorted(items, key=key)
+
+
+def builtin_models(name: str) -> List[Dict[str, Any]]:
+    if name == "claude":
+        return [claude_entry(m) for m in CLAUDE_BUILTIN]
+    if name == "gemini":
+        return _gemini_sort([{"id": m, "label": pretty_model(m), "note": ""} for m in GEMINI_BUILTIN])
+    return cli_llm.builtin_models(name)
+
+
+async def _claude_api_models() -> List[Dict[str, Any]]:
+    page = await _anthropic().models.list(limit=100)
+    return [claude_entry(m.id, getattr(m, "display_name", "") or "") for m in page.data
+            if str(getattr(m, "id", "")).startswith("claude-")]
+
+
+def _gemini_api_models() -> List[Dict[str, Any]]:
+    out = []
+    for m in _gemini().models.list():
+        mid = str(getattr(m, "name", "") or "").replace("models/", "")
+        acts = getattr(m, "supported_actions", None) or []
+        if not mid.startswith("gemini") or (acts and "generateContent" not in acts) or _GEMINI_SKIP.search(mid):
+            continue
+        out.append({"id": mid, "label": getattr(m, "display_name", "") or pretty_model(mid), "note": ""})
+    return _gemini_sort(out)
+
+
+async def list_models(name: str, refresh: bool = False) -> Dict[str, Any]:
+    """Model để chọn trong Cài đặt. API key: hỏi thẳng nhà cung cấp (không tốn token); gói đăng ký: lấy từ CLI đã cài
+    và đăng nhập. Chưa có key / lỗi thì dùng danh sách có sẵn. Nhớ 10 phút."""
+    name = _valid_provider(name)
+    hit = _MODELS_CACHE.get(name)
+    if hit is None or refresh or time.monotonic() - hit[1] > 600:
+        models, source, err = [], "builtin", ""
+        try:
+            if name == "claude" and os.getenv("ANTHROPIC_API_KEY"):
+                models, source = await _claude_api_models(), "api"
+            elif name == "gemini" and os.getenv("GEMINI_API_KEY"):
+                models, source = await asyncio.to_thread(_gemini_api_models), "api"
+            elif name in cli_llm.PROVIDERS:
+                models, source = await asyncio.to_thread(cli_llm.list_models, name)
+        except Exception as e:
+            log.info("meeting.artifacts: không lấy được danh sách model %s (%s), dùng danh sách có sẵn", name, e)
+            err = str(e)[:200]
+        if not models:
+            models, source = builtin_models(name), "builtin"
+        hit = ({"models": models, "source": source, "error": err}, time.monotonic())
+        _MODELS_CACHE[name] = hit
+    return {"provider": name, **hit[0], "default": default_model(name), "selected": provider_model(name),
+            "current": effective_model(name)}
 
 
 # ------------------------------------------------------------ tra cứu web ---
@@ -383,13 +529,14 @@ async def _claude_search(query: str, context_text: str = "") -> Tuple[str, List[
         raise RuntimeError("Tra cứu bằng Claude cần ANTHROPIC_API_KEY")
     t0 = time.time()
     prompt = f"Câu hỏi cần tra cứu: {query}\n\nNội dung cuộc họp gần đây (để liên hệ, không bắt buộc):\n{context_text[-3000:] or '(không có)'}"
+    model = claude_model()
     try:
         resp = await _anthropic().messages.create(
-            model=CLAUDE_MODEL, max_tokens=4000, system=WEB_SYSTEM_PROMPT,
+            model=model, max_tokens=4000, system=WEB_SYSTEM_PROMPT,
             tools=[{"type": "web_search_20260209", "name": "web_search", "max_uses": 5}],
             messages=[{"role": "user", "content": prompt}])
     except Exception:
-        _record("claude", CLAUDE_MODEL, len(prompt) // 4, 0, t0, ok=False, estimated=True)
+        _record("claude", model, len(prompt) // 4, 0, t0, ok=False, estimated=True)
         raise
     texts, sources, searches = [], [], 0
 
@@ -413,7 +560,7 @@ async def _claude_search(query: str, context_text: str = "") -> Tuple[str, List[
     u = _usage_of(resp, prompt, "".join(texts))
     stu = getattr(getattr(resp, "usage", None), "server_tool_use", None)
     billed = int(getattr(stu, "web_search_requests", 0) or 0) or searches
-    _record("claude", CLAUDE_MODEL, u["input"], u["output"], t0, ok=True, estimated=u["estimated"],
+    _record("claude", model, u["input"], u["output"], t0, ok=True, estimated=u["estimated"],
             cache_read=u["cache_read"], cache_write=u["cache_write"], extra_usd=billed * WEB_SEARCH_USD)
     return _clean_report("".join(texts), query), sources, searches
 

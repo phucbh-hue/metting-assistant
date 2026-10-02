@@ -7,7 +7,7 @@ vẽ sơ đồ, dựng dashboard số liệu, báo cáo nhanh và phác thảo t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng tiếng Việt chạy ngay trên máy (miễn phí), vừa làm
 vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.9 - cập nhật 02/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.9.1 - cập nhật 02/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
@@ -53,6 +53,26 @@ gọi tên trong 40 giây sau câu hỏi (người khác nói chuyện khác th�
 - Theo kịch bản thì trợ lý đọc đúng từng chữ, không viết lại. Mỗi cách trình bày lưu thành một phiên bản mới của bộ slide.
 - Nói gộp một câu cũng được: "<tên gọi> ơi, mở file mega sale rồi trình bày theo ghi chú".
 
+### Chọn model từ danh sách (bản 3.9.1)
+- Claude API mặc định chuyển từ Opus 4.7 sang **Sonnet 5.5** (`claude-sonnet-5-5`, đổi trong `.env` ngày 02/10/2026): giá
+  2 / 10 USD cho 1 triệu token vào / ra so với 5 / 25 USD của Opus 4.7, tức rẻ hơn 60% mỗi token; hai model dùng cùng
+  bộ tách token. Muốn quay lại Opus thì chọn trong danh sách, không cần sửa `.env`.
+- **Cài đặt > Nguồn AI**: mỗi nguồn có một danh sách model, chọn xong bấm **Lưu nguồn AI** (lưu model của cả năm nguồn
+  một lần, có hiệu lực ngay, không cần chạy lại server). Mục **Khác (tự nhập)** để gõ tên model chưa có trong danh sách;
+  nút tải lại để lấy danh sách mới.
+
+| Nguồn | Danh sách lấy từ | Ví dụ |
+|---|---|---|
+| Claude API | API Anthropic (`models.list`, không tốn token), kèm giá từng model | Sonnet 5.5 (khuyên dùng), Opus 5.5, Fable 5.1, Haiku 4.5, Opus 4.7 |
+| Gemini API | API Google (`models.list`), bỏ các model đọc giọng / tạo ảnh | Gemini 3.8 Flash, Gemini Pro Latest |
+| Claude.ai qua Claude Code | bí danh của Claude Code + model thêm mà tài khoản được dùng (`~/.claude.json`) | `sonnet`, `opus`, `haiku`, Fable 5.1 (1 triệu token ngữ cảnh) |
+| ChatGPT qua Codex CLI | `codex debug models` (đã đăng nhập thì là danh mục của gói ChatGPT) | GPT-6.1-Sol, GPT-6-Astra, GPT-6-Luna |
+| Gemini qua Gemini CLI | bí danh + các model khai báo trong Gemini CLI đã cài | `auto`, `pro`, `flash`, Gemini 3.8 Flash |
+
+- Chưa có API key, chưa cài CLI hoặc lỗi mạng thì dùng danh sách có sẵn (ghi rõ dưới ô chọn). Danh sách nhớ 10 phút.
+- Bảng giá Claude dùng để ước tính chi phí đã cập nhật đủ các model (trang Pricing của Anthropic, lấy ngày 02/10/2026);
+  tên có hậu tố ngày (`claude-haiku-4-5-20251001`) hoặc `[1m]` tính theo giá của tên gốc.
+
 ### Chạy AI bằng gói đăng ký thay cho API key
 **Cài đặt > Nguồn AI** chọn một trong năm nguồn; mọi việc của trợ lý (trả lời, slide, lời thuyết trình, đoán tên, biên
 bản) đi qua nguồn đã chọn:
@@ -68,8 +88,8 @@ bản) đi qua nguồn đã chọn:
   không công cụ, không MCP, không đọc cấu hình cá nhân; gỡ biến API key khỏi tiến trình con để chắc chắn dùng gói đăng ký.
 - Mỗi lần gọi qua CLI chậm hơn API khoảng 2-4 giây. Hạn mức gói tính theo giờ / ngày; hết hạn mức thì báo lỗi, hoặc gọi
   tiếp bằng API key nếu bật "Gói đăng ký lỗi thì gọi tiếp bằng API key" (có tính phí, mặc định tắt).
-- Model cho từng gói đặt trong Cài đặt (Claude Code mặc định `sonnet`; `opus` tốn hạn mức nhanh hơn nhiều). Nút **Kiểm tra**
-  gửi một câu chào ngắn để thử đăng nhập.
+- Model cho từng nguồn chọn trong danh sách ở Cài đặt (xem mục dưới). Nút **Kiểm tra** gửi một câu chào ngắn bằng đúng
+  model đang chọn để thử đăng nhập.
 - Cài đặt > Sử dụng AI ghi cả lời gọi qua gói đăng ký (số lần, token), chi phí ghi 0 USD.
 - Đã thử thật ngày 02/10/2026: Claude Code 2.1.287 với gói Claude Team trả lời trong khoảng 3,6 giây. Codex CLI 0.160.0 và
   Gemini CLI 0.62.0 đã cài nhưng chưa đăng nhập nên chưa thử thật (phần đọc kết quả có test với đầu ra mẫu).
@@ -476,6 +496,7 @@ Xem `.env.example`. Các biến quan trọng:
 |---|---|---|
 | `SONIOX_API_KEY` | | Bắt buộc để ghi âm |
 | `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` | | Trợ lý AI, đoán tên, biên bản |
+| `CLAUDE_MODEL` / `AGENT_MODEL` | `claude-sonnet-5-5` / `gemini-3.6-flash` | Model mặc định của Claude API / Gemini API; chọn trong Cài đặt được ưu tiên |
 | `MONGODB_URL` | | Không có thì dùng MongoDB local, cuối cùng là in-memory |
 | `MEETING_DB` | | `mock` = luôn dùng in-memory (test/demo); `local` = bỏ qua Atlas, lưu trên máy (làm việc offline) |
 | `LOCAL_DB_DIR` | `data/local_db` | Thư mục lưu trên máy khi không kết nối được Atlas |
@@ -532,7 +553,8 @@ Xem `.env.example`. Các biến quan trọng:
 | GET | `/api/deck-assets/{key}/{name}` | Ảnh từng trang của tài liệu đã mở |
 | GET | `/api/llm/providers` | Các nguồn AI: đã cài / đã đăng nhập / model |
 | PUT | `/api/llm/provider` | Chọn nguồn AI (`provider`, `api_fallback`, `model`) |
-| POST | `/api/llm/test` | Gửi một câu ngắn qua nguồn AI để kiểm tra |
+| POST | `/api/llm/test` | Gửi một câu ngắn qua nguồn AI để kiểm tra (`provider`, `model`) |
+| GET | `/api/llm/models?provider=` | Danh sách model của một nguồn (`refresh=true` để lấy lại); `PUT /api/llm/provider` nhận `models: {nguồn: model}` |
 | POST | `/api/meetings/{id}/inferences/{iid}/accept` \| `dismiss` | Xác nhận / bỏ qua gợi ý của AI |
 | GET/POST/PATCH/DELETE | `/api/voices` | Hồ sơ giọng nói; `POST /api/voices/enroll-audio` để thu mẫu |
 | WS | `/ws/meeting/{id}/audio` | PCM16 16kHz mono từ mic (một thiết bị ghi mỗi cuộc họp) |

@@ -137,6 +137,122 @@ def status() -> List[Dict[str, Any]]:
     return out
 
 
+# ------------------------------------------------------------ danh sách model của từng gói ---
+CLAUDE_CLI_MODELS = [("sonnet", "Sonnet mới nhất", "khuyên dùng: nhanh, ít tốn hạn mức"),
+                     ("opus", "Opus mới nhất", "mạnh hơn, tốn hạn mức nhanh hơn nhiều"),
+                     ("haiku", "Haiku mới nhất", "nhanh nhất, cho việc đơn giản"),
+                     ("claude-sonnet-5-5", "Claude Sonnet 5.5", ""), ("claude-opus-5-5", "Claude Opus 5.5", ""),
+                     ("claude-opus-4-7", "Claude Opus 4.7", ""), ("claude-haiku-4-5", "Claude Haiku 4.5", "")]
+# danh mục của Codex CLI 0.160.0 (02/10/2026), dùng khi chưa chạy được "codex debug models"
+CODEX_BUILTIN = [("gpt-6.1-sol", "GPT-6.1-Sol", "Latest workhorse model for coding and everyday work."),
+                 ("gpt-6-astra", "GPT-6-Astra", "Frontier intelligence for the most demanding work."),
+                 ("gpt-6-sol", "GPT-6-Sol", "Previous generation workhorse model."),
+                 ("gpt-6-luna", "GPT-6-Luna", "Fast and affordable model for easier tasks."),
+                 ("gpt-5.6-sol", "GPT-5.6-Sol", "Older generation workhorse model.")]
+GEMINI_CLI_ALIASES = [("auto", "Tự chọn", "Gemini CLI tự chọn model theo độ khó của yêu cầu"),
+                      ("pro", "Pro mới nhất", "mạnh nhất"), ("flash", "Flash mới nhất", "nhanh"),
+                      ("flash-lite", "Flash-Lite mới nhất", "nhanh nhất, nhẹ nhất")]
+GEMINI_BUILTIN = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3-pro-preview", "gemini-2.5-pro"]
+_GEMINI_CONST = re.compile(rb'\b((?:LATEST|BASE|DEFAULT|PREVIEW)_GEMINI(?:_[A-Z0-9]+)*_MODEL) = "(gemini-[0-9a-z.\-]+)"')
+_list_cache: Dict[str, Any] = {}
+
+
+def _entries(rows) -> List[Dict[str, Any]]:
+    return [{"id": i, "label": l, "note": n} for i, l, n in rows]
+
+
+def _gemini_label(mid: str) -> str:
+    return " ".join(w if re.match(r"\d", w) else w.title() for w in mid.split("-"))
+
+
+def _gemini_order(mid: str):
+    v = re.search(r"gemini-(\d+(?:\.\d+)?)", mid)
+    return (-(float(v.group(1)) if v else 0.0), "preview" in mid, mid)
+
+
+def builtin_models(provider: str) -> List[Dict[str, Any]]:
+    if provider == "claude-cli":
+        return _entries(CLAUDE_CLI_MODELS)
+    if provider == "codex-cli":
+        return _entries(CODEX_BUILTIN)
+    if provider == "gemini-cli":
+        return _entries(GEMINI_CLI_ALIASES) + [{"id": m, "label": _gemini_label(m), "note": ""} for m in GEMINI_BUILTIN]
+    return []
+
+
+def _claude_models() -> List[Dict[str, Any]]:
+    """Bí danh của Claude Code (luôn là bản mới nhất của gói) + model thêm mà tài khoản được dùng (Claude Code ghi trong
+    ~/.claude.json sau khi đăng nhập, ví dụ Fable 5.1 với 1 triệu token ngữ cảnh)."""
+    home = Path.home()
+    cfg = Path(os.environ["CLAUDE_CONFIG_DIR"]) / ".claude.json" if os.getenv("CLAUDE_CONFIG_DIR") else home / ".claude.json"
+    extra = []
+    for o in _read_json(cfg).get("additionalModelOptionsCache") or []:
+        v = str((o or {}).get("value") or "").strip() if isinstance(o, dict) else ""
+        if v and re.fullmatch(r"[A-Za-z0-9._:/@\[\]-]{1,80}", v):
+            note = str(o.get("description") or "").replace("\u2014", "-").replace("\u2013", "-")
+            extra.append({"id": v, "label": str(o.get("label") or v), "note": note[:120]})
+    base = _entries(CLAUDE_CLI_MODELS)
+    return base[:3] + extra + [m for m in base[3:] if m["id"] not in {e["id"] for e in extra}]
+
+
+def _codex_models() -> List[Dict[str, Any]]:
+    """Danh mục model của Codex CLI ("codex debug models"); đã đăng nhập thì là danh mục của gói ChatGPT."""
+    base = resolve_cmd("codex")
+    if not base or os.getenv("CLI_LLM_DISABLED") == "1":
+        return []
+    with tempfile.TemporaryDirectory(prefix="mcopilot-llm-") as work:
+        r = _run(base + ["debug", "models"], "", work, _env(), 60)
+    data = _json_tail(r.stdout.decode("utf-8", "replace")) or {}
+    rows = [m for m in data.get("models") or [] if isinstance(m, dict) and m.get("slug") and m.get("visibility", "list") == "list"]
+    rows.sort(key=lambda m: (m.get("priority") if isinstance(m.get("priority"), (int, float)) else 999, m["slug"]))
+    return [{"id": str(m["slug"]), "label": str(m.get("display_name") or m["slug"]),
+             "note": str(m.get("description") or "")[:120]} for m in rows]
+
+
+def _gemini_models() -> List[Dict[str, Any]]:
+    """Bí danh của Gemini CLI + các model khai báo trong gói Gemini CLI đã cài (đọc một lần, nhớ theo phiên bản)."""
+    base = resolve_cmd("gemini")
+    if not base:
+        return []
+    js = Path(base[-1]).resolve()
+    bundle = js.parent
+    if js.suffix not in (".js", ".mjs", ".cjs") or not bundle.is_dir():
+        return []
+    key = f"{bundle}|{js.stat().st_mtime}"
+    if _list_cache.get("gemini_key") != key:
+        found: Dict[str, str] = {}
+        for f in sorted(bundle.glob("*.js")):
+            try:
+                data = f.read_bytes()
+            except OSError:
+                continue
+            if b"_GEMINI_" not in data:
+                continue
+            for m in _GEMINI_CONST.finditer(data):
+                const, mid = m.group(1).decode(), m.group(2).decode()
+                if "EMBEDDING" not in const and not re.search(r"customtools|tts|image|embedding|live", mid):
+                    found.setdefault(mid, const)
+            if found:
+                break                       # các hằng số nằm chung một tệp; không cần đọc hết 70 tệp
+        _list_cache.update(gemini_key=key, gemini=sorted(found, key=_gemini_order))
+    return _entries(GEMINI_CLI_ALIASES) + [{"id": m, "label": _gemini_label(m), "note": ""} for m in _list_cache["gemini"]]
+
+
+def list_models(provider: str):
+    """(danh sách model, nguồn "cli" | "builtin") để chọn trong Cài đặt."""
+    if provider not in PROVIDERS:
+        raise ValueError(f"Nguồn AI không hợp lệ: {provider}")
+    if not installed(provider):
+        return builtin_models(provider), "builtin"
+    if provider == "claude-cli":
+        models = _claude_models() if _login_state(provider)["logged_in"] else []
+    elif provider == "codex-cli":
+        models = _codex_models()
+    else:
+        models = _gemini_models()
+    return (models, "cli") if models else (builtin_models(provider), "builtin")
+
+
 # ------------------------------------------------------------ gọi ---
 def _env(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     env = {k: v for k, v in os.environ.items() if k not in _DROP_ENV}
@@ -196,7 +312,7 @@ def run(provider: str, system: str, prompt: str, timeout: Optional[float] = None
         raise RuntimeError(f"Chưa cài {spec['tool']}. Cài bằng lệnh: {spec['install']}")
     timeout = timeout or TIMEOUT_S
     model = (model or "").strip() or model_of(provider)
-    if not re.fullmatch(r"[A-Za-z0-9._:/@-]{0,80}", model):
+    if not re.fullmatch(r"[A-Za-z0-9._:/@\[\]-]{0,80}", model):
         raise ValueError(f"Tên model không hợp lệ: {model}")
     with tempfile.TemporaryDirectory(prefix="mcopilot-llm-") as work:
         wd = Path(work)

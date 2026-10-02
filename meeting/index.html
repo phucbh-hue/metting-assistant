@@ -3154,6 +3154,7 @@ function openSettings() {
       <div class="flex items-center justify-between gap-2 mb-2"><h4 class="font-semibold">Sử dụng AI</h4><span class="text-[12px] text-muted">Số lần gọi model, số token vào/ra, chi phí ước tính</span></div>
       <div id="usage-box" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang tải...</div></div>
     </div>`, {
+    wide: true,
     onMount(m) {
       renderUsage($('#usage-box', m));
       renderStorage($('#storage-box', m));
@@ -3177,6 +3178,8 @@ function openSettings() {
   });
 }
 const PROVIDER_NAMES = { claude: 'Claude API', gemini: 'Gemini API', 'claude-cli': 'Claude.ai (gói đăng ký)', 'codex-cli': 'ChatGPT (gói đăng ký)', 'gemini-cli': 'Gemini (gói đăng ký)' };
+const MODEL_SOURCE = { api: 'Danh sách lấy trực tiếp từ tài khoản API', cli: 'Danh sách lấy từ công cụ của gói đã cài', builtin: 'Danh sách có sẵn' };
+const LLM_MODELS = {};                 // nguồn AI -> danh sách model đã tải
 async function renderLlm(box) {
   if (!box) return;
   try {
@@ -3184,7 +3187,7 @@ async function renderLlm(box) {
     const items = r.providers || [];
     const state = p => p.kind === 'api' ? (p.logged_in ? ['Có API key', 'chip-accent'] : ['Chưa có API key', ''])
       : !p.installed ? ['Chưa cài', ''] : p.logged_in ? [`Đã đăng nhập${p.plan ? ` (${p.plan})` : ''}`, 'chip-accent'] : ['Chưa đăng nhập', 'chip-warn'];
-    const detail = p => p.kind === 'api' ? `Model ${p.model}, tính tiền theo token. ${p.logged_in ? '' : p.login}`
+    const detail = p => p.kind === 'api' ? `Tính tiền theo token. ${p.logged_in ? '' : p.login}`
       : !p.installed ? `Cần ${p.plan_hint}. Cài ${p.tool}: ${p.install}`
       : !p.logged_in ? `Cần ${p.plan_hint}. ${p.login}` : `Dùng hạn mức của gói, không tính tiền API. Cần ${p.plan_hint}.`;
     box.innerHTML = `<form id="llm-form" class="flex flex-col gap-2">
@@ -3194,8 +3197,13 @@ async function renderLlm(box) {
           <input type="radio" name="llm-p" id="${id}" value="${esc(p.id)}" ${r.current === p.id ? 'checked' : ''} style="margin-top:3px">
           <div class="min-w-0"><label for="${id}" class="block font-medium cursor-pointer">${esc(p.kind === 'api' ? p.label : `${p.label} qua ${p.tool}`)}</label>
             <p class="text-[12px] text-muted">${esc(detail(p))}</p>
-            ${p.kind === 'api' ? '' : `<div class="flex items-center gap-2 mt-1.5"><label class="text-[12px] text-muted shrink-0" for="${id}-model">Model</label>
-              <input id="${id}-model" class="input" data-llm-model="${esc(p.id)}" style="height:30px;font-size:12.5px;max-width:220px" value="${esc(p.model_setting || '')}" placeholder="${esc(p.model || 'mặc định của gói')}" autocomplete="off"></div>`}</div>
+            <div class="flex items-center gap-2 mt-1.5">
+              <label class="text-[12px] text-muted shrink-0" for="${id}-model">Model</label>
+              <select id="${id}-model" class="input" data-llm-model="${esc(p.id)}" style="height:30px;font-size:12.5px;flex:1 1 0;min-width:0;width:100%;padding:0 8px" disabled><option>Đang tải danh sách...</option></select>
+              <button type="button" class="icon-btn shrink-0" data-act="llm-models-refresh" data-pid="${esc(p.id)}" title="Tải lại danh sách model" aria-label="Tải lại danh sách model của ${esc(p.label)}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
+            </div>
+            <input class="input hidden mt-1.5" data-llm-custom="${esc(p.id)}" style="height:30px;font-size:12.5px" placeholder="Tên model, ví dụ claude-sonnet-5-5" autocomplete="off" aria-label="Tên model tự nhập cho ${esc(p.label)}">
+            <p class="text-[11.5px] text-muted mt-1" data-llm-note="${esc(p.id)}"></p></div>
           <div class="flex flex-col items-end gap-1.5"><span class="chip ${cls}">${esc(txt)}</span>
             <button type="button" class="btn btn-ghost btn-sm" data-act="llm-test" data-pid="${esc(p.id)}" ${p.installed && p.logged_in ? '' : 'disabled'}>Kiểm tra</button></div>
         </div>`; }).join('')}</div>
@@ -3207,20 +3215,71 @@ async function renderLlm(box) {
     $('#llm-form', box).addEventListener('submit', async e => {
       e.preventDefault();
       const sel = $('input[name="llm-p"]:checked', box); if (!sel) return;
-      const mi = $(`[data-llm-model="${sel.value}"]`, box);
+      const models = {};
+      for (const it of items) {
+        const m = pickedModel(it.id, box);
+        if (m === null) continue;                             // danh sách chưa tải xong: giữ model cũ
+        if (m === undefined) { toast(`Nhập tên model cho ${it.label}.`, 'err'); return; }
+        models[it.id] = m;
+      }
       try {
-        await PUT('/api/llm/provider', { provider: sel.value, api_fallback: $('#llm-fallback', box).checked, model: mi ? mi.value.trim() : null });
-        toast(`Đã chọn nguồn AI: ${PROVIDER_NAMES[sel.value] || sel.value}.`);
+        await PUT('/api/llm/provider', { provider: sel.value, api_fallback: $('#llm-fallback', box).checked, models });
+        const m = models[sel.value] || (LLM_MODELS[sel.value] || {}).default || '';
+        toast(`Đã chọn ${PROVIDER_NAMES[sel.value] || sel.value}${m ? `, model ${m}` : ''}.`);
         renderLlm(box); loadHealth();
       } catch (err) { toast(err.message, 'err'); }
     });
+    items.forEach(it => loadModels(it.id, box));
   } catch (e) { box.innerHTML = `<p style="color:rgb(var(--danger))">${esc(e.message)}</p>`; }
 }
+function pickedModel(pid, box) {
+  /* model đang chọn trong một dòng: "" = mặc định, null = danh sách chưa tải, undefined = chọn tự nhập mà để trống */
+  const sel = $(`[data-llm-model="${pid}"]`, box); if (!sel || sel.dataset.loaded !== '1') return null;
+  if (sel.value !== '__custom__') return sel.value;
+  const v = $(`[data-llm-custom="${pid}"]`, box).value.trim();
+  return v || undefined;
+}
+async function loadModels(pid, box, refresh = false) {
+  const sel = $(`[data-llm-model="${pid}"]`, box); if (!sel) return;
+  sel.disabled = true; sel.dataset.loaded = ''; sel.innerHTML = '<option>Đang tải danh sách...</option>';
+  try {
+    const r = await GET(`/api/llm/models?provider=${encodeURIComponent(pid)}${refresh ? '&refresh=true' : ''}`);
+    if (!document.contains(sel)) return;
+    LLM_MODELS[pid] = r;
+    const chosen = r.selected || '';
+    const known = new Set((r.models || []).map(m => m.id));
+    const opt = (v, t, on) => `<option value="${esc(v)}" title="${esc(v)}" ${on ? 'selected' : ''}>${esc(t)}</option>`;
+    sel.innerHTML = opt('', `Mặc định${r.default ? ` (${r.default})` : ' của gói'}`, !chosen)
+      + (r.models || []).map(m => opt(m.id, `${m.label}${m.recommended ? ' (khuyên dùng)' : ''}`, chosen === m.id)).join('')
+      + (chosen && !known.has(chosen) ? opt(chosen, `${chosen} (đã chọn)`, true) : '')
+      + opt('__custom__', 'Khác (tự nhập)...', false);
+    sel.disabled = false; sel.dataset.loaded = '1';
+    sel.onchange = () => { modelNote(pid, box); if (sel.value === '__custom__') $(`[data-llm-custom="${pid}"]`, box).focus(); };
+    modelNote(pid, box);
+  } catch (e) {
+    sel.innerHTML = '<option value="">Mặc định</option><option value="__custom__">Khác (tự nhập)...</option>';
+    sel.disabled = false; sel.dataset.loaded = '1';
+    sel.onchange = () => modelNote(pid, box);
+    const note = $(`[data-llm-note="${pid}"]`, box); if (note) note.textContent = `Không tải được danh sách model: ${e.message}`;
+  }
+}
+function modelNote(pid, box) {
+  const sel = $(`[data-llm-model="${pid}"]`, box), custom = $(`[data-llm-custom="${pid}"]`, box), note = $(`[data-llm-note="${pid}"]`, box);
+  const r = LLM_MODELS[pid]; if (!sel || !note) return;
+  if (custom) custom.classList.toggle('hidden', sel.value !== '__custom__');
+  if (!r) return;
+  const id = sel.value === '__custom__' ? '' : (sel.value || r.default);
+  const m = (r.models || []).find(x => x.id === id);
+  const src = `${MODEL_SOURCE[r.source] || ''}${r.error ? ` (chưa lấy được từ nhà cung cấp: ${r.error})` : ''}, ${(r.models || []).length} model`;
+  note.textContent = `${id ? `Mã: ${id}. ` : ''}${m && m.note ? `${m.note.replace(/^./, c => c.toUpperCase())}. ` : ''}${src}.`;
+}
 async function testProvider(pid, btn) {
+  const box = btn ? btn.closest('#llm-box') : null;
+  const m = box ? pickedModel(pid, box) : null;
   if (btn) { btn.disabled = true; btn.textContent = 'Đang thử...'; }
   try {
-    const r = await POST('/api/llm/test', { provider: pid });
-    toast(`${PROVIDER_NAMES[pid] || pid} trả lời sau ${String(r.seconds).replace('.', ',')} giây: "${r.text}"`, 'ok', 6000);
+    const r = await POST('/api/llm/test', { provider: pid, model: m || null });
+    toast(`${PROVIDER_NAMES[pid] || pid}${r.model ? ` (${r.model})` : ''} trả lời sau ${String(r.seconds).replace('.', ',')} giây: "${r.text}"`, 'ok', 6000);
   } catch (e) { toast(e.message, 'err', 7000); }
   finally { if (btn) { btn.disabled = false; btn.textContent = 'Kiểm tra'; } }
 }
@@ -3449,6 +3508,7 @@ document.addEventListener('click', async e => {
     case 'ask-file': return openLibrary('script');
     case 'ask-paste': return openPasteScript();
     case 'llm-test': return testProvider(el.dataset.pid, el);
+    case 'llm-models-refresh': return loadModels(el.dataset.pid, el.closest('#llm-box'), true);
     case 'lib-remove': { const box = el.closest('#lib-box'); const d = el.dataset.dir;
       const cur = $$('[data-act="lib-remove"]', box).map(b => b.dataset.dir).filter(x => x !== d);
       return saveLibraryDirs(cur, box); }
