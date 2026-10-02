@@ -19,6 +19,7 @@ import os
 import re
 import time
 from collections import deque
+from pathlib import Path
 from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple
 
 import numpy as np
@@ -37,6 +38,8 @@ SHORT_HOLD_S = 2.5              # Chờ tối đa (giây thực) trước khi ch
 WAKE_FOLLOWUP_S = 8.0           # Chỉ gọi tên trợ lý rồi ngừng: chờ câu yêu cầu trong ngần này giây
 # Lời gọi chưa nói hết câu (Soniox cắt ở chỗ ngập ngừng: "Thanh ơi, em hãy" | "tổng kết cuộc họp..."):
 # chờ người đó nói tiếp, ngừng nói (không còn chữ tạm) ngần này giây thì mới xử lý cả câu
+ASK_S = 180.0                   # câu hỏi "tự trình bày hay theo kịch bản" còn hiệu lực trong 3 phút
+ANSWER_WINDOW_S = 40.0          # sau khi hỏi: câu nói tiếp theo không cần gọi tên, nếu đúng là câu trả lời
 CMD_SETTLE_S = 1.2
 AUTO_CONFIRM_S = 10.0           # Slide vừa tự chuyển theo lời nói: "chuyển slide" trong ngần này giây = xác nhận, không nhảy thêm
 CMD_MAX_WAIT_S = 15.0
@@ -505,6 +508,7 @@ class MeetingSession:
         self._pending_wake: Optional[Dict[str, Any]] = None
         self._pending_cmd: Optional[Dict[str, Any]] = None   # lời gọi trợ lý đang chờ nói hết câu
         self._ai_tasks: set = set()                          # yêu cầu đang xử lý (để "đừng soạn nữa" dừng được)
+        self._ask: Optional[Dict[str, Any]] = None            # câu hỏi đang chờ người dùng trả lời (cách trình bày tài liệu)
         self._speech_at = 0.0                                  # lần cuối chữ tạm (interim) thay đổi
         self._lock = asyncio.Lock()
         # Màn hình trình bày: nội dung đang chiếu, slide hiện tại, lịch sử để "quay lại phần trước"
@@ -734,6 +738,8 @@ class MeetingSession:
             return
         pw = self._pending_wake
         if pw is not None and now <= pw["until"] and re.search(r"\w", text):
+            if pw.get("answer") and not llm.present_answer(text, asked=True):
+                return                          # chờ câu trả lời; người khác nói chuyện khác thì không gọi AI
             self._pending_wake = None
             cmd = f"{pw['prefix']} {text}".strip() if pw.get("prefix") else text   # nối phần đã nói dở
             if _SENTENCE_END.search(text):
@@ -774,11 +780,13 @@ class MeetingSession:
                 return
 
     async def _expire_wake(self, token: object):
-        await asyncio.sleep(WAKE_FOLLOWUP_S + 0.5)
+        pw = self._pending_wake
+        until = pw["until"] if pw is not None and pw["token"] is token else time.monotonic() + WAKE_FOLLOWUP_S
+        await asyncio.sleep(max(0.5, until - time.monotonic() + 0.5))
         pw = self._pending_wake
         if pw is not None and pw["token"] is token:
             self._pending_wake = None
-            await self.emit({"type": "ai_listening_end", "name": pw["name"], "reason": "timeout"})
+            await self.emit({"type": "ai_listening_end", "name": pw["name"], "reason": "answer" if pw.get("answer") else "timeout"})
 
     async def _apply_relabels(self, keys: List[Any], is_inferred: Optional[bool] = None) -> int:
         items = []
@@ -1029,7 +1037,14 @@ class MeetingSession:
         await self.emit({"type": "ai_activated", "wake_word": name or llm.assistant_config()["name"], "prompt": prompt,
                          "source": source})
         try:
+            if self._ask and time.monotonic() < self._ask["until"]:
+                ans = llm.present_answer(command, asked=True)
+                if ans:
+                    await self.answer_present(ans)
+                    return
             intent = llm.stage_intent(command)
+            if intent and intent.get("action") == "present":
+                intent = dict(intent, text=command)
             if intent and await self._handle_stage_intent(intent):
                 return
             if self.stage["artifact_id"] is not None and llm.is_edit_command(command):
@@ -1086,7 +1101,7 @@ class MeetingSession:
     def _slides_of(art: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not art or art.get("kind") != "slides":
             return []
-        deck = artifacts.normalize_deck(artifacts._json_from_text(art.get("content", "")))
+        deck = artifacts.load_deck(art.get("content", ""))
         return deck["slides"] if deck else []
 
     @staticmethod
@@ -1273,6 +1288,17 @@ class MeetingSession:
                 await self.stage_action("show", artifact_id=decks[0]["id"])
                 art = await self._get_artifact(self.stage["artifact_id"])
             await self.emit({"type": "stage_command", "action": "open"})
+            deck = artifacts.load_deck(art.get("content", "")) or {}
+            ans = llm.present_answer(intent.get("text", ""), explicit=True)
+            if ans and ans.get("mode") == "auto" and (not artifacts.deck_is_file(deck) or deck.get("script_mode") == "auto"):
+                ans = None                            # "tự trình bày" bộ đã có lời / do AI soạn: trình bày như cũ, không soạn lại
+            if ans:                                   # "trình bày theo kịch bản trong ghi chú": nói luôn cách trình bày
+                self._ask = {"kind": "present_mode", "artifact_id": art["id"], "until": time.monotonic() + ASK_S}
+                await self.answer_present(ans)
+                return True
+            if artifacts.deck_is_file(deck) and not deck.get("script_mode"):
+                await self._ask_present_mode(art)     # tài liệu mở từ máy: hỏi tự trình bày hay theo kịch bản
+                return True
             await self._ensure_scripts(art)
             await self.emit({"type": "stage_present", "action": "start", "slide": self.stage["slide"]})
             return True
@@ -1408,32 +1434,173 @@ class MeetingSession:
         return True
 
     async def _open_deck_file(self, query: str) -> bool:
-        """"Mở slide ở folder A": tìm trong thư viện slide trên máy, nhập vào cuộc họp và đưa lên màn hình."""
+        """"Mở file báo cáo Q3 trong Downloads": tìm trong các thư mục tài liệu, mở lên màn hình, hỏi cách trình bày."""
         from meeting import decks
-        found = decks.find_files(query)
+        found = await asyncio.to_thread(decks.find_files, query)
         if not found:
-            fs = decks.folders()
-            hint = f" Thư mục hiện có: {', '.join(fs[:5])}." if fs else f" Thư mục {decks.SLIDES_DIR} đang trống."
-            await self._say(f"Em không thấy tệp slide nào khớp với yêu cầu.{hint}", "concerned")
+            roots = ", ".join(r.name for r in decks.library_roots()) or str(decks.SLIDES_DIR)
+            subs = decks.folders(decks.SLIDES_DIR)
+            hint = f" Em đã tìm trong {roots}" + (f"; thư mục slide có: {', '.join(subs[:5])}" if subs else "") + "."
+            await self._say(f"Em không thấy tệp nào khớp với yêu cầu.{hint} Anh chị có thể bấm Mở tài liệu để chọn tệp.",
+                            "concerned")
             return True
         if len(found) > 1 and found[1]["score"] >= found[0]["score"]:
-            names = "; ".join(f"{r['name']} trong {r['folder'] or 'thư mục gốc'}" for r in found[:3])
+            names = "; ".join(f"{r['name']}{r['ext']} trong {r['folder'] or Path(r['root']).name}" for r in found[:3])
             await self._say(f"Em thấy nhiều tệp giống nhau: {names}. Anh chị nói rõ tên tệp giúp em.", "concerned")
             return True
-        hit = found[0]
+        return await self.open_path(found[0]["path"], query)
+
+    async def open_path(self, path: str, command: str = "") -> bool:
+        """Mở một tệp trên máy lên màn hình trình chiếu rồi hỏi cách trình bày (hoặc làm luôn nếu câu lệnh đã nói)."""
+        p = Path(path)
+        if p.suffix.lower() in (".pdf", ".pptx", ".ppt"):
+            await self._progress(f"Dạ, em mở {p.name}, đang dựng hình từng trang ạ.", "status")
         try:
-            art = await asyncio.to_thread(artifacts.import_deck, self.id, hit["path"])
+            art = await asyncio.to_thread(artifacts.import_deck, self.id, str(p))
         except Exception as e:
-            await self._say(f"Em không đọc được tệp {hit['name']}: {e}", "concerned")
+            await self._say(f"Em không đọc được tệp {p.name}: {e}", "concerned")
             return True
         self._art_cache[art["id"]] = art
         await self.emit({"type": "artifact_created", "artifact": art})
         await self.emit({"type": "stage_command", "action": "open"})
         await self.stage_action("show", artifact_id=art["id"])
         n = len(self._slides_of(art))
-        await self._say(f"Dạ, em mở bộ slide \"{art['title'].replace('Slide: ', '')}\" từ thư mục {hit['folder'] or 'gốc'}, "
-                        f"gồm {n} slide.")
+        unit = "trang" if p.suffix.lower() in (".pdf", ".docx") else "slide"
+        await self._say(f"Dạ, em mở \"{p.name}\" trong thư mục {p.parent.name or p.anchor}, gồm {n} {unit}.", quiet=True)
+        ans = llm.present_answer(command, explicit=True) if command else None
+        if ans:
+            self._ask = {"kind": "present_mode", "artifact_id": art["id"], "until": time.monotonic() + ASK_S}
+            await self.answer_present(ans)
+        else:
+            await self._ask_present_mode(art)
         return True
+
+    # ------------------------------------------------------------ cách trình bày tài liệu ---
+    async def _ask_present_mode(self, art: Dict[str, Any]):
+        deck = artifacts.load_deck(art.get("content", "")) or {"slides": []}
+        has_notes = sum(1 for s in deck["slides"] if (s.get("notes") or "").strip())
+        self._ask = {"kind": "present_mode", "artifact_id": art["id"], "until": time.monotonic() + ASK_S}
+        q = ("Anh chị muốn em tự trình bày hay trình bày theo kịch bản ạ? Nếu theo kịch bản thì anh chị chỉ em kịch bản "
+             "ở đâu để em trình bày.")
+        if has_notes:
+            q += f" Tệp này có sẵn ghi chú ở {has_notes} slide, em có thể đọc theo ghi chú đó."
+        await self.emit({"type": "ai_ask", "kind": "present_mode", "artifact_id": art["id"], "text": q,
+                         "title": art.get("title", ""), "has_notes": bool(has_notes)})
+        await self._say(q)
+        self._open_answer_window()
+
+    def _open_answer_window(self, seconds: float = ANSWER_WINDOW_S):
+        """Câu tiếp theo (không cần gọi tên) được hiểu là câu trả lời nếu đúng là câu trả lời."""
+        token = object()
+        self._pending_wake = {"name": llm.assistant_config()["name"], "until": time.monotonic() + seconds,
+                              "token": token, "answer": True}
+        asyncio.create_task(self._expire_wake(token))
+
+    async def answer_present(self, ans: Dict[str, Any]) -> Dict[str, Any]:
+        """Thực hiện câu trả lời: tự trình bày (AI viết lời) hoặc theo kịch bản (ghi chú, tệp khác, văn bản dán vào)."""
+        from meeting import decks
+        aid = (self._ask or {}).get("artifact_id") or ans.get("artifact_id") or self.stage["artifact_id"]
+        art = await self._get_artifact(aid)
+        deck = artifacts.load_deck((art or {}).get("content", ""))
+        if not art or not deck:
+            await self._say("Chưa có tài liệu nào trên màn hình để em trình bày.", "concerned")
+            return {"ok": False}
+        n = len(deck["slides"])
+        if ans.get("mode") == "human":                # người trong phòng tự trình bày: em chỉ chuyển slide theo lời
+            await self._ask_done()
+            await self.stage_action("follow", follow=True)
+            await self._say("Dạ, anh chị trình bày nhé. Em sẽ tự chuyển slide theo nội dung anh chị đang nói.", quiet=True)
+            return {"ok": True, "mode": "human"}
+        if ans.get("mode") == "auto":
+            await self._ask_done()
+            if not artifacts.llm_available():
+                await self._say("Em chưa kết nối được AI để tự viết lời trình bày. Anh chị chỉ em kịch bản nhé.", "concerned")
+                return {"ok": False}
+            artifacts.set_meeting(self.id, "lời thuyết trình")
+            await self._progress(f"Dạ, em tự trình bày. Em soạn lời cho {n} slide trước, chờ em chút ạ.", "ack")
+            try:
+                new_deck = await artifacts.generate_scripts(deck, llm._context_lines(self.segments))
+            except Exception as e:
+                await self._say(f"Em chưa soạn được lời trình bày: {e}", "concerned")
+                return {"ok": False}
+            return await self._present_with(art, new_deck, "Em bắt đầu trình bày ạ.")
+        source = ans.get("source")
+        scripts, label = None, ""
+        if source == "notes":
+            scripts = [s.get("notes", "") for s in deck["slides"]]
+            label = "ghi chú trong tệp"
+            if not any(x.strip() for x in scripts):
+                await self._ask_where("Tệp này chưa có ghi chú cho slide nào. Anh chị chỉ em tệp kịch bản, hoặc dán kịch bản vào khung chat nhé.")
+                return {"ok": False, "need": "where"}
+        elif source in ("file", "text"):
+            text = ans.get("text") or ""
+            if source == "file":
+                path = ans.get("path")
+                if not path:
+                    exclude = (deck.get("source") or {}).get("path")
+                    found = await asyncio.to_thread(decks.find_files, ans.get("query", ""), None, exclude)
+                    if not found:
+                        await self._ask_where("Em không thấy tệp kịch bản nào khớp. Anh chị nói lại tên tệp, hoặc bấm Chọn tệp kịch bản giúp em.")
+                        return {"ok": False, "need": "where"}
+                    path = found[0]["path"]
+                try:
+                    text = await asyncio.to_thread(decks.read_text, path)
+                except Exception as e:
+                    await self._ask_where(f"Em không đọc được tệp kịch bản: {e}")
+                    return {"ok": False, "need": "where"}
+                label = f"tệp {Path(path).name}"
+            else:
+                label = "kịch bản anh chị dán vào"
+            if not text.strip():
+                await self._ask_where("Kịch bản đang trống. Anh chị gửi lại giúp em nhé.")
+                return {"ok": False, "need": "where"}
+            scripts = decks.split_script(text, n)
+            if scripts is None:
+                if not artifacts.llm_available():
+                    scripts = [text] + [""] * (n - 1)
+                else:
+                    await self._progress("Em đang ghép kịch bản với từng slide, giữ nguyên câu chữ ạ.", "status")
+                    artifacts.set_meeting(self.id, "ghép kịch bản")
+                    try:
+                        scripts = await artifacts.align_script(text, deck)
+                    except Exception as e:
+                        await self._say(f"Em chưa ghép được kịch bản: {e}", "concerned")
+                        return {"ok": False}
+        else:
+            await self._ask_where("Dạ, kịch bản nằm ở đâu ạ? Trong phần ghi chú của tệp, một tệp khác (anh chị nói tên tệp), "
+                                  "hay anh chị dán vào khung chat?")
+            return {"ok": False, "need": "where"}
+        await self._ask_done()
+        new_deck = artifacts.deck_with_scripts(deck, scripts, "script", label)
+        filled = sum(1 for x in scripts if (x or "").strip())
+        tail = "" if filled == n else f" Có {n - filled} slide chưa có lời trong kịch bản, em sẽ đọc nội dung trên slide."
+        return await self._present_with(art, new_deck, f"Dạ, em trình bày theo {label}.{tail}")
+
+    async def _ask_done(self):
+        """Đã có câu trả lời: đóng câu hỏi (cả thẻ hỏi trên màn hình)."""
+        if self._ask is not None:
+            self._ask = None
+            await self.emit({"type": "ai_ask_done"})
+
+    async def _ask_where(self, text: str):
+        if self._ask is None:
+            self._ask = {"kind": "present_mode", "artifact_id": self.stage["artifact_id"], "until": time.monotonic() + ASK_S}
+        self._ask["until"] = time.monotonic() + ASK_S
+        await self.emit({"type": "ai_ask", "kind": "script_where", "artifact_id": self._ask["artifact_id"], "text": text})
+        await self._say(text, "concerned")
+        self._open_answer_window()
+
+    async def _present_with(self, art: Dict[str, Any], new_deck: Dict[str, Any], message: str) -> Dict[str, Any]:
+        aid = await asyncio.to_thread(db.save_artifact, self.id, "slides", art["title"],
+                                      json.dumps(new_deck, ensure_ascii=False), "cách trình bày", art["id"])
+        new_art = await asyncio.to_thread(db.get_artifact, aid)
+        self._art_cache[aid] = new_art
+        await self.emit({"type": "artifact_updated", "artifact": new_art})
+        await self.emit({"type": "stage_command", "action": "open"})
+        await self.stage_action("show", artifact_id=aid, slide=0)
+        await self._say(message, quiet=True)
+        await self.emit({"type": "stage_present", "action": "start", "slide": 0})
+        return {"ok": True, "artifact_id": aid}
 
     async def _edit_on_stage(self, command: str):
         """Sửa nội dung đang trình chiếu bằng lời nói ("sửa slide này thêm số liệu doanh thu")."""

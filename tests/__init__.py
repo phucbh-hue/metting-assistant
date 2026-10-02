@@ -10,3 +10,9 @@ for _key in ("SONIOX_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
 os.environ.setdefault("IDENTITY_MIN_INTERVAL_S", "0")
 # Tra cứu web mặc định không mở trình duyệt / không gọi mạng; test nào cần thì tự đặt WEB_SEARCH_PROVIDER và mock
 os.environ["WEB_SEARCH_PROVIDER"] = "claude"
+# Thư viện tài liệu: test không quét Desktop / Documents / Downloads của người dùng
+os.environ["LIBRARY_DEFAULTS"] = "0"
+os.environ.pop("LIBRARY_DIRS", None)
+# Nguồn AI: test không gọi CLI của gói đăng ký
+os.environ["LLM_PROVIDER"] = "claude"
+os.environ["CLI_LLM_DISABLED"] = "1"           # chốt an toàn: lỡ chọn CLI thì báo lỗi thay vì chạy thật

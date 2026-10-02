@@ -284,6 +284,21 @@
     .slide.has-now li { opacity: .6; transition: opacity .25s; }
     .slide.has-now li.sl-now { opacity: 1; }
     .slide li.sl-now::before { box-shadow: 0 0 0 .55cqw rgb(var(--accent) / .28); }
+    /* trang PDF / slide PowerPoint dựng thành ảnh: hiện đúng hình gốc */
+    .slide.slide-img { background: #eef0f2; }
+    .slide.slide-img::after { display: none; }
+    .slide-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+    .slide-img .sl-badge { position: absolute; right: 1.2cqw; bottom: 1cqw; font-size: 1.3cqw; padding: .25cqw .9cqw; border-radius: 99px; background: rgba(0,0,0,.62); color: #fff; font-variant-numeric: tabular-nums; }
+    .sl-inner.sl-media { flex-direction: row; align-items: center; gap: 3cqw; }
+    .sl-media .sl-text { flex: 1 1 56%; min-width: 0; }
+    .sl-media .sl-pic { flex: 0 1 40%; max-width: 40%; max-height: 100%; object-fit: contain; border-radius: 1cqw; }
+    /* trợ lý hỏi cách trình bày tài liệu */
+    .ask-card { position: fixed; left: 50%; bottom: 88px; transform: translateX(-50%); z-index: 58; width: min(640px, calc(100vw - 32px)); background: rgb(var(--raise)); border: 1px solid var(--line-strong); border-left: 3px solid rgb(var(--accent)); border-radius: 16px; padding: 14px 16px; box-shadow: 0 24px 70px rgba(0,0,0,.55); animation: toastIn .2s ease-out; }
+    .lib-row { width: 100%; display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 10px; align-items: center; text-align: left; padding: 7px 10px; border-radius: 10px; }
+    .lib-row:hover, .lib-row:focus-visible { background: rgba(255,255,255,.06); }
+    .lib-ext { width: 38px; height: 34px; border-radius: 8px; display: grid; place-items: center; font-size: 10.5px; font-weight: 700; text-transform: uppercase; background: rgba(255,255,255,.06); }
+    .llm-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 10px; border-radius: 12px; border: 1px solid var(--line); }
+    .llm-row.on { border-color: rgb(var(--accent) / .45); background: rgb(var(--accent) / .05); }
     .num.flash { color: rgb(var(--accent)); font-weight: 600; }
     @keyframes slideIn { from { opacity: 0; transform: translateY(10px) scale(.992); } to { opacity: 1; transform: none; } }
     .no-scrollbar { scrollbar-width: none; }
@@ -1089,6 +1104,8 @@ function onEvent(R, ev) {
       } else if (items.length) { const n = newTurn('', 'note'); n.done = true; n.insights = items; }
       renderJarvis(); break;
     }
+    case 'ai_ask': showAsk(ev); break;
+    case 'ai_ask_done': hideAsk(); break;
     case 'stage_prompt': {
       const text = promptNext();
       const t = R.turns[R.turns.length - 1];
@@ -2360,7 +2377,7 @@ function avatarEvent(R, ev) {
     case 'segment': setLive(null, ev.segment); if (STAGE.open) { renderPrompter(); focusBullet(ev.segment.text); } break;
     case 'ai_listening': avSet('listening', 'happy'); showBubble('Dạ, em nghe đây, anh chị cứ nói yêu cầu.'); break;
     case 'ai_cancelled': avSet('idle', 'neutral'); VOICE.queue = VOICE.queue.filter(it => !it.stale); break;
-    case 'ai_listening_end': avSet('idle', 'neutral'); showBubble(`Em chưa nghe thấy yêu cầu. Thử nói "${ev.name} ơi, vẽ dashboard tiến độ".`); break;
+    case 'ai_listening_end': if (ev.reason === 'answer') { avSet('idle', 'neutral'); break; } avSet('idle', 'neutral'); showBubble(`Em chưa nghe thấy yêu cầu. Thử nói "${ev.name} ơi, vẽ dashboard tiến độ".`); break;
     case 'ai_progress': if (AV.state !== 'thinking') avSet('thinking'); say(ev.text, { mood: ev.kind === 'ack' ? 'happy' : 'neutral', stale: ev.kind === 'status' }); break;
     case 'ai_activated': if (PRESENT.on) stopPresent(); avSet('thinking', 'neutral'); showBubble(`"${ev.prompt}"`); break;
     case 'ai_thinking': showBubble(AV.bubbleText || 'Đang xử lý...', ev.text); break;
@@ -2377,7 +2394,7 @@ function avatarEvent(R, ev) {
     case 'ai_error': avSet('idle', 'concerned'); say('Em chưa làm được yêu cầu này.', { mood: 'concerned', caption: ev.text }); break;
     case 'stage_state': applyStage(ev.stage, ev.auto); break;
     case 'stage_command': avSet('idle', 'happy'); if (ev.action === 'open') openStage(true); else closeStage(); break;
-    case 'stage_present': if (ev.action === 'start') startPresent(ev.slide); else stopPresent('Dạ, em dừng thuyết trình.'); break;
+    case 'stage_present': if (ev.action === 'start') { hideAsk(); startPresent(ev.slide); } else stopPresent('Dạ, em dừng thuyết trình.'); break;
     case 'stage_prompt': avSet('idle', 'happy'); break;
     case 'meeting_status':
       if (ev.minutes_status === 'pending') { avSet('thinking', 'neutral'); showBubble('Em đang lập biên bản cuộc họp...'); }
@@ -2552,8 +2569,14 @@ function slideHtml(deck, i, animate) {
   const n = deck.slides.length; const sl = deck.slides[i] || deck.slides[0];
   const b = sl.bullets || [];
   const li = arr => arr.map(x => `<li>${esc(x)}</li>`).join('');
+  if (sl.layout === 'image' && sl.image) {           // trang PDF / slide PowerPoint: hiện đúng hình gốc
+    return `<div class="slide slide-img ${animate && !REDUCED_MOTION ? 'slide-enter' : ''}" role="img" aria-label="Trang ${i + 1} trên ${n}: ${esc(sl.title)}">
+      <img src="${esc(sl.image)}" alt="" decoding="async"><span class="sl-badge">${i + 1} / ${n}</span></div>`;
+  }
+  const media = sl.layout === 'media' && sl.image;
   let body;
-  if (sl.layout === 'title') body = `<h1>${esc(sl.title)}</h1>${b.length ? `<p class="sl-sub">${b.map(esc).join('<br>')}</p>` : ''}`;
+  if (media) body = `<div class="sl-text"><h2>${esc(sl.title)}</h2><ul>${li(b)}</ul></div><img class="sl-pic" src="${esc(sl.image)}" alt="" decoding="async">`;
+  else if (sl.layout === 'title') body = `<h1>${esc(sl.title)}</h1>${b.length ? `<p class="sl-sub">${b.map(esc).join('<br>')}</p>` : ''}`;
   else if (sl.layout === 'quote') body = `<blockquote>${esc(b[0] || sl.title)}</blockquote>${b[1] ? `<cite>${esc(b[1])}</cite>` : ''}`;
   else if (sl.layout === 'metrics') body = `<h2>${esc(sl.title)}</h2><div class="metrics">${b.map(x => {
     const k = x.indexOf(':'); const l = k > 0 ? x.slice(0, k) : x, v = k > 0 ? x.slice(k + 1).trim() : '';
@@ -2561,7 +2584,7 @@ function slideHtml(deck, i, animate) {
   else if (sl.layout === 'two_column') { const h = Math.ceil(b.length / 2); body = `<h2>${esc(sl.title)}</h2><div class="cols"><ul>${li(b.slice(0, h))}</ul><ul>${li(b.slice(h))}</ul></div>`; }
   else body = `<h2>${esc(sl.title)}</h2><ul>${li(b)}</ul>`;
   return `<div class="slide ${animate && !REDUCED_MOTION ? 'slide-enter' : ''}" role="img" aria-label="Slide ${i + 1} trên ${n}: ${esc(sl.title)}">
-    <div class="sl-inner">${body}</div><div class="sl-foot"><span class="truncate">${esc(deck.title || '')}</span><span>${i + 1} / ${n}</span></div></div>`;
+    <div class="sl-inner ${media ? 'sl-media' : ''}">${body}</div><div class="sl-foot"><span class="truncate">${esc(deck.title || '')}</span><span>${i + 1} / ${n}</span></div></div>`;
 }
 function artLabel(a) {
   const kind = KIND_LABEL[a.kind] || a.kind; const title = String(a.title || '');
@@ -2620,6 +2643,7 @@ function fitSlide() {
 }
 if (window.ResizeObserver) new ResizeObserver(fitSlide).observe($('#stage-frame'));
 let stageRenderSeq = 0;
+const OPEN_DOC_BTN = '<button class="btn btn-ghost btn-sm" data-act="open-doc" title="Mở PDF, PowerPoint, Word trên máy để trình bày">Mở tài liệu</button>';
 async function renderStageFrame(animate) {
   const R = S.room; const frame = $('#stage-frame'); const nav = $('#stage-nav'); if (!frame || !R) return;
   const my = ++stageRenderSeq;
@@ -2634,8 +2658,9 @@ async function renderStageFrame(animate) {
         <button class="btn btn-primary btn-sm" data-act="quick" data-prompt="Dựng dashboard số liệu: tiến độ ticket Jira và thời lượng phát biểu của từng người trong cuộc họp">Dựng dashboard</button>
         <button class="btn btn-ghost btn-sm" data-act="quick" data-prompt="Làm slide báo cáo tiến độ và các quyết định của cuộc họp">Soạn slide</button>
         <button class="btn btn-ghost btn-sm" data-act="quick" data-prompt="Tổng hợp nhanh cuộc họp: quyết định, việc cần làm, người phụ trách, hạn chót">Báo cáo nhanh</button>
+        <button class="btn btn-ghost btn-sm" data-act="open-doc" title="Mở PDF, PowerPoint, Word trên máy để trình bày">Mở tài liệu</button>
       </div></div>`;
-    nav.innerHTML = picker ? `<div class="flex justify-end">${picker}</div>` : '';
+    nav.innerHTML = picker ? `<div class="flex justify-end gap-2">${OPEN_DOC_BTN}${picker}</div>` : '';
     renderPrompter();
     return;
   }
@@ -2644,6 +2669,7 @@ async function renderStageFrame(animate) {
     const deck = parseDeck(art.content); const i = Math.max(0, Math.min(R.stage.slide, deck.slides.length - 1));
     frame.innerHTML = `<div class="slide-wrap">${slideHtml(deck, i, animate)}</div>`;
     fitSlide();
+    const nx = deck.slides[i + 1]; if (nx && nx.image) { const im = new Image(); im.src = nx.image; }   // trang sau hiện ngay khi chuyển
     const prompterOn = !$('#stage-prompter').classList.contains('hidden');
     const followOn = R.stage.follow !== false;
     nav.innerHTML = `<div class="flex flex-wrap items-center justify-between gap-2">
@@ -2652,13 +2678,13 @@ async function renderStageFrame(animate) {
           <span class="num text-muted text-[13px]">${i + 1} / ${deck.slides.length}</span>
           <button class="btn btn-ghost btn-sm" data-act="stage-next" ${i >= deck.slides.length - 1 ? 'disabled' : ''} aria-label="Slide sau">Sau<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg></button>
         </div>
-        <div class="flex flex-wrap items-center gap-2">${back}<button class="btn ${PRESENT.on ? 'btn-primary' : 'btn-ghost'} btn-sm" data-act="stage-present" aria-pressed="${PRESENT.on}" title="Trợ lý tự đọc nội dung từng slide và chuyển tiếp (nói: 'thuyết trình giúp anh')">${PRESENT.on ? 'Dừng thuyết trình' : 'Thuyết trình'}</button><button class="btn btn-ghost btn-sm" data-act="stage-follow" aria-pressed="${followOn}" title="Slide tự chuyển theo nội dung đang trình bày">Tự chuyển: ${followOn ? 'bật' : 'tắt'}</button><button class="btn btn-ghost btn-sm" data-act="stage-prompter" aria-pressed="${prompterOn}" title="Phím N">Nhắc bài</button>${picker}</div>
+        <div class="flex flex-wrap items-center gap-2">${back}<button class="btn ${PRESENT.on ? 'btn-primary' : 'btn-ghost'} btn-sm" data-act="stage-present" aria-pressed="${PRESENT.on}" title="Trợ lý tự đọc nội dung từng slide và chuyển tiếp (nói: 'thuyết trình giúp anh')">${PRESENT.on ? 'Dừng thuyết trình' : 'Thuyết trình'}</button><button class="btn btn-ghost btn-sm" data-act="stage-follow" aria-pressed="${followOn}" title="Slide tự chuyển theo nội dung đang trình bày">Tự chuyển: ${followOn ? 'bật' : 'tắt'}</button><button class="btn btn-ghost btn-sm" data-act="stage-prompter" aria-pressed="${prompterOn}" title="Phím N">Nhắc bài</button>${OPEN_DOC_BTN}${picker}</div>
       </div>
       <div class="thumbs" aria-label="Danh sách slide">${deck.slides.map((sl, k) => `<button class="thumb" data-act="stage-goto" data-slide="${k}" aria-current="${k === i}">${k + 1}. ${esc(sl.title)}</button>`).join('')}</div>`;
     const cur = $('.thumb[aria-current="true"]', nav); if (cur) cur.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   } else {
     const presentBtn = art.kind === 'dashboard' ? `<button class="btn ${PRESENT.on ? 'btn-primary' : 'btn-ghost'} btn-sm" data-act="stage-present" aria-pressed="${PRESENT.on}">${PRESENT.on ? 'Dừng thuyết trình' : 'Thuyết trình'}</button>` : '';
-    nav.innerHTML = `<div class="flex flex-wrap items-center justify-end gap-2">${back}${presentBtn}${picker}</div>`;
+    nav.innerHTML = `<div class="flex flex-wrap items-center justify-end gap-2">${back}${presentBtn}${OPEN_DOC_BTN}${picker}</div>`;
     if (art.kind === 'dashboard') {
       const d = parseDash(art.content);
       frame.innerHTML = `<div class="stage-scroll">${dashHtml(d, true)}</div>`;
@@ -2774,6 +2800,7 @@ const PRESENT = { on: false, token: 0, moving: false };
 const ORDINALS = ['Thứ nhất', 'Thứ hai', 'Thứ ba', 'Thứ tư', 'Thứ năm', 'Thứ sáu'];
 function slideNarration(deck, i) {
   const sl = deck.slides[i]; const b = (sl.bullets || []).map(x => String(x).trim()).filter(Boolean);
+  if (deck.script_mode === 'script' && String(sl.script || '').trim()) return String(sl.script).trim();   // kịch bản người dùng đưa: đọc đúng từng chữ
   if (sl.script && sl.script.split(/\s+/).length >= 25) return sl.script;   // lời thuyết trình chi tiết do AI soạn
   const parts = [];
   if (sl.layout === 'title') parts.push(`${sl.title}.`, ...b.map(x => `${x}.`));
@@ -2831,6 +2858,110 @@ function stopPresent(message) {
   stopVoice();
   renderStageFrame(false);
   if (message) showBubble(message);
+}
+/* ---------- tài liệu trên máy: mở, hỏi tự trình bày hay theo kịch bản ---------- */
+const ASK = { ev: null };
+function showAsk(ev) {
+  ASK.ev = ev;
+  let el = $('#ask-card');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'ask-card'; el.className = 'ask-card hidden';
+    el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Trợ lý hỏi cách trình bày');
+    document.body.appendChild(el);
+  }
+  const where = ev.kind === 'script_where';
+  const title = String(ev.title || '').replace(/^Slide: /, '');
+  el.innerHTML = `<div class="flex items-start justify-between gap-3">
+      <div class="min-w-0"><p class="text-[12px] text-muted">${esc(AN())} hỏi${title ? ` - ${esc(title)}` : ''}</p>
+        <p class="font-medium mt-0.5">${esc(ev.text)}</p></div>
+      <button class="icon-btn shrink-0" data-act="ask-close" aria-label="Đóng câu hỏi" title="Đóng"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="flex flex-wrap gap-2 mt-3">
+      ${where ? '' : '<button class="btn btn-primary btn-sm" data-act="ask-answer" data-mode="auto">Em tự trình bày</button>'}
+      ${ev.has_notes && !where ? '<button class="btn btn-ghost btn-sm" data-act="ask-answer" data-mode="script" data-source="notes">Theo ghi chú trong tệp</button>' : ''}
+      <button class="btn ${where ? 'btn-primary' : 'btn-ghost'} btn-sm" data-act="ask-file">Chọn tệp kịch bản</button>
+      <button class="btn btn-ghost btn-sm" data-act="ask-paste">Dán kịch bản</button>
+      ${where ? '<button class="btn btn-ghost btn-sm" data-act="ask-answer" data-mode="auto">Em tự trình bày</button>' : ''}
+      <button class="btn btn-ghost btn-sm" data-act="ask-answer" data-mode="human" title="Em chỉ tự chuyển slide theo lời anh chị">Để tôi trình bày</button>
+    </div>
+    <p class="text-[12px] text-muted mt-2">Trả lời bằng giọng nói cũng được: "em tự trình bày", "theo ghi chú trong file", "kịch bản ở file kich-ban trong Downloads".</p>`;
+  el.classList.remove('hidden');
+}
+function hideAsk() { const el = $('#ask-card'); if (el) el.classList.add('hidden'); ASK.ev = null; }
+async function answerAsk(body) {
+  const R = S.room; if (!R) return;
+  const ev = ASK.ev;
+  hideAsk();
+  try { await POST(`/api/meetings/${R.id}/present-mode`, { artifact_id: ev ? ev.artifact_id : (R.stage && R.stage.artifact_id), ...body }); }
+  catch (e) { toast(e.message, 'err'); if (ev && !ASK.ev) showAsk(ev); }
+}
+const EXT_COLOR = { '.pdf': '#FF6B6B', '.pptx': '#FF9F43', '.ppt': '#FF9F43', '.docx': '#5AB2FF', '.md': '#9AA5B1', '.txt': '#9AA5B1', '.json': '#9AA5B1' };
+function fmtSize(n) {
+  n = n || 0;
+  return n >= 1048576 ? `${(n / 1048576).toFixed(1).replace('.', ',')} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`;
+}
+function libRow(it) {
+  const when = it.mtime ? fmt.date(it.mtime).split(' ')[0] : '';
+  return `<button type="button" class="lib-row" data-lib-path="${esc(it.path)}" title="${esc(it.path)}">
+    <span class="lib-ext" style="color:${EXT_COLOR[it.ext] || '#9AA5B1'}">${esc(String(it.ext || '').replace('.', ''))}</span>
+    <span class="min-w-0"><span class="block truncate">${esc(it.name)}</span><span class="block truncate text-[12px] text-muted">${esc([it.root_name, it.folder].filter(Boolean).join(' / '))}</span></span>
+    <span class="text-[12px] text-muted num whitespace-nowrap text-right">${esc(fmtSize(it.size))}${when ? `<br>${esc(when)}` : ''}</span></button>`;
+}
+function openLibrary(mode = 'open') {
+  const R = S.room; if (!R) return toast('Mở một cuộc họp trước để trình bày tài liệu.', 'info');
+  const script = mode === 'script';
+  openModal(`<h3 class="text-lg font-semibold mb-1">${script ? 'Chọn tệp kịch bản' : 'Mở tài liệu'}</h3>
+    <p class="text-muted text-[13px] mb-3">${script ? 'Tệp Word, PDF, Markdown hoặc văn bản chứa lời trình bày. Có đánh dấu "Slide 1:", "Slide 2:" thì em ghép đúng từng slide, không có thì em tự ghép theo nội dung và giữ nguyên câu chữ.'
+      : 'PDF, PowerPoint, Word, Markdown trong các thư mục tài liệu. Mở xong em hỏi anh chị muốn em tự trình bày hay theo kịch bản.'}</p>
+    <input id="lib-q" class="input mb-2" type="search" autocomplete="off" placeholder="Tìm theo tên tệp hoặc thư mục" aria-label="Tìm tài liệu">
+    <div id="lib-list" class="flex flex-col gap-0.5" style="max-height:52vh;overflow:auto" aria-live="polite"><div class="flex items-center gap-2 text-muted p-2"><span class="spinner"></span>Đang tìm...</div></div>
+    <p class="text-[12px] text-muted mt-3" id="lib-roots"></p>
+    <div class="flex justify-between items-center gap-2 mt-3"><button type="button" class="link text-[12.5px]" data-act="settings">Thêm thư mục tài liệu</button><button type="button" class="btn btn-ghost" data-act="modal-close">Đóng</button></div>`, {
+    wide: true,
+    onMount(m) {
+      let seq = 0, timer = null;
+      const load = async () => {
+        const my = ++seq; const q = $('#lib-q', m).value.trim();
+        try {
+          const r = await GET(`/api/library?q=${encodeURIComponent(q)}&limit=80`);
+          if (my !== seq || !document.contains(m)) return;
+          const roots = (r.roots || []).map(x => x.name);
+          $('#lib-roots', m).textContent = roots.length ? `Đang tìm trong: ${roots.join(', ')}.` : 'Chưa có thư mục tài liệu nào.';
+          const items = r.items || [];
+          $('#lib-list', m).innerHTML = items.length ? items.map(libRow).join('')
+            : `<p class="text-muted p-2">${q ? 'Không có tệp nào khớp.' : 'Chưa có tệp PDF, PowerPoint, Word hay Markdown nào trong các thư mục tài liệu.'}</p>`;
+        } catch (e) { if (my === seq) $('#lib-list', m).innerHTML = `<p class="p-2" style="color:rgb(var(--danger))">${esc(e.message)}</p>`; }
+      };
+      $('#lib-q', m).addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 220); });
+      m.addEventListener('click', async e => {
+        const b = e.target.closest('[data-lib-path]'); if (!b) return;
+        const path = b.dataset.libPath;
+        closeModal();
+        if (script) return answerAsk({ mode: 'script', source: 'file', path });
+        if (!STAGE.open) openStage(true);
+        try { await POST(`/api/meetings/${R.id}/open-file`, { path }); }
+        catch (err) { toast(err.message, 'err'); }
+      });
+      load();
+    }
+  });
+}
+function openPasteScript() {
+  openModal(`<h3 class="text-lg font-semibold mb-1">Dán kịch bản</h3>
+    <p class="text-muted text-[13px] mb-3">Ghi "Slide 1:", "Slide 2:"... trước lời của từng slide để em ghép đúng. Không có đánh dấu thì em tự ghép theo nội dung từng slide, giữ nguyên câu chữ của anh chị.</p>
+    <form id="ps-form">
+      <label class="field" for="ps-text">Lời trình bày</label>
+      <textarea id="ps-text" class="input" rows="12" required placeholder="Slide 1: Kính chào anh chị, hôm nay em trình bày kế hoạch quý 4...&#10;Slide 2: ..."></textarea>
+      <div class="flex justify-end gap-2 mt-3"><button type="button" class="btn btn-ghost" data-act="modal-close">Hủy</button><button class="btn btn-primary" type="submit">Trình bày theo kịch bản này</button></div>
+    </form>`, {
+    wide: true,
+    onMount(m) {
+      $('#ps-form', m).addEventListener('submit', e => {
+        e.preventDefault();
+        const text = $('#ps-text', m).value.trim(); if (!text) return;
+        closeModal(); answerAsk({ mode: 'script', source: 'text', text });
+      });
+    }
+  });
 }
 $('#stage-ask').addEventListener('submit', e => {
   e.preventDefault();
@@ -3007,6 +3138,15 @@ function openSettings() {
       <p class="text-[12px] text-muted mt-1">Linh vật UrBox: nói thì miệng mở theo giọng, nghe thì nghiêng người và đưa tay lên tai, nghĩ thì gãi đầu kèm bong bóng suy nghĩ. Hộp quà: nắp bật theo giọng nói.</p>
     </div>
     <div class="mt-5 pt-4 border-t divider">
+      <div class="flex items-center justify-between gap-2 mb-2"><h4 class="font-semibold">Nguồn AI</h4><span class="text-[12px] text-muted">API key hoặc gói đăng ký</span></div>
+      <div id="llm-box" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang kiểm tra...</div></div>
+    </div>
+    <div class="mt-5 pt-4 border-t divider">
+      <h4 class="font-semibold mb-1">Thư mục tài liệu</h4>
+      <p class="text-[12px] text-muted mb-2">Trợ lý tìm và mở PDF, PowerPoint, Word, Markdown trong các thư mục này ("${esc(a.name)} ơi, mở file báo cáo Q3 trong Downloads"). Chỉ quét tên tệp, nội dung chỉ được đọc khi mở.</p>
+      <div id="lib-box" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang tải...</div></div>
+    </div>
+    <div class="mt-5 pt-4 border-t divider">
       <h4 class="font-semibold mb-2">Lưu trữ dữ liệu</h4>
       <div id="storage-box" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang kiểm tra...</div></div>
     </div>
@@ -3017,6 +3157,8 @@ function openSettings() {
     onMount(m) {
       renderUsage($('#usage-box', m));
       renderStorage($('#storage-box', m));
+      renderLlm($('#llm-box', m));
+      renderLibrarySettings($('#lib-box', m));
       const preview = () => { const n = $('#as-name', m).value.trim() || 'Bông'; $('#as-preview', m).textContent = `"${n} ơi, tóm tắt giúp anh các quyết định" hoặc "${n}, tra cứu ticket của Tuấn"`; };
       $('#as-name', m).addEventListener('input', preview); preview();
       $('#as-form', m).addEventListener('submit', async e => {
@@ -3034,6 +3176,82 @@ function openSettings() {
     }
   });
 }
+const PROVIDER_NAMES = { claude: 'Claude API', gemini: 'Gemini API', 'claude-cli': 'Claude.ai (gói đăng ký)', 'codex-cli': 'ChatGPT (gói đăng ký)', 'gemini-cli': 'Gemini (gói đăng ký)' };
+async function renderLlm(box) {
+  if (!box) return;
+  try {
+    const r = await GET('/api/llm/providers');
+    const items = r.providers || [];
+    const state = p => p.kind === 'api' ? (p.logged_in ? ['Có API key', 'chip-accent'] : ['Chưa có API key', ''])
+      : !p.installed ? ['Chưa cài', ''] : p.logged_in ? [`Đã đăng nhập${p.plan ? ` (${p.plan})` : ''}`, 'chip-accent'] : ['Chưa đăng nhập', 'chip-warn'];
+    const detail = p => p.kind === 'api' ? `Model ${p.model}, tính tiền theo token. ${p.logged_in ? '' : p.login}`
+      : !p.installed ? `Cần ${p.plan_hint}. Cài ${p.tool}: ${p.install}`
+      : !p.logged_in ? `Cần ${p.plan_hint}. ${p.login}` : `Dùng hạn mức của gói, không tính tiền API. Cần ${p.plan_hint}.`;
+    box.innerHTML = `<form id="llm-form" class="flex flex-col gap-2">
+      <div role="radiogroup" aria-label="Nguồn AI" class="flex flex-col gap-1.5">${items.map(p => {
+        const [txt, cls] = state(p); const id = `llm-${p.id}`;
+        return `<div class="llm-row ${r.current === p.id ? 'on' : ''}" data-llm-row="${esc(p.id)}">
+          <input type="radio" name="llm-p" id="${id}" value="${esc(p.id)}" ${r.current === p.id ? 'checked' : ''} style="margin-top:3px">
+          <div class="min-w-0"><label for="${id}" class="block font-medium cursor-pointer">${esc(p.kind === 'api' ? p.label : `${p.label} qua ${p.tool}`)}</label>
+            <p class="text-[12px] text-muted">${esc(detail(p))}</p>
+            ${p.kind === 'api' ? '' : `<div class="flex items-center gap-2 mt-1.5"><label class="text-[12px] text-muted shrink-0" for="${id}-model">Model</label>
+              <input id="${id}-model" class="input" data-llm-model="${esc(p.id)}" style="height:30px;font-size:12.5px;max-width:220px" value="${esc(p.model_setting || '')}" placeholder="${esc(p.model || 'mặc định của gói')}" autocomplete="off"></div>`}</div>
+          <div class="flex flex-col items-end gap-1.5"><span class="chip ${cls}">${esc(txt)}</span>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="llm-test" data-pid="${esc(p.id)}" ${p.installed && p.logged_in ? '' : 'disabled'}>Kiểm tra</button></div>
+        </div>`; }).join('')}</div>
+      <label class="flex items-center gap-2 text-[13px] mt-1"><input type="checkbox" id="llm-fallback" ${r.api_fallback ? 'checked' : ''}> Gói đăng ký lỗi hoặc hết hạn mức thì gọi tiếp bằng API key (có tính phí)</label>
+      <div class="flex items-center justify-between gap-2"><p class="text-[12px] text-muted" id="llm-msg">${r.ready ? '' : 'Nguồn đang chọn chưa sẵn sàng.'}</p><button class="btn btn-primary btn-sm" type="submit">Lưu nguồn AI</button></div>
+      <p class="text-[12px] text-muted">Gói đăng ký Claude.ai, ChatGPT, Gemini dành cho cá nhân người đăng ký và có hạn mức theo giờ / ngày. Dùng chung cho nhiều người hoặc chạy liên tục cả ngày nên dùng API key theo điều khoản của nhà cung cấp. Gói cá nhân có thể dùng nội dung để cải thiện mô hình nếu chưa tắt trong cài đặt quyền riêng tư; nội dung cuộc họp nội bộ nên đi qua gói doanh nghiệp (Team, Business, Enterprise) hoặc API key. Đây là thông tin tham khảo, vui lòng xác nhận với bộ phận IT / Pháp chế trước khi dùng chính thức.</p>
+    </form>`;
+    $$('input[name="llm-p"]', box).forEach(inp => inp.addEventListener('change', () => $$('[data-llm-row]', box).forEach(row => row.classList.toggle('on', row.dataset.llmRow === inp.value))));
+    $('#llm-form', box).addEventListener('submit', async e => {
+      e.preventDefault();
+      const sel = $('input[name="llm-p"]:checked', box); if (!sel) return;
+      const mi = $(`[data-llm-model="${sel.value}"]`, box);
+      try {
+        await PUT('/api/llm/provider', { provider: sel.value, api_fallback: $('#llm-fallback', box).checked, model: mi ? mi.value.trim() : null });
+        toast(`Đã chọn nguồn AI: ${PROVIDER_NAMES[sel.value] || sel.value}.`);
+        renderLlm(box); loadHealth();
+      } catch (err) { toast(err.message, 'err'); }
+    });
+  } catch (e) { box.innerHTML = `<p style="color:rgb(var(--danger))">${esc(e.message)}</p>`; }
+}
+async function testProvider(pid, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Đang thử...'; }
+  try {
+    const r = await POST('/api/llm/test', { provider: pid });
+    toast(`${PROVIDER_NAMES[pid] || pid} trả lời sau ${String(r.seconds).replace('.', ',')} giây: "${r.text}"`, 'ok', 6000);
+  } catch (e) { toast(e.message, 'err', 7000); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = 'Kiểm tra'; } }
+}
+async function renderLibrarySettings(box) {
+  if (!box) return;
+  try {
+    const r = await GET('/api/settings/library');
+    const norm = p => String(p || '').toLowerCase().replace(/[\\/]+$/, '');
+    const saved = new Set((r.saved || []).map(norm));
+    const fixed = (r.roots || []).filter(x => !saved.has(norm(x.path)));
+    box.innerHTML = `
+      <ul class="flex flex-col gap-1 mb-2">
+        ${fixed.map(x => `<li class="flex items-center justify-between gap-2"><span class="truncate" title="${esc(x.path)}">${esc(x.path)}</span><span class="chip">mặc định</span></li>`).join('')}
+        ${(r.saved || []).map(d => `<li class="flex items-center justify-between gap-2"><span class="truncate" title="${esc(d)}">${esc(d)}</span>
+          <button type="button" class="icon-btn" data-act="lib-remove" data-dir="${esc(d)}" aria-label="Bỏ thư mục ${esc(d)}" title="Bỏ thư mục"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></li>`).join('')}
+      </ul>
+      <form id="lib-form" class="flex gap-2"><input id="lib-dir" class="input" autocomplete="off" placeholder="Ví dụ: D:\\Tài liệu\\Thuyết trình" aria-label="Đường dẫn thư mục tài liệu"><button class="btn btn-ghost btn-sm shrink-0" type="submit" style="height:38px">Thêm thư mục</button></form>
+      <p class="text-[12px] text-muted mt-2">${r.libreoffice ? 'Đã có LibreOffice: PowerPoint hiện đúng thiết kế từng slide.'
+        : 'Máy chưa có LibreOffice: PowerPoint hiện chữ, ghi chú và hình lớn nhất của từng slide. Muốn hiện đúng thiết kế, lưu thêm bản PDF (File > Save As > PDF) rồi mở bản PDF, hoặc cài LibreOffice.'} PDF luôn hiện đúng hình từng trang.</p>`;
+    $('#lib-form', box).addEventListener('submit', async e => {
+      e.preventDefault();
+      const d = $('#lib-dir', box).value.trim(); if (!d) return;
+      await saveLibraryDirs([...(r.saved || []), d], box);
+    });
+  } catch (e) { box.innerHTML = `<p style="color:rgb(var(--danger))">${esc(e.message)}</p>`; }
+}
+async function saveLibraryDirs(dirs, box) {
+  try { await PUT('/api/settings/library', { dirs }); toast('Đã lưu thư mục tài liệu.'); }
+  catch (e) { toast(e.message, 'err'); }
+  renderLibrarySettings(box || $('#lib-box'));
+}
 const fmtTok = n => new Intl.NumberFormat('vi-VN').format(Math.round(n || 0));
 const fmtUsd = v => (v >= 0.01 ? `$${v.toFixed(2)}` : v > 0 ? `$${v.toFixed(4)}` : '$0');
 async function renderUsage(box) {
@@ -3046,6 +3264,8 @@ async function renderUsage(box) {
     const meetings = (u.by_meeting || []).slice(0, 15).map(m => row([
       `${m.meeting_id != null ? `<a class="link" href="#/m/${m.meeting_id}" data-act="modal-close">#${m.meeting_id}</a> ` : ''}${esc(m.title || '')}`,
       fmtTok(m.requests), fmtTok(m.input_tokens), fmtTok(m.output_tokens), fmtUsd(m.cost_usd)])).join('');
+    const models = (u.by_model || []).map(x => { const [pv, ...md] = String(x.model || '').split('/');
+      return row([esc(`${PROVIDER_NAMES[pv] || pv}${md.length ? ' / ' + md.join('/') : ''}`), fmtTok(x.requests), fmtTok(x.input_tokens), fmtTok(x.output_tokens), fmtUsd(x.cost_usd)]); }).join('');
     const purposes = (u.by_purpose || []).map(p => row([esc(p.purpose), fmtTok(p.requests), fmtTok(p.input_tokens), fmtTok(p.output_tokens), fmtUsd(p.cost_usd)])).join('');
     box.innerHTML = `
       <div class="kpis mb-3" style="grid-template-columns:repeat(4,minmax(0,1fr))">
@@ -3055,6 +3275,7 @@ async function renderUsage(box) {
         <div class="kpi"><div class="kpi-l">Chi phí ước tính</div><div class="kpi-v" style="font-size:18px;overflow-wrap:normal">${fmtUsd(t.cost_usd || 0)}</div><div class="kpi-n">theo giá niêm yết của model</div></div>
       </div>
       ${meetings ? `<div class="dtable-wrap mb-3"><table class="dtable">${head(['Cuộc họp', 'Lần gọi', 'Token vào', 'Token ra', 'Chi phí'])}<tbody>${meetings}</tbody></table></div>` : '<p class="text-muted mb-3">Chưa có lời gọi AI nào được ghi.</p>'}
+      ${models ? `<details class="mb-2"><summary class="cursor-pointer text-muted">Theo nguồn AI và model</summary><div class="dtable-wrap mt-2"><table class="dtable">${head(['Nguồn / model', 'Lần gọi', 'Token vào', 'Token ra', 'Chi phí'])}<tbody>${models}</tbody></table></div><p class="text-[12px] text-muted mt-1">Gọi qua gói đăng ký (Claude.ai, ChatGPT, Gemini) ghi 0 USD, tính vào hạn mức của gói.</p></details>` : ''}
       ${purposes ? `<details><summary class="cursor-pointer text-muted">Theo loại việc</summary><div class="dtable-wrap mt-2"><table class="dtable">${head(['Việc', 'Lần gọi', 'Token vào', 'Token ra', 'Chi phí'])}<tbody>${purposes}</tbody></table></div></details>` : ''}
       ${u.estimated_rows ? `<p class="text-[12px] text-muted mt-2">${fmtTok(u.estimated_rows)} lần gọi không trả về số token (hoặc lỗi), số liệu ước tính theo độ dài chữ.</p>` : ''}
       <p class="text-[12px] text-muted mt-2">Phần prompt lặp lại giữa các lần gọi (hướng dẫn, transcript, kết quả tra cứu) được đọc lại từ cache với 10% giá. Chi phí tính theo bảng giá Anthropic ngày 02/10/2026.</p>`;
@@ -3108,7 +3329,7 @@ async function openDiagnostics() {
     <ul class="mb-4">
       ${row('Nhận dạng giọng nói (Soniox)', h.soniox.ready, `${h.soniox.model} - ${h.soniox.status}`)}
       ${row('Phân biệt người nói (CAM++)', h.campp.ready, h.campp.status)}
-      ${row('Trợ lý AI', h.llm.ready, `${h.llm.provider} (Claude ${h.llm.claude_ready ? 'có' : 'chưa có'} key, Gemini ${h.llm.gemini_ready ? 'có' : 'chưa có'} key)`)}
+      ${row('Trợ lý AI', h.llm.ready, `${PROVIDER_NAMES[h.llm.provider] || h.llm.provider} (Claude ${h.llm.claude_ready ? 'có' : 'chưa có'} key, Gemini ${h.llm.gemini_ready ? 'có' : 'chưa có'} key). Đổi nguồn AI trong Cài đặt.`)}
       ${row('Cơ sở dữ liệu', true, `${h.mongodb.status}`, h.mongodb.is_mock)}
       ${h.web_search ? row('Tra cứu trên mạng', h.web_search.playwright || h.web_search.claude,
           h.web_search.provider === 'claude' ? 'Công cụ web_search của Claude'
@@ -3222,6 +3443,15 @@ document.addEventListener('click', async e => {
       S.room.panelSlide[aid] = to; return renderArtifactPane();
     }
     case 'diag': return openDiagnostics();
+    case 'open-doc': return openLibrary('open');
+    case 'ask-close': return hideAsk();
+    case 'ask-answer': return answerAsk(el.dataset.source ? { mode: el.dataset.mode, source: el.dataset.source } : { mode: el.dataset.mode });
+    case 'ask-file': return openLibrary('script');
+    case 'ask-paste': return openPasteScript();
+    case 'llm-test': return testProvider(el.dataset.pid, el);
+    case 'lib-remove': { const box = el.closest('#lib-box'); const d = el.dataset.dir;
+      const cur = $$('[data-act="lib-remove"]', box).map(b => b.dataset.dir).filter(x => x !== d);
+      return saveLibraryDirs(cur, box); }
     case 'settings': closeMenu(); return openSettings();
     case 'modal-close': return closeModal();
   }

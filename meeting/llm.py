@@ -169,8 +169,70 @@ _WEB_SEARCH = re.compile(r"\b(search|sớt|xớt|research|google)\b|(tra cứu|t
                          r"(coi|xem|thử)?\s*(trên\s*)?(mạng|internet|google|web|online)", re.I)
 _WEB_FILLER = re.compile(r"^(em\s+)?(hãy\s+)?(search|sớt|xớt|research|tra cứu|tìm kiếm|tìm|kiểm tra|xem|google)\s*(trên\s*)?(mạng|internet|google|web|online)?"
                          r"\s*(giúp|giùm|hộ|cho)?\s*(anh|chị|em|mình|tôi)?\s*(coi|xem|thử|là|về)?\s*", re.I)
-_OPEN_FILE = re.compile(r"(mở|lấy|tìm|chiếu|trình chiếu|load)\b.*\b(slide|bộ slide|bài|file|tệp)\b.*\b(folder|thư mục|tệp|file|trên máy|ổ)\b|"
-                        r"(mở|lấy|tìm)\s*(file|tệp)\s*slide", re.I)
+_OPEN_FILE = re.compile(r"(mở|lấy|tìm|chiếu|trình chiếu|load)\b.*\b(slide|bộ slide|bài|file|tệp|tài liệu)\b.*\b(folder|thư mục|tệp|file|trên máy|ổ|desktop|download|documents)\b|"
+                        r"(mở|lấy|tìm|chiếu)\s*(cái\s*)?(file|tệp|tài liệu)\s*(slide|pdf|powerpoint|ppt|pptx|word|docx|báo cáo|thuyết trình|trình bày)?|"
+                        r"(mở|chiếu)\s*(cái\s*)?(file\s*)?(pdf|powerpoint|pptx|ppt|word|docx)\b|[a-z]:\\[^\n]+\.(pdf|pptx|ppt|docx|md|txt)", re.I)
+_ANS_NO_SCRIPT = re.compile(r"không\s*(cần|có|dùng)\s*kịch\s*bản", re.I)
+# "em tự trình bày", "tự soạn lời luôn": chọn rõ ràng
+_ANS_SELF = re.compile(r"(em\s*)?tự\s*(trình bày|thuyết trình|nói|làm|soạn|viết|trình)", re.I)
+# chung chung ("em thuyết trình giúp anh"): chỉ coi là câu trả lời khi không phải câu lệnh kèm cách trình bày
+_ANS_LOOSE = re.compile(r"cứ\s*(trình bày|nói|thuyết trình)|em\s*(trình bày|nói|thuyết trình)\s*(luôn|đi|giúp)|em\s*lo\b", re.I)
+_ANS_SCRIPT = re.compile(r"kịch\s*bản|\bscript\b|theo\s*(bài|ghi chú|note|file|tệp)|đọc\s*(theo|đúng)", re.I)
+_ANS_NOTES = re.compile(r"ghi\s*chú|\bnotes?\b|speaker|có\s*sẵn|phần\s*dưới|trong\s*(slide|file|tệp)\s*(luôn|đó|này)", re.I)
+_ANS_PASTE = re.compile(r"\b(dán|paste|gõ|nhắn|copy|gửi)\b", re.I)
+_ANS_FILE = re.compile(r"(?:file|tệp|folder|thư mục|tài liệu)\s+(.+)", re.I)
+# "để anh trình bày", "anh tự nói": người trong phòng tự trình bày, AI chỉ chuyển slide theo lời
+_ANS_HUMAN = re.compile(r"\bđể\s*(anh|chị|tôi|mình|tụi anh|bọn anh)\s*(tự\s*)?(trình bày|thuyết trình|nói)\b|"
+                        r"\b(anh|chị|tôi|mình|tụi anh|bọn anh)\s*(sẽ\s*)?tự\s*(trình bày|thuyết trình|nói)\b", re.I)
+# đang chờ trả lời: "để anh", "để chị lo", "anh trình bày nhé" (không nhận "để anh xem", "file anh nói lúc nãy")
+_ANS_HUMAN_ASKED = re.compile(r"^(thôi\s*|vậy\s*|ừ\s*)?để\s*(anh|chị|tôi|mình)(\s*(tự|lo|làm|nói|trình bày|thuyết trình))*"
+                              r"(\s*(nhé|nha|đi|được rồi))*$|"
+                              r"^(thôi\s*|vậy\s*|ừ\s*)?(anh|chị|tôi|mình)\s*(sẽ\s*)?(tự\s*)?(trình bày|thuyết trình|nói)"
+                              r"(\s*(nhé|nha|đi|được rồi|luôn))*$", re.I)
+_WIN_PATH = re.compile(r"[a-z]:[\\/]", re.I)
+# chỉ khi đang chờ trả lời: "trình bày đi", "nói luôn đi em", "bắt đầu đi"
+_ANS_GO = re.compile(r"^(ừ\s*|ok\s*|được\s*|vâng\s*)?(em\s*)?(cứ\s*)?(trình bày|thuyết trình|nói|bắt đầu|làm)"
+                     r"(\s*(luôn|đi|nhé|nha|thôi|em|giúp anh|giúp chị))*$", re.I)
+
+
+def present_answer(text: str, asked: bool = False, explicit: bool = False) -> Optional[Dict[str, Any]]:
+    """Câu trả lời cho "anh muốn em tự trình bày hay trình bày theo kịch bản ạ?".
+
+    {"mode": "auto"} | {"mode": "human"} | {"mode": "script", "source": "notes" | "file" | "text" | None, "query": ...}
+    | None.
+    - asked=True: trợ lý vừa hỏi, nhận cả câu ngắn ("trình bày đi", "để anh", "file kich ban ở Downloads").
+    - explicit=True: câu lệnh nói kèm cách trình bày ("mở file X rồi trình bày theo ghi chú"); chỉ nhận lựa chọn nói rõ,
+      câu chung chung như "em thuyết trình giúp anh" thì trợ lý vẫn hỏi."""
+    c = re.sub(r"\s+", " ", (text or "").lower()).strip(" .!?,")
+    if not c:
+        return None
+    if _ANS_NO_SCRIPT.search(c):
+        return {"mode": "auto"}
+    if _CREATE_DECK.search(c) or _WEB_SEARCH.search(c):
+        return None                                 # yêu cầu mới (soạn slide, tra cứu), không phải câu trả lời
+    if _ANS_SCRIPT.search(c) and _WIN_PATH.search(c):
+        return {"mode": "script", "source": "file", "query": (text or "").strip()}   # đọc thẳng đường dẫn đầy đủ
+    if _ANS_SCRIPT.search(c):
+        if _ANS_NOTES.search(c):
+            return {"mode": "script", "source": "notes"}
+        m = _ANS_FILE.search(c)
+        if m and not re.fullmatch(r"(này|đó|luôn)", m.group(1).strip()):
+            return {"mode": "script", "source": "file", "query": c}
+        if _ANS_PASTE.search(c):
+            return {"mode": "script", "source": "text"}
+        return {"mode": "script", "source": None}
+    if _ANS_HUMAN.search(c) or (asked and _ANS_HUMAN_ASKED.search(c)):
+        return {"mode": "human"}
+    if _ANS_SELF.search(c) or (not explicit and _ANS_LOOSE.search(c)) or (asked and _ANS_GO.search(c)):
+        return {"mode": "auto"}
+    m = _ANS_FILE.search(c)                         # trả lời câu "kịch bản ở đâu ạ?" chỉ bằng tên file
+    if asked and m and re.search(r"\b(ở|trong|tên|là)\b", c) and not re.match(r"(mở|chiếu|trình chiếu)\b", c):
+        return {"mode": "script", "source": "file", "query": c}
+    if asked and _ANS_NOTES.search(c):              # "có sẵn trong ghi chú đó em"
+        return {"mode": "script", "source": "notes"}
+    return None
+
+
 _STAGE_PATTERNS = [
     ("follow_off", re.compile(r"(tắt|ngừng|dừng|đừng|không|thôi)\s*(chế độ\s*)?(tự\s*(động\s*)?|tự\s*ý\s*)"
                               r"(chuyển|lật|theo|đổi)", re.I)),

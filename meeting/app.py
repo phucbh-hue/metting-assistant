@@ -11,6 +11,7 @@ import io
 import json
 import logging
 import os
+import time
 import wave
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -27,12 +28,14 @@ from fastapi.responses import FileResponse, Response  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
-from meeting import artifacts, db, live, llm, mcp, tts, voice, websearch  # noqa: E402
+from meeting import artifacts, cli_llm, db, decks, live, llm, mcp, tts, voice, websearch  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("meeting.app")
 
 HERE = Path(__file__).resolve().parent
+NO_LLM = ("Chưa có nguồn AI: đặt ANTHROPIC_API_KEY / GEMINI_API_KEY trong .env, hoặc chọn gói đăng ký "
+          "(Claude.ai, ChatGPT, Gemini) trong Cài đặt")
 DEFAULT_VOCAB = ["UrBox", "Kubernetes", "PostgreSQL", "Redis", "webhook", "idempotent", "voucher",
                  "merchant", "sprint", "DevOps", "latency", "schema", "microservices"]
 
@@ -109,6 +112,33 @@ class StageReq(BaseModel):
 class AssistantSettings(BaseModel):
     name: str
     aliases: List[str] = Field(default_factory=list)
+
+
+class LibraryDirs(BaseModel):
+    dirs: List[str] = Field(default_factory=list)
+
+
+class OpenFileReq(BaseModel):
+    path: str = Field(..., min_length=3, max_length=1000)
+
+
+class PresentModeReq(BaseModel):
+    mode: str                                   # auto | script | human
+    source: Optional[str] = None                # notes | file | text
+    artifact_id: Optional[int] = None
+    path: Optional[str] = None
+    query: Optional[str] = None
+    text: Optional[str] = Field(None, max_length=60000)
+
+
+class ProviderReq(BaseModel):
+    provider: str
+    api_fallback: Optional[bool] = None
+    model: Optional[str] = Field(None, max_length=80)
+
+
+class ProviderTestReq(BaseModel):
+    provider: Optional[str] = None
 
 
 class VoiceUpdate(BaseModel):
@@ -226,7 +256,7 @@ def health():
                        "claude": bool(os.getenv("ANTHROPIC_API_KEY"))},
         "mongodb": {"status": _db_status_text(db_st), "ready": True, "database": db_st["database"],
                     "is_mock": db_st["is_mock"], "mode": db_st["mode"], "atlas_error": db_st["atlas_error"]},
-        "llm": {"provider": llm.PROVIDER, "ready": artifacts.llm_available(),
+        "llm": {"provider": artifacts.provider(), "ready": artifacts.llm_available(),
                 "claude_ready": bool(os.getenv("ANTHROPIC_API_KEY")),
                 "gemini_ready": bool(os.getenv("GEMINI_API_KEY"))},
         "auto_enroll_voices": live.AUTO_ENROLL_AI,
@@ -253,6 +283,159 @@ def put_assistant_settings(req: AssistantSettings):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {**cfg, "generic": ["trợ lý ơi", "hey assistant", "@ai", "bot ơi"]}
+
+
+# ------------------------------------------------------------ thư viện tài liệu trên máy ---
+@app.get("/api/library")
+async def library(q: str = "", limit: int = 60):
+    """Tệp PDF / PowerPoint / Word / Markdown trong các thư mục tài liệu (khớp câu tìm, hoặc mới sửa trước)."""
+    items = await asyncio.to_thread(decks.browse, q, max(1, min(int(limit), 200)))
+    return {"items": items, "roots": [{"path": str(r), "name": r.name} for r in decks.library_roots()]}
+
+
+def _library_settings() -> Dict[str, Any]:
+    try:
+        saved = [str(d) for d in json.loads(db.get_setting("library_dirs", "[]") or "[]")]
+    except ValueError:
+        saved = []
+    env_dirs = [d for d in (os.getenv("LIBRARY_DIRS") or "").split(os.pathsep) if d.strip()]
+    return {"roots": [{"path": str(r), "name": r.name} for r in decks.library_roots()], "saved": saved,
+            "env": env_dirs, "defaults": os.getenv("LIBRARY_DEFAULTS", "1").strip() != "0",
+            "slides_dir": str(decks.SLIDES_DIR), "libreoffice": bool(decks._soffice())}
+
+
+@app.get("/api/settings/library")
+def get_library_settings():
+    return _library_settings()
+
+
+@app.put("/api/settings/library")
+def put_library_settings(req: LibraryDirs):
+    """Thư mục tài liệu thêm (ngoài slides/, Desktop, Documents, Downloads, OneDrive)."""
+    dirs: List[str] = []
+    for d in req.dirs[:30]:
+        d = os.path.expandvars(os.path.expanduser((d or "").strip().strip('"')))
+        if not d:
+            continue
+        if not Path(d).is_dir():
+            raise HTTPException(status_code=400, detail=f"Không thấy thư mục: {d}")
+        if d not in dirs:
+            dirs.append(d)
+    db.set_setting("library_dirs", json.dumps(dirs, ensure_ascii=False))
+    decks.invalidate()
+    return _library_settings()
+
+
+@app.get("/api/deck-assets/{key}/{name}")
+def deck_asset(key: str, name: str):
+    """Ảnh từng trang của tài liệu đã mở (dựng trên máy, nằm trong data/deck_assets)."""
+    p = decks.asset_path(key, name)
+    if p is None or not p.is_file():
+        raise HTTPException(status_code=404, detail="Không có ảnh")
+    return FileResponse(str(p), headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.post("/api/meetings/{mid}/open-file")
+async def open_file(mid: int, req: OpenFileReq):
+    """Mở một tệp trong thư mục tài liệu lên màn hình trình chiếu, rồi hỏi tự trình bày hay theo kịch bản."""
+    p = decks.allowed(req.path)
+    if p is None:
+        raise HTTPException(status_code=400, detail="Tệp không đọc được hoặc không nằm trong thư mục tài liệu (thêm thư mục trong Cài đặt)")
+    s = await _session_or_404(mid)
+    q = await s.subscribe()
+    try:
+        await s.open_path(str(p))
+    finally:
+        s.unsubscribe(q)
+    events = []
+    while not q.empty():
+        events.append(q.get_nowait())
+    s.dispose_if_idle()
+    return {"events": events, "artifact_id": s.stage["artifact_id"]}
+
+
+@app.post("/api/meetings/{mid}/present-mode")
+async def present_mode(mid: int, req: PresentModeReq):
+    """Trả lời câu hỏi cách trình bày bằng nút bấm: tự trình bày, theo ghi chú, theo tệp kịch bản, dán kịch bản."""
+    if req.mode not in ("auto", "script", "human"):
+        raise HTTPException(status_code=400, detail="mode phải là auto, script hoặc human")
+    ans: Dict[str, Any] = {"mode": req.mode}
+    if req.mode == "script":
+        if req.source not in ("notes", "file", "text"):
+            raise HTTPException(status_code=400, detail="source phải là notes, file hoặc text")
+        ans["source"] = req.source
+        if req.source == "file":
+            if req.path:
+                p = decks.allowed(req.path)
+                if p is None:
+                    raise HTTPException(status_code=400, detail="Tệp kịch bản không nằm trong thư mục tài liệu")
+                ans["path"] = str(p)
+            elif req.query:
+                ans["query"] = req.query
+            else:
+                raise HTTPException(status_code=400, detail="Thiếu đường dẫn hoặc tên tệp kịch bản")
+        if req.source == "text":
+            if not (req.text or "").strip():
+                raise HTTPException(status_code=400, detail="Kịch bản đang trống")
+            ans["text"] = req.text
+    if req.artifact_id is not None:
+        ans["artifact_id"] = req.artifact_id
+    s = await _session_or_404(mid)
+    if req.artifact_id is not None and (s._ask or {}).get("artifact_id") != req.artifact_id:
+        s._ask = {"kind": "present_mode", "artifact_id": req.artifact_id, "until": time.monotonic() + live.ASK_S}
+    res = await s.answer_present(ans)
+    s.dispose_if_idle()
+    return res
+
+
+# ------------------------------------------------------------ nguồn AI: API key hoặc gói đăng ký ---
+def _providers_info() -> Dict[str, Any]:
+    api = [{"id": "claude", "kind": "api", "label": "Claude API (Anthropic)", "installed": True,
+            "logged_in": bool(os.getenv("ANTHROPIC_API_KEY")), "model": artifacts.CLAUDE_MODEL,
+            "login": "Đặt ANTHROPIC_API_KEY trong tệp .env"},
+           {"id": "gemini", "kind": "api", "label": "Gemini API (Google)", "installed": True,
+            "logged_in": bool(os.getenv("GEMINI_API_KEY")), "model": artifacts.AGENT_MODEL,
+            "login": "Đặt GEMINI_API_KEY trong tệp .env"}]
+    subs = cli_llm.status()
+    for it in subs:
+        it["model_setting"] = artifacts.provider_model(it["id"])
+    return {"current": artifacts.provider(), "api_fallback": artifacts.api_fallback(),
+            "ready": artifacts.llm_available(), "providers": api + subs}
+
+
+@app.get("/api/llm/providers")
+async def llm_providers():
+    return await asyncio.to_thread(_providers_info)
+
+
+@app.put("/api/llm/provider")
+async def set_llm_provider(req: ProviderReq):
+    try:
+        await asyncio.to_thread(artifacts.set_provider, req.provider, req.api_fallback, req.model)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return await asyncio.to_thread(_providers_info)
+
+
+@app.post("/api/llm/test")
+async def test_llm_provider(req: ProviderTestReq):
+    """Gửi một câu hỏi rất ngắn qua nguồn AI để kiểm tra đăng nhập / API key (tốn rất ít hạn mức)."""
+    name = (req.provider or artifacts.provider()).strip().lower()
+    t0 = time.time()
+    artifacts.set_meeting(None, "kiểm tra nguồn AI")
+    try:
+        if name in cli_llm.PROVIDERS:
+            text = await artifacts._cli_text(name, "Trả lời bằng tiếng Việt, đúng một câu ngắn.", "Chào một câu ngắn để kiểm tra kết nối.")
+        elif name == "claude" and os.getenv("ANTHROPIC_API_KEY"):
+            text = await artifacts._claude_text("Trả lời bằng tiếng Việt, đúng một câu ngắn.", "Chào một câu ngắn để kiểm tra kết nối.", 60)
+        elif name == "gemini" and os.getenv("GEMINI_API_KEY"):
+            text = await artifacts._gemini_text("Trả lời bằng tiếng Việt, đúng một câu ngắn.", "Chào một câu ngắn để kiểm tra kết nối.")
+        else:
+            raise RuntimeError("Nguồn này chưa có API key trong .env" if name in artifacts.API_PROVIDERS else f"Nguồn AI không hợp lệ: {name}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"ok": True, "provider": name, "text": (text or "").strip()[:300],
+            "seconds": round(time.time() - t0, 1)}
 
 
 @app.get("/api/directory")
@@ -546,7 +729,7 @@ async def control_stage(mid: int, req: StageReq):
 async def meeting_insights(mid: int, payload: Optional[Dict[str, Any]] = None):
     """Trợ lý xem lại cuộc họp và nêu nhận xét (đọc to trên giao diện)."""
     if not artifacts.llm_available():
-        raise HTTPException(status_code=503, detail="Chưa cấu hình ANTHROPIC_API_KEY hoặc GEMINI_API_KEY")
+        raise HTTPException(status_code=503, detail=NO_LLM)
     s = await _session_or_404(mid)
     try:
         items = await s.analyze_now((payload or {}).get("focus", ""))
@@ -597,7 +780,7 @@ async def split_speaker_after(mid: int, seq: int):
 async def infer_meeting_speakers(mid: int):
     """AI đọc hội thoại để đoán tên cho mọi người nói chưa định danh."""
     if not artifacts.llm_available():
-        raise HTTPException(status_code=503, detail="Chưa cấu hình ANTHROPIC_API_KEY hoặc GEMINI_API_KEY")
+        raise HTTPException(status_code=503, detail=NO_LLM)
     s = await _session_or_404(mid)
     try:
         results = await s.identity.run(force=True)
@@ -660,7 +843,7 @@ async def assistant_command(mid: int, payload: Dict[str, Any]):
     s = await _session_or_404(mid)
     needs_llm = llm.stage_intent(text) is None and not (s.stage["artifact_id"] and llm.is_edit_command(text))
     if needs_llm and not artifacts.llm_available():
-        raise HTTPException(status_code=503, detail="Chưa cấu hình ANTHROPIC_API_KEY hoặc GEMINI_API_KEY")
+        raise HTTPException(status_code=503, detail=NO_LLM)
     q = await s.subscribe()
     try:
         await s._handle_ai_activation(text, text, llm.assistant_config()["name"], source="text")
@@ -679,7 +862,7 @@ async def ask_assistant(mid: int, payload: Dict[str, Any]):
     if not prompt:
         raise HTTPException(status_code=400, detail="Thiếu nội dung câu hỏi")
     if not artifacts.llm_available():
-        raise HTTPException(status_code=503, detail="Chưa cấu hình ANTHROPIC_API_KEY hoặc GEMINI_API_KEY")
+        raise HTTPException(status_code=503, detail=NO_LLM)
     ls = live.SESSIONS.get(mid)
     segs = ls.segments if ls is not None else await asyncio.to_thread(db.get_segments, mid)
 

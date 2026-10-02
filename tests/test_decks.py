@@ -93,8 +93,12 @@ class StageDeckTests(unittest.IsolatedAsyncioTestCase):
         await self.s._handle_ai_activation("mở slide ở folder mega sale giúp anh", "Bông ơi, mở slide ở folder mega sale giúp anh", "Bông")
         art = db.get_artifact(self.s.stage["artifact_id"])
         self.assertEqual((art["kind"], art["title"]), ("slides", "Slide: Kế hoạch Q4"))
-        says = [e["text"] for e in self.events("ai_say")]
-        self.assertTrue(any("mở bộ slide" in t and "mega sale" in t and "2 slide" in t for t in says), says)
+        ev = self.events()
+        says = [e["text"] for e in ev if e["type"] == "ai_say"]
+        self.assertTrue(any("ke-hoach-q4" in t and "mega sale" in t and "2 slide" in t for t in says), says)
+        ask = [e for e in ev if e["type"] == "ai_ask"]           # tài liệu từ máy: hỏi cách trình bày
+        self.assertEqual((ask[0]["kind"], ask[0]["artifact_id"], ask[0]["has_notes"]), ("present_mode", art["id"], True))
+        self.assertIn("tự trình bày hay trình bày theo kịch bản", says[-1])
 
     async def test_open_file_not_found_lists_folders(self):
         await self.s._handle_ai_activation("mở slide ở folder tài chính", "Bông ơi, mở slide ở folder tài chính", "Bông")

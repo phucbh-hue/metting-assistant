@@ -17,7 +17,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from meeting import db, mcp
+from meeting import cli_llm, db, mcp
 
 log = logging.getLogger("meeting.artifacts")
 
@@ -54,8 +54,66 @@ def wants_stats(text: str) -> bool:
     return bool(_STATS_RE.search(text or ""))
 
 
-def llm_available() -> bool:
+API_PROVIDERS = ("claude", "gemini")
+_provider_cache: Dict[str, Any] = {}
+
+
+def _setting(key: str, default: str = "") -> str:
+    """Cài đặt nguồn AI lưu trong DB (đổi trong Cài đặt), nhớ 10 giây để không đọc DB ở mỗi lời gọi."""
+    hit = _provider_cache.get(key)
+    if hit is not None and time.monotonic() - hit[1] < 10:
+        return hit[0]
+    try:
+        val = db.get_setting(key, default) or default
+    except Exception:
+        val = default
+    _provider_cache[key] = (val, time.monotonic())
+    return val
+
+
+def provider() -> str:
+    """Nguồn AI đang dùng: claude / gemini (API key) hoặc claude-cli / codex-cli / gemini-cli (gói đăng ký)."""
+    p = _setting("llm_provider").strip().lower()
+    if p in API_PROVIDERS or p in cli_llm.PROVIDERS:
+        return p
+    return PROVIDER if PROVIDER in API_PROVIDERS or PROVIDER in cli_llm.PROVIDERS else "claude"
+
+
+def api_fallback() -> bool:
+    """Gói đăng ký lỗi / hết hạn mức thì có gọi tiếp bằng API key không (mặc định không, để không phát sinh chi phí)."""
+    return _setting("llm_api_fallback", os.getenv("LLM_API_FALLBACK", "0")).strip() in ("1", "true", "yes")
+
+
+def provider_model(name: str) -> str:
+    """Model chọn trong Cài đặt cho một gói đăng ký (trống = mặc định của CLI / biến môi trường)."""
+    return _setting(f"llm_model_{name}").strip()
+
+
+def set_provider(name: str, fallback: Optional[bool] = None, model: Optional[str] = None) -> Dict[str, Any]:
+    name = (name or "").strip().lower()
+    if name not in API_PROVIDERS and name not in cli_llm.PROVIDERS:
+        raise ValueError(f"Nguồn AI không hợp lệ: {name}")
+    if model is not None and name in cli_llm.PROVIDERS:
+        model = model.strip()
+        if not re.fullmatch(r"[A-Za-z0-9._:/@-]{0,80}", model):
+            raise ValueError(f"Tên model không hợp lệ: {model}")
+        db.set_setting(f"llm_model_{name}", model)
+    db.set_setting("llm_provider", name)
+    if fallback is not None:
+        db.set_setting("llm_api_fallback", "1" if fallback else "0")
+    _provider_cache.clear()
+    return {"provider": provider(), "api_fallback": api_fallback()}
+
+
+def _api_ready() -> bool:
     return bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("GEMINI_API_KEY"))
+
+
+def llm_available() -> bool:
+    p = provider()
+    if p in cli_llm.PROVIDERS:
+        return cli_llm.installed(p) or (api_fallback() and _api_ready())
+    return _api_ready()
 
 
 def _anthropic():
@@ -103,11 +161,12 @@ def _cost_usd(model: str, inp: int, out: int, cache_read: int = 0, cache_write: 
 
 
 def _record(provider: str, model: str, inp: int, out: int, t0: float, ok: bool, estimated: bool = False,
-            cache_read: int = 0, cache_write: int = 0, extra_usd: float = 0.0) -> None:
+            cache_read: int = 0, cache_write: int = 0, extra_usd: float = 0.0, free: bool = False) -> None:
+    """free=True: gọi qua gói đăng ký (Claude.ai / ChatGPT / Gemini), không tính tiền API."""
     try:
         db.record_llm_usage(CURRENT_MEETING.get(), provider, model, CURRENT_PURPOSE.get(), inp + cache_read + cache_write,
                             out, time.time() - t0, ok=ok,
-                            cost_usd=_cost_usd(model, inp, out, cache_read, cache_write) + extra_usd,
+                            cost_usd=0.0 if free else _cost_usd(model, inp, out, cache_read, cache_write) + extra_usd,
                             estimated=estimated, cache_read_tokens=cache_read, cache_write_tokens=cache_write)
     except Exception as e:   # ghi nhật ký không được làm hỏng lời gọi chính
         log.warning("meeting.artifacts: không ghi được nhật ký LLM: %s", e)
@@ -206,10 +265,34 @@ async def _gemini_text(system: Any, prompt: Any) -> str:
     return text
 
 
+async def _cli_text(name: str, system: Any, prompt: Any) -> str:
+    """Gọi qua gói đăng ký bằng CLI chính chủ (không prompt cache theo khối, không giới hạn max_tokens)."""
+    t0 = time.time()
+    sys_t, prm_t = _as_text(system), _as_text(prompt)
+    try:
+        r = await asyncio.to_thread(cli_llm.run, name, sys_t, prm_t, None, provider_model(name) or None)
+    except Exception:
+        _record(name, provider_model(name) or cli_llm.model_of(name), len(sys_t + prm_t) // 4, 0, t0, ok=False,
+                estimated=True, free=True)
+        raise
+    _record(name, r["model"], r["input"], r["output"], t0, ok=True, estimated=r["estimated"],
+            cache_read=r["cache_read"], cache_write=r["cache_write"], free=True)
+    return r["text"]
+
+
 async def _call_llm_raw(system: Any, prompt: Any, max_tokens: int = 4000) -> str:
-    if not llm_available():
-        raise RuntimeError("Chưa cấu hình ANTHROPIC_API_KEY hoặc GEMINI_API_KEY")
-    use_claude_first = PROVIDER == "claude" or not os.getenv("GEMINI_API_KEY")
+    p = provider()
+    if p in cli_llm.PROVIDERS:
+        try:
+            return await _cli_text(p, system, prompt)
+        except Exception as e:
+            if not (api_fallback() and _api_ready()):
+                raise
+            log.warning("meeting.artifacts: %s lỗi (%s), chuyển sang API key", p, e)
+            p = "claude"
+    if not _api_ready():
+        raise RuntimeError("Chưa cấu hình ANTHROPIC_API_KEY hoặc GEMINI_API_KEY (hoặc chọn gói đăng ký trong Cài đặt)")
+    use_claude_first = p == "claude" or not os.getenv("GEMINI_API_KEY")
     errors = []
     if use_claude_first and os.getenv("ANTHROPIC_API_KEY"):
         try:
@@ -652,7 +735,8 @@ def _json_from_text(text: str) -> Any:
 # ==============================================================================
 # 3b. BỘ SLIDE TRÌNH BÀY (PRESENTATION DECK)
 # ==============================================================================
-SLIDE_LAYOUTS = ("title", "bullets", "two_column", "quote", "metrics")
+SLIDE_LAYOUTS = ("title", "bullets", "two_column", "quote", "metrics", "image", "media")
+_ASSET_URL = re.compile(r"^/api/deck-assets/[0-9a-f]{16}/\d{1,3}m?\.(png|jpg|jpeg|webp|gif)$")
 
 SLIDES_SYSTEM = """Bạn là chuyên gia soạn slide thuyết trình cho cuộc họp nội bộ UrBox.
 Dựa vào yêu cầu, TOÀN BỘ nội dung cuộc họp và dữ liệu tra cứu, soạn một bộ slide ĐẦY ĐỦ, CHI TIẾT để trợ lý thuyết trình
@@ -686,14 +770,17 @@ Chỉ trả về MỘT JSON:
  "deck": {"title": "...", "slides": [{"title": "...", "layout": "...", "bullets": ["..."], "notes": "..."}]}}"""
 
 
-def normalize_deck(data: Any) -> Optional[Dict[str, Any]]:
-    """Chuẩn hóa bộ slide từ LLM; None nếu không hợp lệ."""
+def normalize_deck(data: Any, max_slides: int = 20) -> Optional[Dict[str, Any]]:
+    """Chuẩn hóa bộ slide (do AI soạn hoặc mở từ tệp); None nếu không hợp lệ.
+
+    Slide mở từ PDF / PowerPoint có thể có "image" (ảnh trang gốc, chỉ nhận đường dẫn ảnh do hệ thống dựng), ghi chú
+    người trình bày dài, và lời thuyết trình theo kịch bản của người dùng."""
     if isinstance(data, dict) and isinstance(data.get("deck"), dict):
         data = data["deck"]
     if not isinstance(data, dict) or not isinstance(data.get("slides"), list):
         return None
     slides = []
-    for s in data["slides"][:20]:
+    for s in data["slides"][:max_slides]:
         if isinstance(s, str):
             s = {"title": s}
         if not isinstance(s, dict):
@@ -703,42 +790,118 @@ def normalize_deck(data: Any) -> Optional[Dict[str, Any]]:
         if isinstance(bullets, str):
             bullets = re.split(r"\n+|•", bullets)
         bullets = [str(b).strip(" -•\t")[:220] for b in bullets if str(b).strip(" -•\t")][:7]
-        if not title and not bullets:
+        image = str(s.get("image") or "").strip()
+        image = image if _ASSET_URL.match(image) else ""
+        if not title and not bullets and not image:
             continue
         layout = s.get("layout") if s.get("layout") in SLIDE_LAYOUTS else ("title" if not slides else "bullets")
-        slides.append({"title": title or f"Slide {len(slides) + 1}", "layout": layout, "bullets": bullets,
-                       "notes": str(s.get("notes") or "").strip()[:600],
-                       "script": str(s.get("script") or "").strip()[:1500]})
+        if layout in ("image", "media") and not image:
+            layout = "bullets"
+        item = {"title": title or f"Slide {len(slides) + 1}", "layout": layout, "bullets": bullets,
+                "notes": str(s.get("notes") or "").strip()[:4000], "script": str(s.get("script") or "").strip()[:4000]}
+        if image:
+            item["image"] = image
+        slides.append(item)
     if not slides:
         return None
-    return {"title": str(data.get("title") or slides[0]["title"]).strip()[:120], "slides": slides}
+    deck = {"title": str(data.get("title") or slides[0]["title"]).strip()[:120], "slides": slides}
+    if isinstance(data.get("source"), dict):
+        deck["source"] = {k: str(v)[:500] for k, v in data["source"].items() if k in ("type", "path", "name", "ext")}
+    if data.get("script_mode") in ("auto", "script"):
+        deck["script_mode"] = data["script_mode"]
+        deck["script_source"] = str(data.get("script_source") or "")[:200]
+    return deck
 
 
 def deck_has_scripts(deck: Dict[str, Any]) -> bool:
     slides = (deck or {}).get("slides") or []
+    if (deck or {}).get("script_mode") == "script":          # theo kịch bản của người dùng: đọc đúng như vậy
+        return bool(slides) and any((s.get("script") or "").strip() for s in slides)
     return bool(slides) and all(len((s.get("script") or "").split()) >= 25 for s in slides)
 
 
-async def generate_scripts(deck: Dict[str, Any], context_text: str = "", data_text: str = "") -> Dict[str, Any]:
-    """Viết lời thuyết trình chi tiết cho bộ slide chưa có (slide nhập từ tệp, slide bản cũ)."""
-    prompt = (f"## Bộ slide (JSON):\n{json.dumps({'title': deck['title'], 'slides': [{k: v for k, v in s.items() if k != 'script'} for s in deck['slides']]}, ensure_ascii=False)}\n\n"
-              f"## Dữ liệu tra cứu:\n{data_text or '(không có)'}\n\n## Nội dung cuộc họp:\n{context_text or '(chưa có)'}")
+def load_deck(content: Any) -> Optional[Dict[str, Any]]:
+    """Bộ slide đã lưu (không giới hạn 20 slide như khi AI soạn)."""
+    return normalize_deck(_json_from_text(content) if isinstance(content, str) else content, max_slides=300)
+
+
+def deck_is_file(deck: Dict[str, Any]) -> bool:
+    return ((deck or {}).get("source") or {}).get("type") == "file"
+
+
+SCRIPT_BATCH = 10                # số slide mỗi lần nhờ AI viết lời (bộ dài chia nhiều lần, chạy song song)
+
+
+async def _scripts_batch(deck: Dict[str, Any], start: int, context_text: str, data_text: str) -> List[str]:
+    part = deck["slides"][start:start + SCRIPT_BATCH]
+    brief = [{k: v for k, v in s.items() if k not in ("script", "image")} for s in part]
+    prompt = (f"## Bộ slide \"{deck['title']}\", các slide từ {start + 1} đến {start + len(part)} trên {len(deck['slides'])} (JSON):\n"
+              f"{json.dumps(brief, ensure_ascii=False)}\n\n## Dữ liệu tra cứu:\n{data_text or '(không có)'}\n\n"
+              f"## Nội dung cuộc họp:\n{(context_text or '(chưa có)')[-6000:]}")
     data = _json_from_text(await _call_llm(with_skill(SCRIPTS_SYSTEM, "slides"), prompt, max_tokens=6000))
     scripts = data.get("scripts") if isinstance(data, dict) else None
-    if not isinstance(scripts, list) or len(scripts) < len(deck["slides"]):
+    if not isinstance(scripts, list) or len(scripts) < len(part):
         raise RuntimeError("AI chưa viết đủ lời thuyết trình cho các slide")
+    return [str(x or "").strip()[:4000] for x in scripts[:len(part)]]
+
+
+async def generate_scripts(deck: Dict[str, Any], context_text: str = "", data_text: str = "") -> Dict[str, Any]:
+    """Viết lời thuyết trình chi tiết cho bộ slide chưa có (tệp mở từ máy, bản cũ). Bộ dài chia lô 10 slide."""
+    sem = asyncio.Semaphore(3)
+
+    async def run(start: int) -> List[str]:
+        async with sem:
+            return await _scripts_batch(deck, start, context_text, data_text)
+    parts = await asyncio.gather(*(run(k) for k in range(0, len(deck["slides"]), SCRIPT_BATCH)))
+    out = json.loads(json.dumps(deck))
+    for s, sc in zip(out["slides"], [x for p in parts for x in p]):
+        s["script"] = sc
+    out["script_mode"], out["script_source"] = "auto", "AI tự viết"
+    return out
+
+
+ALIGN_SYSTEM = """Bạn ghép kịch bản thuyết trình với các slide. Có danh sách slide (số, tiêu đề, ý chính) và các đoạn kịch bản
+đã đánh số. Gán MỖI đoạn cho đúng một slide theo nội dung, giữ thứ tự (số slide không giảm dần). Không viết lại câu chữ.
+Chỉ trả về một JSON: {"assign": [số slide cho đoạn 1, số slide cho đoạn 2, ...]} (số slide bắt đầu từ 1)."""
+
+
+async def align_script(text: str, deck: Dict[str, Any]) -> List[str]:
+    """Kịch bản không đánh dấu slide: nhờ AI gán từng đoạn cho slide, giữ nguyên câu chữ của người dùng."""
+    paras = [p.strip() for p in re.split(r"\n\s*\n|\n(?=\S)", text or "") if p.strip()]
+    n = len(deck["slides"])
+    if not paras:
+        return [""] * n
+    slides = "\n".join(f"{i}. {s['title']} - {'; '.join(s.get('bullets', [])[:3])}" for i, s in enumerate(deck["slides"], 1))
+    body = "\n".join(f"[{i}] {p[:600]}" for i, p in enumerate(paras, 1))
+    data = _json_from_text(await _call_llm(ALIGN_SYSTEM, f"## Slide:\n{slides}\n\n## Các đoạn kịch bản:\n{body}", max_tokens=1500))
+    assign = data.get("assign") if isinstance(data, dict) else None
+    out = [""] * n
+    last = 1
+    for i, p in enumerate(paras):
+        try:
+            k = int(assign[i]) if isinstance(assign, list) and i < len(assign) else last
+        except (TypeError, ValueError):
+            k = last
+        k = min(max(k, last), n)               # giữ thứ tự, không vượt quá số slide
+        last = k
+        out[k - 1] = (out[k - 1] + "\n" + p).strip()
+    return out
+
+
+def deck_with_scripts(deck: Dict[str, Any], scripts: List[str], mode: str, source: str) -> Dict[str, Any]:
     out = json.loads(json.dumps(deck))
     for s, sc in zip(out["slides"], scripts):
-        s["script"] = str(sc or "").strip()[:1500]
+        s["script"] = str(sc or "").strip()[:4000]
+    out["script_mode"], out["script_source"] = mode, source[:200]
     return out
 
 
 def import_deck(meeting_id: int, path: str) -> Dict[str, Any]:
-    """Đọc tệp slide trên máy (md/txt/json/pptx) thành sản phẩm "slides" của cuộc họp."""
+    """Mở tệp trên máy (pdf, pptx, docx, md, txt, json) thành sản phẩm "slides" của cuộc họp."""
     from meeting import decks
-    deck = normalize_deck(decks.read_deck(path))
+    deck = normalize_deck(decks.read_deck(path), max_slides=decks.MAX_PAGES)
     if deck is None:
-        raise RuntimeError(f"Tệp {Path(path).name} không có slide nào đọc được")
+        raise RuntimeError(f"Tệp {Path(path).name} không có trang nào đọc được")
     aid = db.save_artifact(meeting_id=meeting_id, kind="slides", title=f"Slide: {deck['title'][:60]}",
                            content=json.dumps(deck, ensure_ascii=False), prompt_trigger=f"file:{path}")
     return db.get_artifact(aid)
