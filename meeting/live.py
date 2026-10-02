@@ -513,7 +513,15 @@ class MeetingSession:
         self._lock = asyncio.Lock()
         # Màn hình trình bày: nội dung đang chiếu, slide hiện tại, lịch sử để "quay lại phần trước"
         self.stage: Dict[str, Any] = {"artifact_id": None, "slide": 0, "history": [], "shown_at_seq": 0,
-                                      "follow": True, "changed_at": 0.0, "manual_at": 0.0, "auto_at": 0.0}
+                                      "follow": True, "changed_at": 0.0, "manual_at": 0.0, "auto_at": 0.0, "log": []}
+        # Lịch sử trình chiếu lưu trong DB (meetings.stage_log): chạy lại server vẫn "quay lại cái slide lúc nãy" được
+        log_ = [e for e in (meeting.get("stage_log") or []) if isinstance(e, dict) and isinstance(e.get("artifact_id"), int)]
+        if log_:
+            self.stage["log"] = [{"artifact_id": e["artifact_id"], "slide": int(e.get("slide") or 0),
+                                  "at": float(e.get("at") or 0)} for e in log_[-50:]]
+            self.stage["history"] = [{"artifact_id": e["artifact_id"], "slide": e["slide"]} for e in self.stage["log"][:-1]][-20:]
+            self.stage["artifact_id"] = self.stage["log"][-1]["artifact_id"]
+            self.stage["slide"] = self.stage["log"][-1]["slide"]
         self._follower = follow.SlideFollower()     # tự chuyển slide theo lời trình bày
         self._matchers: Dict[int, Any] = {}          # artifact_id -> (slides, SlideMatcher)
         self._follow_texts: Deque[str] = deque(maxlen=2)
@@ -1070,13 +1078,25 @@ class MeetingSession:
             res = await llm.think_and_act(meeting_id=self.id, prompt=prompt, segments=self.segments,
                                           on_thinking=_thinking, on_tool=_tool, on_insights=_insights,
                                           on_progress=self._progress, meeting=self.meeting,
-                                          stage_art=self._stage_summary())
+                                          stage_art=self._stage_summary(), library=await self._library_summary())
             await self.emit({"type": "ai_response", "response": res})
-            if res.get("artifact"):
-                await self.stage_action("show", artifact_id=res["artifact"]["id"])
+            await self.apply_ai_result(res)
         except Exception as e:
             log.warning("meeting.live: trợ lý AI lỗi: %s", e)
             await self.emit({"type": "ai_error", "text": f"Trợ lý AI lỗi: {e}"})
+
+    async def apply_ai_result(self, res: Dict[str, Any]):
+        """Kết quả của trợ lý lên màn hình: mở lại nội dung đã có (show) hoặc sản phẩm vừa tạo."""
+        show = res.get("show")
+        if show and show.get("artifact_id") is not None:
+            aid = int(show["artifact_id"])
+            slide = show.get("slide")
+            if slide is None and self._slides_of(await self._get_artifact(aid)):
+                slide = self._last_slide(aid)
+            await self.emit({"type": "stage_command", "action": "open"})
+            await self.stage_action("show", artifact_id=aid, slide=slide or 0)
+        elif res.get("artifact"):
+            await self.stage_action("show", artifact_id=res["artifact"]["id"])
 
     # ------------------------------------------------- màn hình trình bày ---
     STAGE_ACTIONS = ("show", "next", "prev", "goto", "topic", "back", "follow")
@@ -1124,6 +1144,8 @@ class MeetingSession:
         if not kind:
             return len(hist) - 1
         for i in range(len(hist) - 1, -1, -1):
+            if hist[i]["artifact_id"] == self.stage["artifact_id"]:
+                continue
             art = await self._get_artifact(hist[i]["artifact_id"])
             if art and art.get("kind") == kind:
                 return i
@@ -1173,8 +1195,126 @@ class MeetingSession:
             st["changed_at"] = time.monotonic()
             st["auto_at" if auto else "manual_at"] = st["changed_at"]
             self._follow_texts.clear()
+            self._log_stage()
         await self.emit({"type": "stage_state", "stage": self.stage_public(), "auto": auto})
         return self.stage_public()
+
+    def _log_stage(self):
+        """Ghi lại nội dung đang chiếu (mỗi nội dung một dòng, cập nhật slide đang xem) vào DB."""
+        st = self.stage
+        if st["artifact_id"] is None:
+            return
+        lg = st["log"]
+        if lg and lg[-1]["artifact_id"] == st["artifact_id"]:
+            lg[-1].update(slide=st["slide"], at=time.time())
+        else:
+            lg.append({"artifact_id": st["artifact_id"], "slide": st["slide"], "at": time.time()})
+            del lg[:-50]
+        self.meeting["stage_log"] = [dict(e) for e in lg]
+        self._db(db.update_meeting, self.id, {"stage_log": self.meeting["stage_log"]}, internal=True)
+
+    def _last_slide(self, aid: int) -> int:
+        for e in reversed(self.stage["log"]):
+            if e["artifact_id"] == aid:
+                return int(e.get("slide") or 0)
+        return 0
+
+    async def _library_summary(self) -> Dict[str, Any]:
+        """Nội dung đã tạo / đã chiếu trong cuộc họp (mới nhất trước) để trợ lý mở lại đúng thứ người dùng nhắc."""
+        arts = await asyncio.to_thread(db.get_artifacts, self.id)
+        arts = sorted(arts, key=lambda a: (a.get("created_at") or 0, a.get("id") or 0), reverse=True)[:15]
+        shown = [e["artifact_id"] for e in self.stage["log"]]
+        items = []
+        for a in arts:
+            it = {"id": a["id"], "kind": a.get("kind"), "title": a.get("title", ""), "version": int(a.get("version") or 1),
+                  "on_stage": a["id"] == self.stage["artifact_id"], "shown": a["id"] in shown}
+            if a.get("kind") == "slides":
+                it["slides"] = [s.get("title", "") for s in self._slides_of(a)][:10]
+                if it["on_stage"]:
+                    it["slide"] = self.stage["slide"] + 1
+            items.append(it)
+        return {"items": items, "order": shown[-12:]}
+
+    async def _recall(self, intent: Dict[str, Any], announce: bool = True) -> bool:
+        """Mở lại nội dung đã có: theo chủ đề ("slide điểm cộng"), theo loại đã chiếu gần nhất ("sơ đồ lúc nãy"),
+        cái đầu tiên, hoặc bất kỳ nội dung vừa chiếu trước đó. Không khớp chủ đề thì để trợ lý hiểu câu nói (False)."""
+        kind, query = intent.get("kind"), (intent.get("query") or "").strip()
+        arts = sorted(await asyncio.to_thread(db.get_artifacts, self.id),
+                      key=lambda a: (a.get("created_at") or 0, a.get("id") or 0))          # cũ -> mới
+        if kind:
+            arts = [a for a in arts if a.get("kind") == kind]
+        name = llm.KIND_NAMES.get(kind, kind) if kind else "nội dung"
+        if not arts:
+            if not kind:
+                return False
+            if announce:
+                await self._say(f"Em chưa tạo {name} nào trong cuộc họp này.", "concerned")
+            return True
+        cur = self.stage["artifact_id"]
+        cur_art = await self._get_artifact(cur) if cur is not None else None
+        by_id = {a["id"]: a for a in arts}
+        target, slide = None, None
+        if query:
+            best = None
+            for rank, a in enumerate(arts):                         # cùng điểm: bản mới hơn thắng
+                title = re.sub(r"^[^:]{1,24}:\s*", "", a.get("title") or "")
+                sc, hit = llm.topic_score(query, title)
+                cand = (sc, hit, None)
+                for i, sl in enumerate(self._slides_of(a)):
+                    s1, h1 = llm.topic_score(query, sl.get("title", ""))
+                    s2, h2 = llm.topic_score(query, " ".join([sl.get("title", "")] + list(sl.get("bullets") or [])))
+                    c2 = (max(s1, s2 * 0.8), max(h1, h2), i)
+                    if c2[:2] > cand[:2]:
+                        cand = c2
+                key = (cand[0], cand[1], rank)
+                if best is None or key > best[0]:
+                    best = (key, a, cand[2])
+            (sc, hit, _), a, idx = best
+            if not (sc >= 0.5 or (hit >= 2 and sc >= 0.34)):
+                return False
+            target, slide = a, idx
+        elif intent.get("first"):
+            target = arts[0]
+        else:
+            for h in reversed(self.stage["history"]):              # nội dung đã chiếu gần nhất (khác cái đang chiếu)
+                if h["artifact_id"] in by_id and h["artifact_id"] != cur:
+                    target, slide = by_id[h["artifact_id"]], h.get("slide")
+                    break
+            if target is None:
+                cur_title = (cur_art or {}).get("title")
+                others = [a for a in arts if a["id"] != cur and a.get("title") != cur_title]
+                if others:
+                    target = others[-1]
+                elif cur_art is not None and (not kind or cur_art.get("kind") == kind):
+                    sl = self._slides_of(cur_art)
+                    if intent.get("past") and sl and self.stage["slide"] > 0:   # chỉ có bộ này: lùi về slide trước
+                        await self.emit({"type": "stage_command", "action": "open"})
+                        await self.stage_action("prev")
+                        i = self.stage["slide"]
+                        if announce:
+                            await self._say(f"Slide {i + 1} trên {len(sl)}: {sl[i]['title']}.", quiet=True)
+                        return True
+                    if announce:
+                        await self._say(f"Đang chiếu {llm.KIND_NAMES.get(cur_art.get('kind'), 'nội dung')} "
+                                        f"\"{cur_art.get('title', '')}\" rồi ạ, trước đó chưa có {name} nào khác.", quiet=True)
+                    await self.emit({"type": "stage_command", "action": "open"})
+                    return True
+                else:
+                    target = arts[-1]
+        slides = self._slides_of(target)
+        if slide is None:
+            slide = self._last_slide(target["id"]) if slides else 0
+        slide = min(max(int(slide or 0), 0), max(0, len(slides) - 1))
+        await self.emit({"type": "stage_command", "action": "open"})
+        if target["id"] == cur:
+            await self.stage_action("goto", slide=slide)
+        else:
+            await self.stage_action("show", artifact_id=target["id"], slide=slide)
+        if announce:
+            where = f", slide {slide + 1}: {slides[slide]['title']}" if slides and (query or slide) else ""
+            kname = llm.KIND_NAMES.get(target.get("kind"), "nội dung")
+            await self._say(f"Dạ, em mở lại {kname} \"{target.get('title', '')}\"{where}.", quiet=True)
+        return True
 
     def _deck_matcher(self) -> Optional[Any]:
         art = self._art_cache.get(self.stage["artifact_id"]) if self.stage["artifact_id"] is not None else None
@@ -1261,20 +1401,20 @@ class MeetingSession:
             return True
         if action == "web_search":
             return await self._web_research(intent.get("query", ""))
-        if action == "back" and intent.get("kind"):
-            kind = intent["kind"]
-            if await self._history_index(kind) is None:
-                await self._say(f"Em chưa trình bày {llm.KIND_NAMES.get(kind, kind)} nào trước đó.", "concerned")
-                return True
-            await self.stage_action("back", kind=kind)
-            art = await self._get_artifact(self.stage["artifact_id"])
-            await self._say(f"Dạ, em quay lại {llm.KIND_NAMES.get(kind, kind)} \"{art['title'] if art else ''}\".", quiet=True)
-            return True
+        if action == "back" and (intent.get("kind") or intent.get("query") or intent.get("first") or intent.get("past")):
+            return await self._recall(intent)
+        if action == "back" and not self.stage["history"] and await self._recall({"action": "back", "past": True}):
+            return True                               # chưa có lịch sử (cuộc họp cũ): mở nội dung gần nhất khác
         if action in ("present", "present_stop"):
             if action == "present_stop":
                 await self.emit({"type": "stage_present", "action": "stop"})
                 await self._say("Dạ, em dừng thuyết trình.", quiet=True)
                 return True
+            rc = intent.get("recall")
+            if rc:                                      # "thuyết trình lại cái slide hồi nãy": mở lại bộ đó trước
+                cur = await self._get_artifact(self.stage["artifact_id"])
+                if not cur or cur.get("kind") != rc.get("kind"):   # đang chiếu đúng loại đó thì trình bày luôn cái đang chiếu
+                    await self._recall(rc, announce=False)
             art = await self._get_artifact(self.stage["artifact_id"])
             if not self._slides_of(art):
                 if art and art.get("kind") == "dashboard":          # thuyết trình dashboard: đọc KPI và điểm chính

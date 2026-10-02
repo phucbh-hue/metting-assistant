@@ -51,7 +51,7 @@ class StageIntentTests(unittest.TestCase):
             "quay lại slide trước": {"action": "prev"},
             "mở slide số 3": {"action": "goto", "slide": 2},
             "mở slide về ngân sách": {"action": "topic", "query": "ngân sách"},
-            "quay lại phần trình bày lúc nãy": {"action": "back"},
+            "quay lại phần trình bày lúc nãy": {"action": "back", "past": True},
             "nhắc bài giúp anh": {"action": "prompt"},
             "nhận xét nhanh về cuộc họp": {"action": "analyze"},
         }

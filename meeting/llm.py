@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from meeting import artifacts, db, mcp
@@ -169,8 +170,8 @@ _WEB_SEARCH = re.compile(r"\b(search|sớt|xớt|research|google)\b|(tra cứu|t
                          r"(coi|xem|thử)?\s*(trên\s*)?(mạng|internet|google|web|online)", re.I)
 _WEB_FILLER = re.compile(r"^(em\s+)?(hãy\s+)?(search|sớt|xớt|research|tra cứu|tìm kiếm|tìm|kiểm tra|xem|google)\s*(trên\s*)?(mạng|internet|google|web|online)?"
                          r"\s*(giúp|giùm|hộ|cho)?\s*(anh|chị|em|mình|tôi)?\s*(coi|xem|thử|là|về)?\s*", re.I)
-_OPEN_FILE = re.compile(r"(mở|lấy|tìm|chiếu|trình chiếu|load)\b.*\b(slide|bộ slide|bài|file|tệp|tài liệu)\b.*\b(folder|thư mục|tệp|file|trên máy|ổ|desktop|download|documents)\b|"
-                        r"(mở|lấy|tìm|chiếu)\s*(cái\s*)?(file|tệp|tài liệu)\s*(slide|pdf|powerpoint|ppt|pptx|word|docx|báo cáo|thuyết trình|trình bày)?|"
+_OPEN_FILE = re.compile(r"(mở|lấy|tìm|chiếu|trình chiếu|load)\b.*\b(slide|bộ slide|bài|file|tệp|tài liệu)\b.*\b(folder|thư mục|tệp|file|trên máy|ổ|desktop|downloads?|documents)\b|"
+                        r"(mở|lấy|tìm|chiếu)\s*(lại\s*)?(cái\s*)?(file|tệp|tài liệu)\s*(slide|pdf|powerpoint|ppt|pptx|word|docx|báo cáo|thuyết trình|trình bày)?|"
                         r"(mở|chiếu)\s*(cái\s*)?(file\s*)?(pdf|powerpoint|pptx|ppt|word|docx)\b|[a-z]:\\[^\n]+\.(pdf|pptx|ppt|docx|md|txt)", re.I)
 _ANS_NO_SCRIPT = re.compile(r"không\s*(cần|có|dùng)\s*kịch\s*bản", re.I)
 # "em tự trình bày", "tự soạn lời luôn": chọn rõ ràng
@@ -257,11 +258,94 @@ _STAGE_PATTERNS = [
 ]
 
 
+# ---------------------------------------------------------------- quay lại nội dung đã có ---
+# "quay lại cái bộ slide em vừa trình bày trước đó" (#42), "cho anh xem lại cái dashboard vừa rồi", "quay về sơ đồ kiến trúc"
+_RECALL_VERB = re.compile(r"(?:quay|trở)\s*(?:lại|về)|(?:mở|xem|chiếu|bật|đưa|hiện|kéo|lấy|coi)\s*lại|"
+                          r"cho\s*(?:anh|chị|em|mình|tôi|tụi anh|bọn anh|cả nhà)?\s*(?:xem|coi)\s*lại", re.I)
+_PAST_REF = re.compile(r"\bcũ\b|lúc nãy|hồi nãy|khi nãy|ban nãy|vừa nãy|nãy giờ|vừa rồi|trước đó|lúc trước|hồi trước|"
+                       r"lúc đầu|ban đầu|đầu tiên|(?:đã|vừa|mới|từng)\s*(?:trình bày|thuyết trình|chiếu|present|làm|tạo|soạn|vẽ|"
+                       r"dựng|mở|xem|nói|đưa)", re.I)
+_FIRST_REF = re.compile(r"đầu tiên|lúc đầu|ban đầu", re.I)
+_TIME_REF = re.compile(r"\bcũ\b|lúc nãy|hồi nãy|khi nãy|ban nãy|vừa nãy|vừa rồi|trước đó|lúc trước|hồi trước", re.I)
+_RECALL_KIND = re.compile(r"(bộ slide|slides|slide|slai|xlai|sơ đồ|bản vẽ|biểu đồ|dashboard|báo cáo|biên bản|trang web|"
+                          r"giao diện|bản thiết kế)", re.I)
+RECALL_KINDS = {"bộ slide": "slides", "slides": "slides", "slide": "slides", "slai": "slides", "xlai": "slides",
+                "sơ đồ": "diagram", "bản vẽ": "diagram", "biểu đồ": "dashboard", "dashboard": "dashboard",
+                "báo cáo": "report", "biên bản": "minutes", "trang web": "web_design", "giao diện": "web_design",
+                "bản thiết kế": "web_design"}
+# từ đệm của câu nói (đã bỏ dấu): không dùng để tìm theo chủ đề
+_TOPIC_STOP = set("""em anh chi minh toi tui hay giup gium ho cho xem coi nha nhe di a ay do nay kia cai bo phan ma da vua
+moi tung co the duoc khong voi luon lai ve trinh bay thuyet chieu present lam tao soan dung mo noi dua cua muon quay tro
+bat hien keo lay muc doan va thi la nhung cac mot so nao gi dum nhu vay oi roi nua voi ca nha""".split())
+
+
+def fold(text: str) -> str:
+    """Bỏ dấu tiếng Việt, chữ thường ("Khai Phóng" -> "khai phong")."""
+    t = unicodedata.normalize("NFD", str(text or "")).replace("\u0111", "d").replace("\u0110", "d")
+    return "".join(ch for ch in t if unicodedata.category(ch) != "Mn").lower()
+
+
+def topic_words(text: str) -> List[str]:
+    """Các từ mang nghĩa trong một đoạn (giữ nguyên dấu để nói lại cho người dùng)."""
+    return [w for w in re.findall(r"\w+", (text or "").lower()) if len(fold(w)) >= 2 and fold(w) not in _TOPIC_STOP]
+
+
+def topic_score(query: str, text: str) -> Tuple[float, int]:
+    """(tỷ lệ từ của câu hỏi có trong đoạn, số từ trùng), so khớp không dấu."""
+    q = {fold(w) for w in topic_words(query)}
+    if not q:
+        return 0.0, 0
+    have = {fold(w) for w in topic_words(text)}
+    hit = len(q & have)
+    return hit / len(q), hit
+
+
+def recall_intent(c: str) -> Optional[Dict[str, Any]]:
+    """Mở lại nội dung đã có thay vì tạo mới: {"action": "back", "kind", "query", "past", "first"}."""
+    m = _RECALL_VERB.search(c)
+    if not m or _VERSION.search(c) or _LATEST.search(c) or _OPEN_FILE.search(c) or _WEB_SEARCH.search(c) \
+            or _CREATE_DECK.search(c):
+        return None
+    rest = c[m.end():]
+    if re.search(rf"{_SLIDE}\s*(?:số\s*)?\d", rest):
+        return None                                   # "quay lại slide 4": chuyển đúng slide số
+    if re.match(rf"\s*(?:cái\s*)?(?:một\s*)?(?:{_SLIDE}|phần|mục|bước)\s*(?:trước|sau|tiếp|kế)\b(?!\s*đó)", rest) \
+            or re.match(rf"\s*(?:một\s*)?{_SLIDE}\s*$", rest):
+        return None                                   # "quay lại slide trước": lùi một slide
+    nm = re.search(rf"{_SLIDE}\s*(?:số\s*)?({'|'.join(_NUM_WORDS)})(?!\w)", rest)
+    if nm and not topic_words(rest[nm.end():]):
+        return {"action": "goto", "slide": _NUM_WORDS[nm.group(1)] - 1}    # "quay lại slide số bảy"
+    km = _RECALL_KIND.search(rest)
+    kind = RECALL_KINDS.get(km.group(1).lower()) if km else None
+    past = bool(_PAST_REF.search(c))
+    words = topic_words(_RECALL_KIND.sub(" ", _PAST_REF.sub(" ", rest)))
+    if not kind and not past and not words:
+        return None
+    out: Dict[str, Any] = {"action": "back"}
+    if kind:
+        out["kind"] = kind
+    if words:
+        out["query"] = " ".join(words)
+    if past:
+        out["past"] = True
+    if _FIRST_REF.search(c):
+        out["first"] = True
+    return out
+
+
+def recall_like(text: str) -> bool:
+    """Câu nhờ mở lại nội dung đã có (để trợ lý không dựng sản phẩm mới khi chưa chắc)."""
+    return bool(_RECALL_VERB.search((text or "").lower()))
+
+
 def stage_intent(command: str) -> Optional[Dict[str, Any]]:
     """Nhận lệnh điều khiển màn hình trình bày từ câu nói (không cần gọi LLM)."""
     c = re.sub(r"\s+", " ", (command or "").lower()).strip(" .!?,")
     if not c:
         return None
+    r = recall_intent(c)
+    if r:
+        return r
     m = _BACK_KIND.search(c)
     if m:
         return {"action": "back", "kind": KIND_WORDS.get(m.group(5), "slides")}
@@ -285,8 +369,15 @@ def stage_intent(command: str) -> Optional[Dict[str, Any]]:
         if action == "present" and creating:
             continue
         if pat.search(c):
+            if action == "present" and _TIME_REF.search(c):
+                km = _RECALL_KIND.search(c)
+                if km:      # "thuyết trình lại cái slide hồi nãy": mở lại bộ đó rồi mới trình bày
+                    return {"action": "present", "recall": {"action": "back", "kind": RECALL_KINDS[km.group(1).lower()],
+                                                            "past": True}}
             return {"action": action}
     m = re.search(rf"{_SLIDE}\s*(?:số\s*)?(\d{{1,2}}|{'|'.join(_NUM_WORDS)})(?!\w)", c)
+    if m and not m.group(1).isdigit() and topic_words(c[m.end():]):
+        m = None          # "slide hai cách hiểu về khai phóng" là tên slide, không phải slide số 2
     if m and re.search(r"(đến|tới|sang|qua|mở|về|xem|chuyển|quay|cho)", c):
         n = int(m.group(1)) if m.group(1).isdigit() else _NUM_WORDS[m.group(1)]
         return {"action": "goto", "slide": max(0, n - 1)}
@@ -388,6 +479,7 @@ Cách làm việc:
  "artifact_needed": "dashboard" | "report" | "slides" | "web_design" | "diagram" | "minutes" | null,
  "artifact_prompt": "mô tả chi tiết cho bộ tạo sản phẩm: dùng dữ liệu nào, biểu đồ/bố cục nào",
  "report_markdown": "nội dung chi tiết để HIỂN THỊ trên màn hình (markdown: gạch đầu dòng, bảng)",
+ "show": {"artifact_id": id trong "Nội dung đã có", "slide": số slide tính từ 1 hoặc null} hoặc null,
  "chat_response": "1-3 câu nói thành tiếng"}
 
 Chọn sản phẩm (artifact_needed):
@@ -396,6 +488,13 @@ Chọn sản phẩm (artifact_needed):
 - "slides": slide, bài trình bày. "web_design": trang web, giao diện, landing page, prototype.
 - "diagram": sơ đồ, luồng xử lý, kiến trúc. "minutes": biên bản cuộc họp.
 - null: câu hỏi ngắn trả lời được ngay trong 1-3 câu.
+
+Màn hình trình chiếu (em điều khiển được):
+- Người dùng muốn quay lại / xem lại / mở lại / chiếu lại nội dung ĐÃ CÓ (kể cả nói tắt "cái lúc nãy", "cái em vừa trình
+  bày", "bộ slide trước đó", gọi tên gần đúng, hoặc chữ bị nhận dạng giọng nói chép sai): chọn đúng mục trong "Nội dung đã
+  có" và điền show; artifact_needed = null; chat_response nói ngắn em mở lại gì. Không tạo sản phẩm mới.
+- Không chắc mục nào: chọn mục đã chiếu gần nhất hợp với câu nói và nói rõ là mục nào. Không bao giờ nói là em không điều
+  khiển được màn hình.
 
 Quy tắc:
 - chat_response phải nói ra thông tin thật (con số, tên người, hạn chót, kết luận). Cấm câu chung chung như "em đã xử lý xong".
@@ -627,8 +726,31 @@ def transcript_blocks(segments: List[Dict[str, Any]], max_chars: int = 24000) ->
     return blocks
 
 
+def library_text(library: Optional[Dict[str, Any]]) -> str:
+    """Danh sách nội dung đã tạo / đã chiếu trong cuộc họp, để trợ lý mở lại đúng thứ người dùng nhắc tới."""
+    items = (library or {}).get("items") or []
+    if not items:
+        return ""
+    lines = []
+    for it in items:
+        flags = []
+        if it.get("on_stage"):
+            flags.append("đang chiếu" + (f", slide {it['slide']}" if it.get("slide") else ""))
+        elif it.get("shown"):
+            flags.append("đã chiếu")
+        s = f"- [{it['id']}] {KIND_NAMES.get(it.get('kind'), it.get('kind'))} \"{it.get('title', '')}\" v{it.get('version', 1)}"
+        s += f" ({', '.join(flags)})" if flags else ""
+        if it.get("slides"):
+            s += " - các slide: " + "; ".join(f"{i}. {str(t)[:40]}" for i, t in enumerate(it["slides"], 1))
+        lines.append(s)
+    order = " -> ".join(str(x) for x in (library or {}).get("order") or [])
+    return ("## Nội dung đã có trong cuộc họp (mới nhất trước):\n" + "\n".join(lines)
+            + (f"\nThứ tự đã chiếu (cũ -> mới): {order}" if order else ""))
+
+
 def _agent_request(prompt: str, transcript: List[Dict[str, Any]], facts: Dict[str, Any],
-                   tool_results: List[Dict[str, Any]], stage_art: Optional[Dict[str, Any]], final_only: bool) -> str:
+                   tool_results: List[Dict[str, Any]], stage_art: Optional[Dict[str, Any]], final_only: bool,
+                   library: Optional[Dict[str, Any]] = None) -> str:
     """Lượt gọi agent: transcript (cache) -> màn hình -> từng kết quả tra cứu (cache ở kết quả cuối) -> yêu cầu.
 
     Các vòng tra cứu sau gửi lại y nguyên phần trước, chỉ thêm kết quả mới ở cuối, nên phần lặp lại đọc từ cache."""
@@ -639,6 +761,9 @@ def _agent_request(prompt: str, transcript: List[Dict[str, Any]], facts: Dict[st
     if stage_art:
         blocks.append(artifacts.text_block(f"## Đang chiếu trên màn hình: {KIND_NAMES.get(stage_art.get('kind'), stage_art.get('kind'))} "
                                            f"\"{stage_art.get('title', '')}\""))
+    lib = library_text(library)
+    if lib:
+        blocks.append(artifacts.text_block(lib))
     if tool_results:
         for i, r in enumerate(tool_results, 1):
             blocks.append(artifacts.text_block(f"## Dữ liệu đã tra cứu ({i}):\n{_data_text([r], limit=6000)}",
@@ -735,7 +860,8 @@ async def think_and_act(meeting_id: int, prompt: str, segments: List[Dict[str, A
                         on_insights: Optional[Callable[[List[Dict[str, str]]], Any]] = None,
                         on_progress: Optional[Callable[[str, str], Any]] = None,
                         meeting: Optional[Dict[str, Any]] = None,
-                        stage_art: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                        stage_art: Optional[Dict[str, Any]] = None,
+                        library: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Trợ lý xử lý một yêu cầu: tra cứu (nếu cần) -> câu trả lời có nội dung thật -> sản phẩm trực quan.
 
     Trong lúc chờ, báo tiến độ bằng lời qua on_progress ("em tìm thấy 6 ticket, 1 cái quá hạn...")."""
@@ -763,11 +889,12 @@ async def think_and_act(meeting_id: int, prompt: str, segments: List[Dict[str, A
     transcript = transcript_blocks(segments)
     plan: Dict[str, Any] = {}
     plain = ""
-    early_kind = guess_kind(prompt) if guess_kind(prompt) in EARLY_KINDS else None
+    recall = recall_like(prompt)            # "quay lại cái slide lúc nãy": không dựng sớm sản phẩm mới
+    early_kind = guess_kind(prompt) if guess_kind(prompt) in EARLY_KINDS and not recall else None
     early_job = None
     for rnd in range(MAX_TOOL_ROUNDS + 1):
         last = rnd == MAX_TOOL_ROUNDS
-        raw = await _call_llm(system, _agent_request(prompt, transcript, facts, tool_results, stage_art, last),
+        raw = await _call_llm(system, _agent_request(prompt, transcript, facts, tool_results, stage_art, last, library),
                               max_tokens=3000)
         calls, final, text = parse_agent_output(raw)
         if final is not None:
@@ -804,9 +931,10 @@ async def think_and_act(meeting_id: int, prompt: str, segments: List[Dict[str, A
     if insights and on_insights:
         await on_insights(insights)
 
+    show = _pick_show(plan.get("show"), library)
     kind = plan.get("artifact_needed")
-    kind = kind if kind in ARTIFACT_KINDS else None
-    if kind is None and not plan:
+    kind = kind if kind in ARTIFACT_KINDS and show is None else None
+    if kind is None and not plan and not recall:
         kind = guess_kind(prompt)       # LLM không trả về JSON: đoán theo câu lệnh để vẫn có kết quả hiển thị
     report_md = str(plan.get("report_markdown") or "").strip()
     chat = str(plan.get("chat_response") or plain or "").strip()
@@ -831,11 +959,37 @@ async def think_and_act(meeting_id: int, prompt: str, segments: List[Dict[str, A
         except Exception as e:
             log.warning("meeting.llm: tạo %s lỗi: %s", kind, e)
             err = str(e)
-    chat = _final_reply(chat, kind, art, err, report_md)
+    if show is not None and (not chat or (len(chat) < 90 and _GENERIC_REPLY.search(chat))):
+        chat = f"Dạ, em mở lại {KIND_NAMES.get(show['kind'], show['kind'])} \"{show['title']}\"."
+    chat = _final_reply(chat, kind, art, err, report_md) if show is None else chat
     if art is not None and art.get("kind") == "report":
         report_md = ""                  # đã chiếu dưới dạng báo cáo, không lặp lại trong khung chat
+    show_out = {"artifact_id": show["artifact_id"], "slide": show["slide"]} if show else None
 
     db.record_interaction(meeting_id=meeting_id, prompt=prompt, trigger=trigger, thinking="\n".join(thinking_trace),
-                          tool_calls=tool_results, response={"chat_response": chat, "artifact": art})
+                          tool_calls=tool_results, response={"chat_response": chat, "artifact": art, "show": show_out})
     return {"chat_response": chat, "report": report_md, "thinking": "\n".join(thinking_trace),
-            "tool_calls": tool_results, "insights": insights, "artifact": art}
+            "tool_calls": tool_results, "insights": insights, "artifact": art, "show": show_out}
+
+
+def _pick_show(value: Any, library: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Kiểm tra lựa chọn "mở lại" của trợ lý: chỉ nhận id có trong danh sách nội dung của cuộc họp."""
+    if not isinstance(value, dict) or not library:
+        return None
+    items = {it["id"]: it for it in library.get("items") or [] if isinstance(it.get("id"), int)}
+    try:
+        aid = int(value.get("artifact_id"))
+    except (TypeError, ValueError):
+        return None
+    it = items.get(aid)
+    if it is None:
+        return None
+    slide = value.get("slide")
+    try:
+        slide = max(0, int(slide) - 1) if slide not in (None, "", 0, "0") else None
+    except (TypeError, ValueError):
+        slide = None
+    n = len(it.get("slides") or [])
+    if slide is not None and n and slide >= n:
+        slide = n - 1
+    return {"artifact_id": aid, "slide": slide, "kind": it.get("kind"), "title": it.get("title", "")}

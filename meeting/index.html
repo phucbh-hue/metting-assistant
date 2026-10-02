@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Meeting Copilot - UrBox</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233DDC97' stroke-width='2' stroke-linecap='round'%3E%3Crect x='9' y='3' width='6' height='11' rx='3'/%3E%3Cpath d='M5 11a7 7 0 0 0 14 0M12 18v3'/%3E%3C/svg%3E">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23A426ED' stroke-width='2' stroke-linecap='round'%3E%3Crect x='9' y='3' width='6' height='11' rx='3'/%3E%3Cpath d='M5 11a7 7 0 0 0 14 0M12 18v3'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -30,20 +30,31 @@
         }
       }
     };
-    if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
+    if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'base', securityLevel: 'strict', themeVariables: {
+      darkMode: true, background: '#1b142e', fontFamily: '"Be Vietnam Pro", system-ui, sans-serif',
+      primaryColor: '#2c1f52', primaryBorderColor: '#a67cff', primaryTextColor: '#f1edfa', lineColor: '#b98aff',
+      secondaryColor: '#3a2a12', secondaryBorderColor: '#ffb700', secondaryTextColor: '#f1edfa',
+      tertiaryColor: '#241b3e', tertiaryBorderColor: '#ef65c5', tertiaryTextColor: '#f1edfa',
+      noteBkgColor: '#2c1f52', noteTextColor: '#f1edfa', noteBorderColor: '#a67cff',
+      clusterBkg: '#211836', clusterBorder: '#6821c2', edgeLabelBackground: '#1b142e', titleColor: '#f1edfa' } });
   </script>
   <style>
+    /* Màu thương hiệu UrBox (lấy từ urbox.vn ngày 02/10/2026): tím #6821C2 / #8235E4 / #A426ED, vàng #FFB700, hồng #EF65C5 */
     :root {
-      --base: 11 15 18;      /* nền */
-      --panel: 21 27 33;     /* bề mặt */
-      --raise: 28 35 43;     /* bề mặt nổi (menu, modal) */
-      --ink: 233 238 241;    /* chữ chính */
-      --muted: 141 153 165;  /* chữ phụ */
-      --accent: 61 220 151;  /* hành động chính */
-      --live: 184 240 90;    /* đang ghi */
+      --base: 15 11 26;      /* nền tím than */
+      --panel: 27 20 46;     /* bề mặt */
+      --raise: 37 28 63;     /* bề mặt nổi (menu, modal) */
+      --ink: 241 237 250;    /* chữ chính */
+      --muted: 166 155 191;  /* chữ phụ */
+      --accent: 185 138 255; /* tím sáng: chữ, viền, biểu tượng trên nền tối (tương phản 7:1) */
+      --brand: 130 53 228;   /* tím UrBox #8235E4 */
+      --brand-deep: 104 33 194; /* tím đậm UrBox #6821C2 */
+      --gold: 255 183 0;     /* vàng UrBox #FFB700 */
+      --pink: 239 101 197;   /* hồng UrBox #EF65C5 */
+      --live: 255 183 0;     /* đang ghi */
       --danger: 255 107 107;
-      --line: rgba(255, 255, 255, 0.07);
-      --line-strong: rgba(255, 255, 255, 0.14);
+      --line: rgba(214, 196, 255, 0.08);
+      --line-strong: rgba(214, 196, 255, 0.16);
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; }
@@ -51,7 +62,8 @@
       margin: 0; background: rgb(var(--base)); color: rgb(var(--ink));
       font-family: "Be Vietnam Pro", system-ui, sans-serif; font-size: 14px; line-height: 1.5;
       -webkit-font-smoothing: antialiased;
-      background-image: radial-gradient(1200px 600px at 85% -10%, rgba(61, 220, 151, 0.06), transparent 60%);
+      background-image: radial-gradient(1200px 600px at 85% -10%, rgba(130, 53, 228, 0.22), transparent 60%),
+        radial-gradient(900px 520px at -10% 110%, rgba(239, 101, 197, 0.08), transparent 60%);
     }
     .num { font-variant-numeric: tabular-nums; }
     ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -74,8 +86,8 @@
     .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 14px; border-radius: 10px; font-weight: 600; font-size: 13px; border: 1px solid transparent; transition: background .15s, border-color .15s, color .15s, transform .05s; white-space: nowrap; }
     .btn:active { transform: translateY(1px); }
     .btn[disabled] { opacity: .45; pointer-events: none; }
-    .btn-primary { background: rgb(var(--accent)); color: #04130c; }
-    .btn-primary:hover { background: rgb(var(--accent) / .88); }
+    .btn-primary { background: linear-gradient(135deg, #842EDA 0%, #A426ED 100%); color: #fff; box-shadow: 0 6px 18px rgb(var(--brand) / .28); }
+    .btn-primary:hover { background: linear-gradient(135deg, #9140E6 0%, #B03FF2 100%); }
     .btn-ghost { background: rgba(255,255,255,.04); border-color: var(--line-strong); color: rgb(var(--ink)); }
     .btn-ghost:hover { background: rgba(255,255,255,.08); }
     .btn-danger { background: rgb(var(--danger) / .12); border-color: rgb(var(--danger) / .35); color: rgb(var(--danger)); }
@@ -197,7 +209,8 @@
     /* --------- sân khấu trợ lý (toàn màn hình) --------- */
     .stage { position: fixed; inset: 0; z-index: 55; display: grid; grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
       grid-template-rows: auto minmax(0, 1fr) auto; gap: 14px; padding: 14px 18px;
-      background: radial-gradient(1100px 650px at 10% 16%, rgb(var(--accent) / .08), transparent 60%), rgb(var(--base)); }
+      background: radial-gradient(1100px 650px at 10% 16%, rgb(var(--brand) / .18), transparent 60%),
+        radial-gradient(800px 500px at 100% 100%, rgb(var(--pink) / .06), transparent 60%), rgb(var(--base)); }
     .stage-top { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 12px; }
     .stage-top > :first-child { flex: 1 1 220px; }
     .stage-side { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
@@ -218,11 +231,12 @@
     .face { width: 100%; height: auto; overflow: visible; display: block; }
     .face .ring { fill: none; stroke: rgb(var(--accent)); stroke-width: 3; opacity: 0; transform-box: fill-box; transform-origin: center; transition: opacity .3s; }
     .face .ring2 { fill: none; stroke: rgb(var(--accent) / .5); stroke-width: 2; stroke-dasharray: 5 9; opacity: 0; transform-box: fill-box; transform-origin: center; transition: opacity .3s; }
-    .face .white { fill: #F4FFFA; }
-    .face .pupil { fill: #0B0F12; }
+    .face .white { fill: #FFFFFF; }
+    .face .pupil { fill: #1B0B33; }
     .face .shine { fill: #fff; }
-    .face .brow { fill: none; stroke: #063b26; stroke-width: 5; stroke-linecap: round; }
-    .face .mouth { fill: #4a1124; stroke: #063b26; stroke-width: 4; stroke-linejoin: round; }
+    .face .brow { fill: none; stroke: #2A0B57; stroke-width: 5; stroke-linecap: round; }
+    .face .mouth { fill: #3B0A28; stroke: #2A0B57; stroke-width: 4; stroke-linejoin: round; }
+    .face .halo { transform-box: fill-box; transform-origin: center; }
     .face .cheek { fill: #FF7AC6; opacity: 0; transition: opacity .5s; }
     .face.mood-happy .cheek { opacity: .35; }
     /* Linh vật UrBox: hộp quà tím (#6821C2, #8235E4, #A426ED theo urbox.vn) với nơ vàng #FFB700 */
@@ -236,14 +250,14 @@
     .face.mascot.mood-happy .cheek { opacity: .55; }
     .face .shadow { fill: #000; opacity: .28; }
     /* Linh vật UrBox chính thức (static/mascot/urbox-mascot.svg): bong bóng suy nghĩ, sóng âm khi nghe */
-    .face.urbox .ring { stroke: #FFCD35; }
-    .face.urbox .ring2 { stroke: rgb(255 205 53 / .55); }
+    .face.urbox .ring { stroke: rgb(var(--accent)); stroke-width: 3.5; }
+    .face.urbox .ring2 { stroke: rgb(var(--gold) / .7); }
     .face .thought, .face .waves { opacity: 0; transition: opacity .35s; }
     .face.st-thinking .thought, .face.st-listening .waves { opacity: 1; }
     .face .thought .cloud { fill: #F6F5F0; stroke: #231F20; stroke-width: 2; }
     .face .thought .dot { fill: #231F20; }
     .face.st-thinking .thought .dot { animation: av-dot 1.2s ease-in-out infinite; }
-    .face .waves path { fill: none; stroke: #FFCD35; stroke-width: 3; stroke-linecap: round; }
+    .face .waves path { fill: none; stroke: rgb(var(--accent)); stroke-width: 3; stroke-linecap: round; }
     .face.st-listening .waves path { animation: av-wave 1.4s ease-out infinite; }
     @keyframes av-dot { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
     @keyframes av-wave { 0% { opacity: 0; transform: translateX(5px); } 35% { opacity: 1; } 100% { opacity: 0; transform: translateX(-4px); } }
@@ -253,6 +267,7 @@
     @keyframes av-spark { 0%, 100% { opacity: 0; transform: scale(.3) rotate(0deg); } 50% { opacity: 1; transform: scale(1) rotate(25deg); } }
     @media (prefers-reduced-motion: reduce) { .face .spark { animation: none !important; } }
     .face-mini { width: 40px; height: 40px; flex: none; }
+    .face .confetti * { pointer-events: none; }
     .bubble { position: relative; background: rgb(var(--raise)); border: 1px solid var(--line-strong); border-radius: 16px;
       padding: 12px 14px; font-size: 14.5px; line-height: 1.55; min-height: 50px; }
     .bubble::before { content: ""; position: absolute; top: -8px; left: 50%; margin-left: -7px; width: 14px; height: 14px;
@@ -263,8 +278,8 @@
     .insight.speaking { border-color: rgb(var(--accent) / .55); background: rgb(var(--accent) / .08); }
     .slide-wrap { container-type: inline-size; width: 100%; }
     .slide { width: 100%; aspect-ratio: 16 / 9; position: relative; border-radius: 18px; overflow: hidden; display: flex; flex-direction: column;
-      background: linear-gradient(155deg, #131c22 0%, #0d1317 58%, #0e1b16 100%); border: 1px solid var(--line-strong); box-shadow: 0 30px 80px rgba(0,0,0,.45); }
-    .slide::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: .7cqw; background: rgb(var(--accent)); }
+      background: linear-gradient(155deg, #1d1533 0%, #130e22 58%, #1e1236 100%); border: 1px solid var(--line-strong); box-shadow: 0 30px 80px rgba(0,0,0,.45); }
+    .slide::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: .7cqw; background: linear-gradient(180deg, #A426ED, #6821C2 70%, #FFB700); }
     .sl-inner { flex: 1; padding: 5.5cqw 7cqw 2cqw; display: flex; flex-direction: column; justify-content: center; min-height: 0; overflow: hidden; }
     .slide h1 { font-size: 5cqw; line-height: 1.15; font-weight: 700; letter-spacing: -.01em; }
     .slide h2 { font-size: 3.4cqw; line-height: 1.2; font-weight: 700; margin-bottom: 2.4cqw; }
@@ -1890,10 +1905,15 @@ window.addEventListener('beforeunload', e => { if (MIC.on) { e.preventDefault();
 /* =====================================================================
    KHUÔN MẶT TRỢ LÝ & GIỌNG NÓI
    ===================================================================== */
+/* quầng sáng tím UrBox phía sau linh vật: thở theo nhịp, sáng hơn khi nghe / nói */
+const HALO_DEF = (id) => `<radialGradient id="${id}-halo" cx="50%" cy="50%" r="50%">
+    <stop offset="0%" stop-color="#B98AFF" stop-opacity=".42"/><stop offset="55%" stop-color="#8235E4" stop-opacity=".16"/>
+    <stop offset="100%" stop-color="#6821C2" stop-opacity="0"/></radialGradient>`;
 const FACE_SVG = (id) => `
   <defs><radialGradient id="${id}" cx="38%" cy="32%" r="78%">
-    <stop offset="0%" stop-color="#8AF5C8"/><stop offset="65%" stop-color="#3DDC97"/><stop offset="100%" stop-color="#1F9E6C"/>
-  </radialGradient></defs>
+    <stop offset="0%" stop-color="#D9C2FF"/><stop offset="62%" stop-color="#9B5CF0"/><stop offset="100%" stop-color="#6821C2"/>
+  </radialGradient>${HALO_DEF(id)}</defs>
+  <circle class="halo" data-halo cx="100" cy="102" r="94" fill="url(#${id}-halo)"/>
   <circle class="ring2" cx="100" cy="100" r="97"/>
   <circle class="ring" cx="100" cy="100" r="90"/>
   <g data-head>
@@ -1913,7 +1933,9 @@ const MASCOT_SVG = (id) => `
     <linearGradient id="${id}-lid" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#A84FF0"/><stop offset="100%" stop-color="#7A2FD6"/></linearGradient>
     <linearGradient id="${id}-gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FFD25A"/><stop offset="100%" stop-color="#FFB700"/></linearGradient>
     <clipPath id="${id}-clip"><rect x="42" y="90" width="116" height="86" rx="18"/></clipPath>
+    ${HALO_DEF(id)}
   </defs>
+  <circle class="halo" data-halo cx="100" cy="112" r="88" fill="url(#${id}-halo)"/>
   <circle class="ring2" cx="100" cy="100" r="97"/>
   <circle class="ring" cx="100" cy="100" r="90"/>
   <ellipse class="shadow" data-shadow cx="100" cy="183" rx="50" ry="6.5"/>
@@ -1964,9 +1986,11 @@ function loadBean() {
   }
   return BEAN.loading;
 }
-const BEAN_SVG = (P) => {
+const BEAN_SVG = (P, id) => {
   const pick = (a, b = a) => P.slice(a, b + 1).join('');
   return `
+  <defs>${HALO_DEF(id)}</defs>
+  <circle class="halo" data-halo cx="104" cy="106" r="90" fill="url(#${id}-halo)"/>
   <circle class="ring2" cx="100" cy="100" r="97"/>
   <circle class="ring" cx="100" cy="100" r="90"/>
   <ellipse class="shadow" data-shadow cx="118" cy="181" rx="40" ry="6"/>
@@ -2023,7 +2047,7 @@ function mountFaces() {
   $$('[data-face]').forEach((svg, i) => {
     if (svg.dataset.ready === style) return;
     if (svg.dataset.ready) AV.faces = AV.faces.filter(f => f.svg !== svg);
-    svg.innerHTML = style === 'urbox' ? BEAN_SVG(BEAN.paths) : style === 'mascot' ? MASCOT_SVG(`mascot-${i}`) : FACE_SVG(`face-grad-${i}`);
+    svg.innerHTML = style === 'urbox' ? BEAN_SVG(BEAN.paths, `urbox-${i}`) : style === 'mascot' ? MASCOT_SVG(`mascot-${i}`) : FACE_SVG(`face-grad-${i}`);
     svg.classList.toggle('mascot', style === 'mascot');
     svg.classList.toggle('urbox', style === 'urbox');
     svg.dataset.ready = style;
@@ -2032,7 +2056,13 @@ function mountFaces() {
       shines: $$('.shine', svg), brows: $$('.brow', svg), lid: $('[data-lid]', svg), bow: $('[data-bow]', svg),
       armL: $('[data-arm-l]', svg), armR: $('[data-arm-r]', svg), shadow: $('[data-shadow]', svg),
       hairL: $('[data-hair-l]', svg), hairR: $('[data-hair-r]', svg), eyeL: $('[data-eye-l]', svg), eyeR: $('[data-eye-r]', svg),
-      mouthArt: $('[data-mouth-art]', svg), ms: 0.5, lis: 0 });
+      mouthArt: $('[data-mouth-art]', svg), legs: $('[data-legs]', svg), halo: $('[data-halo]', svg), ms: 0.5, lis: 0,
+      m: { y: SPR(0), lean: SPR(0), sx: SPR(1), sy: SPR(1), armR: SPR(0), armL: SPR(0), armLy: SPR(0), legs: SPR(0),
+           hair: SPR(0), lid: SPR(0), gx: SPR(0), gy: SPR(0), glow: SPR(0.6) }, cheerSeen: 0 });
+    if (!svg.dataset.hover) {                             // rê chuột vào linh vật: vẫy tay chào
+      svg.dataset.hover = '1';
+      svg.addEventListener('pointerenter', () => { if (AV.shown === 'idle' && !AV.act) avStartAct('wave', performance.now()); });
+    }
   });
 }
 function setAvatarStyle(style) {
@@ -2045,6 +2075,110 @@ function mouthPath(open, smile, g = AV_GEO.face) {
   const w = g.mouthW, cx = 100, y = g.mouthY - smile * 3;
   const up = y + smile * 8 - open * 2, low = y + smile * 8 + 3 + open * g.mouthDepth;
   return `M ${cx - w} ${y.toFixed(1)} Q ${cx} ${up.toFixed(1)} ${cx + w} ${y.toFixed(1)} Q ${cx} ${low.toFixed(1)} ${cx - w} ${y.toFixed(1)} Z`;
+}
+/* ---------- chuyển động của linh vật: lò xo (có quán tính, nảy nhẹ) + hành vi tự nhiên ---------- */
+const SPR = x => ({ x, v: 0 });
+function spr(s, target, k = 0.16, d = 0.72) { s.v = (s.v + (target - s.x) * k) * d; s.x += s.v; return s.x; }
+const AV_ACTS = { look: 2200, hop: 950, wave: 1700, stretch: 1700, dance: 2600, peek: 1900 };
+function avStartAct(name, ts) {
+  AV.act = { name, t0: ts, dur: AV_ACTS[name] || 1500 };
+  AV.nextAct = ts + AV.act.dur + 3500 + Math.random() * 5500;
+}
+function avCheer() {                                     // có kết quả: nhảy ăn mừng, tung hoa giấy tím vàng
+  const now = performance.now();
+  if (now - (AV.cheerAt || -1e9) < 2500) return;
+  AV.cheerAt = now; AV.mood = 'happy'; AV.moodAt = now;
+}
+document.addEventListener('pointermove', e => { AV.px = e.clientX; AV.py = e.clientY; AV.pointerAt = performance.now(); }, { passive: true });
+const ease = k => k < 0 ? 0 : k > 1 ? 1 : k * k * (3 - 2 * k);
+/** Tư thế mục tiêu (dùng chung cho mọi linh vật): độ cao, nghiêng, co giãn thân, tay, chân, ánh nhìn. */
+function avPose(ts, st) {
+  const t = ts / 1000;
+  const P = { y: 0, lean: 0, sx: 1, sy: 1, armR: 0, armL: 0, armLy: 0, legs: 0, gx: null, gy: null, glow: 0.55, lid: 0 };
+  if (REDUCED_MOTION) return P;
+  const br = Math.sin(t * 1.6) * 0.014;                                   // thở
+  P.y = Math.sin(t * 1.8) * 2.4; P.sy = 1 + br; P.sx = 1 - br * 0.5;     // lơ lửng nhẹ
+  P.armR = Math.sin(t * 1.6) * 5; P.armL = -Math.sin(t * 1.6 + 0.7) * 4;
+  P.glow = 0.55 + Math.sin(t * 1.6) * 0.08;
+  const sinceCheer = ts - (AV.cheerAt || -1e9), sinceMood = ts - (AV.moodAt || 0);
+  if (sinceCheer < 1500) {                                // ăn mừng: nhún - bật cao giơ hai tay - tiếp đất - nảy
+    const k = sinceCheer / 1500;
+    if (k < 0.14) { const c = ease(k / 0.14); P.y += 4 * c; P.sy = 1 - 0.14 * c; P.sx = 1 + 0.08 * c; }
+    else if (k < 0.62) { const h = Math.sin((k - 0.14) / 0.48 * Math.PI); P.y -= 26 * h; P.sy = 1.1; P.sx = 0.93; P.armR = -100; P.armL = -48; P.armLy = -22; P.lid = 10 * h; }
+    else if (k < 0.78) { const c = Math.sin((k - 0.62) / 0.16 * Math.PI); P.sy = 1 - 0.12 * c; P.sx = 1 + 0.08 * c; P.armR = -40; P.armL = -20; }
+    else { const h = Math.sin((k - 0.78) / 0.22 * Math.PI); P.y -= 6 * h; P.armR = -30 * (1 - k); }
+    P.glow = 1;
+  } else if (st === 'speaking') {                         // nói: nhún theo âm lượng, tay nhấn ý theo nhịp lời
+    const e = AV.mouth;
+    P.y += -e * 6; P.sy += e * 0.06; P.sx -= e * 0.025; P.lid = e * 9;
+    if (e > 0.55 && !AV.peak && ts - (AV.gestAt || 0) > 420) { AV.peak = true; AV.gestAt = ts; AV.gestSide = (AV.gestSide || 1) * -1; }
+    if (e < 0.35) AV.peak = false;
+    const g = Math.max(0, 1 - (ts - (AV.gestAt || -1e9)) / 650);
+    if (AV.gestSide > 0) P.armR += -42 * g; else { P.armL += -28 * g; P.armLy -= 12 * g; }
+    P.lean = Math.sin(t * 2.3) * 3 + (AV.gestSide > 0 ? -2.5 : 2.5) * g;
+    P.glow = 0.75 + e * 0.35;
+  } else if (st === 'thinking') {                         // nghĩ: gãi đầu, mắt nhìn lên, nhịp chân
+    P.armR = -62 + Math.sin(t * 7) * 10;
+    P.lean = -2 + Math.sin(t * 1.3) * 3.5; P.y += Math.sin(t * 2.2) * 1.4;
+    P.legs = Math.abs(Math.sin(t * 5)) * 2.2; P.lid = 2 + Math.sin(t * 4) * 2;
+    P.gx = 5 + Math.sin(t * 0.8) * 3; P.gy = -6;
+    P.glow = 0.6 + Math.sin(t * 3) * 0.12;
+  } else if (st === 'listening') {                        // nghe: nghiêng về phía người nói, tay lên tai, gật gù theo lời
+    const nod = Math.max(0, 1 - (ts - (AV.nodAt || -1e9)) / 380);
+    P.lean = 6 + Math.sin(t * 2) * 1.5 + Math.min(4, (MIC.level || 0) * 60);
+    P.y += nod * 4; P.armL = -24; P.armLy = -17; P.gx = 3; P.gy = 1.5;
+    P.glow = 0.8 + Math.min(0.3, (MIC.level || 0) * 4);
+  } else if (AV.mood === 'concerned' && sinceMood < 6000) {   // lo lắng: nghiêng đầu, chùng người
+    P.lean = 6; P.sy -= 0.04; P.y += 2.5; P.armR = 10; P.armL = -6; P.gy = 3.5; P.glow = 0.4;
+  } else if (AV.act) {                                    // lúc rảnh: nhìn quanh, nhảy, vẫy tay, vươn vai, nhún nhảy, ngó
+    const a = AV.act, k = (ts - a.t0) / a.dur;
+    if (k >= 1) AV.act = null;
+    else if (a.name === 'look') { const side = k < 0.45 ? -1 : k < 0.9 ? 1 : 0; P.gx = side * 7; P.lean = side * 3.5; }
+    else if (a.name === 'hop') {
+      if (k < 0.2) { const c = ease(k / 0.2); P.y += 3 * c; P.sy = 1 - 0.1 * c; P.sx = 1 + 0.07 * c; }
+      else if (k < 0.66) { const h = Math.sin((k - 0.2) / 0.46 * Math.PI); P.y -= 16 * h; P.sy = 1.07; P.sx = 0.95; P.armR = -30; P.armL = -14; P.lid = 6 * h; }
+      else if (k < 0.85) { const c = Math.sin((k - 0.66) / 0.19 * Math.PI); P.sy = 1 - 0.09 * c; P.sx = 1 + 0.06 * c; }
+    } else if (a.name === 'wave') { P.armR = -78 + Math.sin(t * 13) * 24; P.lean = -2.5; P.gx = 2; }
+    else if (a.name === 'stretch') { const c = Math.sin(Math.min(1, k / 0.85) * Math.PI); P.armR = -90 * c; P.armL = -40 * c; P.armLy = -22 * c; P.sy = 1 + 0.07 * c; P.y -= 3 * c; P.gy = -4 * c; }
+    else if (a.name === 'dance') { const w = Math.sin(t * 7.5); P.lean = w * 7; P.y -= Math.abs(w) * 5; P.armR = w * 32 - 12; P.armL = -w * 26; P.legs = Math.abs(w) * 2.5; P.lid = Math.abs(w) * 5; }
+    else if (a.name === 'peek') { const c = Math.sin(k * Math.PI); P.lean = 10 * c; P.gx = 7 * c; P.y += 1.5 * c; }
+  }
+  if (AV.mood === 'happy' && sinceMood < 900 && sinceCheer >= 1500) P.y -= Math.abs(Math.sin(sinceMood / 900 * Math.PI * 2)) * 8;
+  return P;
+}
+/** Hướng nhìn theo con trỏ chuột khi linh vật đang rảnh hoặc đang nghe. */
+function avGaze(f, ts, st, P) {
+  if (P.gx !== null && st !== 'idle') return [P.gx, P.gy ?? 0];
+  if (ts - (AV.pointerAt || -1e9) < 2500 && (st === 'idle' || st === 'listening') && P.gx === null) {
+    const r = f.svg.getBoundingClientRect();
+    if (r.width) {
+      const dx = (AV.px - (r.left + r.width / 2)) / Math.max(140, r.width), dy = (AV.py - (r.top + r.height * 0.4)) / Math.max(140, r.height);
+      return [Math.max(-7, Math.min(7, dx * 14)), Math.max(-5, Math.min(5, dy * 10))];
+    }
+  }
+  return [P.gx ?? AV.gx, P.gy ?? AV.gy];
+}
+function avConfetti(f) {
+  if (REDUCED_MOTION || !f.svg.animate) return;
+  const NS = 'http://www.w3.org/2000/svg', colors = ['#8235E4', '#A426ED', '#FFB700', '#EF65C5', '#FFFFFF', '#C89CFF'];
+  const g = document.createElementNS(NS, 'g');
+  g.setAttribute('class', 'confetti');
+  f.svg.appendChild(g);
+  for (let i = 0; i < 24; i++) {
+    const el = document.createElementNS(NS, i % 3 ? 'rect' : 'circle');
+    if (i % 3) { el.setAttribute('x', '96'); el.setAttribute('y', '57'); el.setAttribute('width', '9'); el.setAttribute('height', '5'); el.setAttribute('rx', '1.4'); }
+    else { el.setAttribute('cx', '100'); el.setAttribute('cy', '60'); el.setAttribute('r', '3.6'); }
+    el.setAttribute('fill', colors[i % colors.length]);
+    el.style.transformBox = 'fill-box'; el.style.transformOrigin = 'center';
+    g.appendChild(el);
+    const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.4, d = 45 + Math.random() * 55;
+    const dx = Math.cos(a) * d, up = Math.sin(a) * d, fall = 70 + Math.random() * 50, rot = (Math.random() - 0.5) * 720;
+    el.animate([{ transform: 'translate(0px,0px) rotate(0deg)', opacity: 1 },
+                { transform: `translate(${(dx * 0.7).toFixed(1)}px,${up.toFixed(1)}px) rotate(${(rot / 2).toFixed(0)}deg)`, opacity: 1, offset: 0.45 },
+                { transform: `translate(${dx.toFixed(1)}px,${(up + fall).toFixed(1)}px) rotate(${rot.toFixed(0)}deg)`, opacity: 0 }],
+               { duration: 1300 + Math.random() * 500, delay: Math.random() * 120, easing: 'cubic-bezier(.2,.7,.4,1)', fill: 'forwards' });
+  }
+  setTimeout(() => g.remove(), 2100);
 }
 function avFrame(ts) {
   requestAnimationFrame(avFrame);
@@ -2060,6 +2194,11 @@ function avFrame(ts) {
     AV.shown = st;
     $$('[data-av-status]').forEach(el => { el.textContent = AV_STATUS[st]; });
   }
+  if (AV.nextAct === undefined) AV.nextAct = ts + 2500;
+  if (st !== 'idle') { AV.act = null; AV.nextAct = Math.max(AV.nextAct || 0, ts + 2500); }
+  else if (!AV.act && !REDUCED_MOTION && ts > (AV.nextAct || 0) && AV.mood !== 'concerned') {
+    const names = Object.keys(AV_ACTS); avStartAct(names[Math.floor(Math.random() * names.length)], ts);
+  }
   if (ts > AV.nextGaze) {
     const r = () => Math.random() * 2 - 1;
     [AV.tgx, AV.tgy] = st === 'thinking' ? [5 + r() * 1.5, -6 + r()] : st === 'listening' ? [r() * 2, 2.5]
@@ -2071,7 +2210,7 @@ function avFrame(ts) {
   let open = 1;
   if (AV.blinkT >= 0) {
     const k = (ts - AV.blinkT) / 150;
-    if (k >= 1) { AV.blinkT = -1; AV.blinkAt = ts + 2200 + Math.random() * 3800; } else open = 1 - Math.sin(k * Math.PI);
+    if (k >= 1) { AV.blinkT = -1; AV.blinkAt = ts + (Math.random() < 0.18 ? 180 : 2200 + Math.random() * 3800); } else open = 1 - Math.sin(k * Math.PI);
   }
   let target = 0;
   if (speaking) {
@@ -2080,6 +2219,7 @@ function avFrame(ts) {
     else { AV.phase += 0.36 + Math.random() * 0.12; target = 0.28 + 0.38 * Math.abs(Math.sin(AV.phase)) + (ts - AV.kickAt < 110 ? 0.25 : 0); }
   }
   AV.mouth += (target - AV.mouth) * 0.35;
+  const P = avPose(ts, st);
   const smile = AV.mood === 'happy' ? 0.9 : AV.mood === 'concerned' ? -0.55 : st === 'thinking' ? 0.1 : 0.6;
   const lift = st === 'thinking' ? -5 : st === 'listening' ? -2.5 : 0;
   const tilt = AV.mood === 'concerned' ? 4 : st === 'thinking' ? -1.5 : 0;
@@ -2087,83 +2227,68 @@ function avFrame(ts) {
   const ringOn = st === 'listening' ? 0.9 : st === 'speaking' ? 0.45 : 0;
   const ringScale = 1 + (st === 'listening' ? Math.min(0.07, MIC.level * 1.5) + (REDUCED_MOTION ? 0 : 0.02 * (1 + Math.sin(t * 5)))
     : st === 'speaking' ? AV.mouth * 0.04 : 0);
-  const bob = REDUCED_MOTION ? 0 : Math.sin(t * 1.6) * 1.4;
-  // Linh vật: nhảy lên khi vừa vui (có kết quả), nhún theo giọng, nắp bật theo âm lượng, nơ lắc, tay vẫy
-  const sinceMood = ts - (AV.moodAt || 0);
-  const hop = REDUCED_MOTION || AV.mood !== 'happy' || sinceMood > 900 ? 0 : Math.abs(Math.sin(sinceMood / 900 * Math.PI * 2)) * 9;
-  const waving = !REDUCED_MOTION && (AV.mood === 'happy' && sinceMood < 2600 || st === 'listening');
   for (const f of visible) {
-    const g = f.geo;
+    const g = f.geo, m = f.m;
+    if (f.cheerSeen !== AV.cheerAt && ts - (AV.cheerAt || -1e9) < 300) { f.cheerSeen = AV.cheerAt; avConfetti(f); }
+    spr(m.y, P.y, 0.18, 0.7); spr(m.lean, P.lean, 0.12, 0.76); spr(m.sx, P.sx, 0.24, 0.62); spr(m.sy, P.sy, 0.24, 0.62);
+    spr(m.armR, P.armR, 0.14, 0.72); spr(m.armL, P.armL, 0.14, 0.72); spr(m.armLy, P.armLy, 0.14, 0.72);
+    spr(m.legs, P.legs, 0.22, 0.68); spr(m.lid, P.lid, 0.2, 0.68); spr(m.glow, P.glow, 0.08, 0.8);
+    spr(m.hair, REDUCED_MOTION ? 0 : -m.y.v * 4 + m.lean.v * 2.5 + Math.sin(t * 2.4) * 3 + AV.mouth * 4, 0.12, 0.78);  // tóc nảy theo người
+    const [tgx, tgy] = avGaze(f, ts, st, P);
+    spr(m.gx, tgx, 0.16, 0.7); spr(m.gy, tgy, 0.16, 0.7);
     f.svg.classList.toggle('st-thinking', st === 'thinking');
     f.svg.classList.toggle('st-listening', st === 'listening');
-    if (f.kind === 'urbox') {
-      avBean(f, { ts, t, st, speaking, bob, hop, waving, open });
-      f.ring.style.opacity = ringOn; f.ring.style.transform = `scale(${ringScale.toFixed(3)})`;
-      f.ring2.style.opacity = st === 'thinking' ? 1 : 0; f.ring2.style.transform = REDUCED_MOTION ? '' : `rotate(${(t * 50) % 360}deg)`;
-      f.svg.classList.toggle('mood-happy', AV.mood === 'happy');
-      continue;
-    }
+    f.svg.classList.toggle('mood-happy', AV.mood === 'happy');
+    if (f.halo) { f.halo.style.opacity = Math.max(0, Math.min(1, m.glow.x)).toFixed(3); f.halo.style.transform = `scale(${(0.94 + m.glow.x * 0.08 + AV.mouth * 0.04).toFixed(3)})`; }
+    f.ring.style.opacity = ringOn; f.ring.style.transform = `scale(${ringScale.toFixed(3)})`;
+    f.ring2.style.opacity = st === 'thinking' ? 1 : 0; f.ring2.style.transform = REDUCED_MOTION ? '' : `rotate(${(t * 50) % 360}deg)`;
+    if (f.kind === 'urbox') { avBean(f, { st, speaking, open }); continue; }
     if (f.mascot) {
-      const sy = 1 + AV.mouth * 0.035, sx = 1 - AV.mouth * 0.02;
-      f.head.setAttribute('transform', `translate(0 ${(bob - hop).toFixed(2)}) translate(100 176) scale(${sx.toFixed(3)} ${sy.toFixed(3)}) translate(-100 -176)`);
-      const lidUp = AV.mouth * 9 + hop * 0.5 + (st === 'thinking' && !REDUCED_MOTION ? 2 + Math.sin(t * 4) * 2 : 0);
-      f.lid.setAttribute('transform', `translate(0 ${(-lidUp).toFixed(2)}) rotate(${(-AV.mouth * 4 - (st === 'thinking' ? 3 : 0)).toFixed(2)} 100 84)`);
-      const wig = REDUCED_MOTION ? 0 : Math.sin(t * 2.2) * 3 + (speaking ? Math.sin(t * 12) * 4 : 0);
-      f.bow.setAttribute('transform', `rotate(${wig.toFixed(2)} 100 72)`);
-      const sway = REDUCED_MOTION ? 0 : Math.sin(t * 1.6) * 3;
-      f.armL.setAttribute('transform', `rotate(${(sway + (st === 'thinking' ? 8 : 0)).toFixed(2)} 46 124)`);
-      const armR = waving ? -40 + Math.sin(t * 13) * 22 : st === 'thinking' ? -55 : -sway;
-      f.armR.setAttribute('transform', `rotate(${armR.toFixed(2)} 154 124)`);
-      f.shadow.setAttribute('rx', (50 - hop * 1.6 + AV.mouth * 2).toFixed(2));
-      f.shadow.style.opacity = (0.28 - hop * 0.015).toFixed(3);
+      f.head.setAttribute('transform', `translate(0 ${m.y.x.toFixed(2)}) rotate(${(m.lean.x * 0.6).toFixed(2)} 100 176) `
+        + `translate(100 176) scale(${m.sx.x.toFixed(3)} ${m.sy.x.toFixed(3)}) translate(-100 -176)`);
+      f.lid.setAttribute('transform', `translate(0 ${(-m.lid.x).toFixed(2)}) rotate(${(-m.lid.x * 0.45 - (st === 'thinking' ? 3 : 0)).toFixed(2)} 100 84)`);
+      const spin = ts - (AV.cheerAt || -1e9) < 1500 ? (ts - AV.cheerAt) / 1500 * 360 : 0;
+      f.bow.setAttribute('transform', `rotate(${(m.hair.x * 1.4 + spin).toFixed(2)} 100 72)`);
+      f.armL.setAttribute('transform', `rotate(${(-m.armL.x * 1.1 - m.armLy.x).toFixed(2)} 46 124)`);
+      f.armR.setAttribute('transform', `rotate(${(m.armR.x * 0.85).toFixed(2)} 154 124)`);
+      f.shadow.setAttribute('rx', (50 + Math.min(0, m.y.x) * 1.1 + AV.mouth * 2).toFixed(2));
+      f.shadow.style.opacity = (0.28 + Math.min(0, m.y.x) * 0.008).toFixed(3);
     } else {
-      f.head.setAttribute('transform', `translate(0 ${bob.toFixed(2)})`);
+      f.head.setAttribute('transform', `translate(0 ${(m.y.x * 0.7).toFixed(2)}) rotate(${(m.lean.x * 0.5).toFixed(2)} 100 100)`);
     }
     const [ex0, ex1] = g.eyes, dx = ex1 - ex0;
     const lf = lift * g.browLift;
     f.whites.forEach(w => w.setAttribute('ry', (g.eyeRy * Math.max(0.08, open)).toFixed(2)));
-    f.pupils.forEach((pp, i) => { pp.setAttribute('cx', (ex0 + i * dx + AV.gx).toFixed(2)); pp.setAttribute('cy', (g.eyeY + g.pupilDy + AV.gy).toFixed(2)); pp.style.opacity = open < 0.3 ? 0 : 1; });
-    f.shines.forEach((sh, i) => { sh.setAttribute('cx', (ex0 + g.shineDx + i * dx + AV.gx).toFixed(2)); sh.setAttribute('cy', (g.eyeY + g.shineDy + AV.gy).toFixed(2)); sh.style.opacity = open < 0.3 ? 0 : 0.9; });
+    f.pupils.forEach((pp, i) => { pp.setAttribute('cx', (ex0 + i * dx + m.gx.x).toFixed(2)); pp.setAttribute('cy', (g.eyeY + g.pupilDy + m.gy.x).toFixed(2)); pp.style.opacity = open < 0.3 ? 0 : 1; });
+    f.shines.forEach((sh, i) => { sh.setAttribute('cx', (ex0 + g.shineDx + i * dx + m.gx.x).toFixed(2)); sh.setAttribute('cy', (g.eyeY + g.shineDy + m.gy.x).toFixed(2)); sh.style.opacity = open < 0.3 ? 0 : 0.9; });
     const by = g.browY, bw = g.browW;
     f.brows[0].setAttribute('d', `M ${ex0 - bw} ${by + lf + tilt} Q ${ex0} ${by - 7 + lf} ${ex0 + bw} ${by + lf - tilt}`);
     f.brows[1].setAttribute('d', `M ${ex1 - bw} ${by + lf - tilt} Q ${ex1} ${by - 7 + lf} ${ex1 + bw} ${by + lf + tilt}`);
     f.mouth.setAttribute('d', mouthPath(AV.mouth, smile, g));
-    f.ring.style.opacity = ringOn; f.ring.style.transform = `scale(${ringScale.toFixed(3)})`;
-    f.ring2.style.opacity = st === 'thinking' ? 1 : 0; f.ring2.style.transform = REDUCED_MOTION ? '' : `rotate(${(t * 50) % 360}deg)`;
-    f.svg.classList.toggle('mood-happy', AV.mood === 'happy');
   }
 }
 
-/** Linh vật UrBox: nói thì miệng mở theo âm lượng và tay phải đưa nhịp; nghe thì nghiêng người, đưa găng trái lên cạnh
-    đầu, có sóng âm; nghĩ thì tay phải gãi đầu, mắt nhìn lên, có bong bóng suy nghĩ; có kết quả thì nhảy lên. */
-function avBean(f, { t, st, speaking, bob, hop, waving, open }) {
-  const still = REDUCED_MOTION;
-  const sp = speaking ? AV.mouth : 0;
-  f.lis += ((st === 'listening' ? 1 : 0) - f.lis) * 0.12;
-  const think = st === 'thinking' ? 1 : 0;
-  const lean = still ? 0 : f.lis * (4 + Math.sin(t * 2) * 1) - think * 3 + (AV.mood === 'concerned' ? Math.sin(t * 3) * 1.5 : 0);
-  const sy = 1 + sp * 0.03 + (still ? 0 : Math.sin(t * 1.6) * 0.008), sx = 1 - sp * 0.015;
-  f.head.setAttribute('transform', `translate(0 ${(bob - hop).toFixed(2)}) rotate(${lean.toFixed(2)} 118 178) `
-    + `translate(118 178) scale(${sx.toFixed(3)} ${sy.toFixed(3)}) translate(-118 -178)`);
-  const sway = still ? 0 : Math.sin(t * 1.6) * 3;
-  const armR = think ? -58 + (still ? 0 : Math.sin(t * 6) * 4)                  // đưa tay lên gãi đầu
-    : waving && st !== 'listening' ? Math.sin(t * 12) * 14                     // vui: vẫy nắm tay
-    : speaking ? (still ? 0 : Math.sin(t * 5) * 6) - sp * 6 : sway;            // nói: đưa nhịp theo lời
-  f.armR.setAttribute('transform', `rotate(${armR.toFixed(2)} 117 53)`);
-  const l = f.lis;
-  f.armL.setAttribute('transform', `translate(${(-3 * l).toFixed(2)} ${(-16 * l).toFixed(2)}) rotate(${(-18 * l + sway * 0.6).toFixed(2)} 36 64)`);
-  const hairW = still ? 0 : Math.sin(t * 2.4) * 3 + sp * 4;
-  f.hairL.setAttribute('transform', `rotate(${hairW.toFixed(2)} 58 46)`);
-  f.hairR.setAttribute('transform', `rotate(${(-hairW).toFixed(2)} 100 33)`);
-  const gx = AV.gx * 0.35, gy = AV.gy * 0.35, o = Math.max(0.1, open).toFixed(3);
+/** Linh vật UrBox chính thức: thân nảy theo lò xo (nhún, bật, co giãn), tay nhấn ý khi nói, đưa tay lên tai khi nghe,
+    gãi đầu khi nghĩ, tóc nảy theo người, mắt nhìn theo chuột, nhảy ăn mừng và tung hoa giấy khi có kết quả. */
+function avBean(f, { st, speaking, open }) {
+  const m = f.m;
+  f.head.setAttribute('transform', `translate(0 ${m.y.x.toFixed(2)}) rotate(${m.lean.x.toFixed(2)} 118 178) `
+    + `translate(118 178) scale(${m.sx.x.toFixed(3)} ${m.sy.x.toFixed(3)}) translate(-118 -178)`);
+  f.armR.setAttribute('transform', `rotate(${m.armR.x.toFixed(2)} 117 53)`);
+  f.armL.setAttribute('transform', `translate(${(m.armLy.x * 0.18).toFixed(2)} ${m.armLy.x.toFixed(2)}) rotate(${m.armL.x.toFixed(2)} 36 64)`);
+  f.hairL.setAttribute('transform', `rotate(${m.hair.x.toFixed(2)} 58 46)`);
+  f.hairR.setAttribute('transform', `rotate(${(-m.hair.x).toFixed(2)} 100 33)`);
+  if (f.legs) f.legs.setAttribute('transform', `translate(0 ${(-m.legs.x).toFixed(2)})`);
+  const gx = m.gx.x * 0.35, gy = m.gy.x * 0.35, o = Math.max(0.1, open).toFixed(3);
   f.eyeL.setAttribute('transform', `translate(${gx.toFixed(2)} ${gy.toFixed(2)}) translate(87.6 40) scale(1 ${o}) translate(-87.6 -40)`);
   f.eyeR.setAttribute('transform', `translate(${gx.toFixed(2)} ${gy.toFixed(2)}) translate(105.5 34.6) scale(1 ${o}) translate(-105.5 -34.6)`);
-  const target = speaking ? 0.3 + Math.min(0.9, AV.mouth * 1.1) : AV.mood === 'happy' ? 1 : AV.mood === 'concerned' ? 0.28
-    : think ? 0.35 : st === 'listening' ? 0.6 : 0.5;
+  const cheer = performance.now() - (AV.cheerAt || -1e9) < 1500;
+  const target = speaking ? 0.3 + Math.min(0.9, AV.mouth * 1.1) : cheer || AV.mood === 'happy' ? 1 : AV.mood === 'concerned' ? 0.28
+    : st === 'thinking' ? 0.35 : st === 'listening' ? 0.6 : 0.5;
   f.ms += (target - f.ms) * (speaking ? 0.45 : 0.15);
   f.mouthArt.setAttribute('transform', `translate(99.6 48.2) scale(1 ${f.ms.toFixed(3)}) translate(-99.6 -48.2)`);
-  f.shadow.setAttribute('rx', (40 - hop * 1.4 + sp * 1.5).toFixed(2));
-  f.shadow.style.opacity = (0.28 - hop * 0.015).toFixed(3);
+  f.shadow.setAttribute('rx', (40 + Math.min(0, m.y.x) * 0.9 + AV.mouth * 1.5).toFixed(2));
+  f.shadow.style.opacity = (0.28 + Math.min(0, m.y.x) * 0.008).toFixed(3);
 }
 
 const VOICE = { enabled: true, supported: 'speechSynthesis' in window, voice: null, queue: [], current: null, audible: false, gateUntil: 0,
@@ -2370,11 +2495,11 @@ async function analyzeNow() {
 function avatarEvent(R, ev) {
   switch (ev.type) {
     case 'interim':
-      if (ev.text) AV.heardAt = performance.now();
+      if (ev.text) { AV.heardAt = performance.now(); if (AV.heardAt - (AV.nodAt || 0) > 520) AV.nodAt = AV.heardAt; }
       setLive(ev);
       if (STAGE.open && ev.text && performance.now() - focusTimer > 400) { focusTimer = performance.now(); focusBullet(ev.text); }
       break;
-    case 'segment': setLive(null, ev.segment); if (STAGE.open) { renderPrompter(); focusBullet(ev.segment.text); } break;
+    case 'segment': AV.nodAt = performance.now(); setLive(null, ev.segment); if (STAGE.open) { renderPrompter(); focusBullet(ev.segment.text); } break;
     case 'ai_listening': avSet('listening', 'happy'); showBubble('Dạ, em nghe đây, anh chị cứ nói yêu cầu.'); break;
     case 'ai_cancelled': avSet('idle', 'neutral'); VOICE.queue = VOICE.queue.filter(it => !it.stale); break;
     case 'ai_listening_end': if (ev.reason === 'answer') { avSet('idle', 'neutral'); break; } avSet('idle', 'neutral'); showBubble(`Em chưa nghe thấy yêu cầu. Thử nói "${ev.name} ơi, vẽ dashboard tiến độ".`); break;
@@ -2387,6 +2512,7 @@ function avatarEvent(R, ev) {
       const res = ev.response || {};
       VOICE.queue = VOICE.queue.filter(it => !it.stale);       // đã có kết quả: bỏ các câu "em đang làm..." còn chờ đọc
       if (res.chat_response) say(res.chat_response, { mood: 'happy' });
+      if (res.artifact || res.show) avCheer();
       if (res.artifact && VISUAL_KINDS.has(res.artifact.kind) && !STAGE.open) openStage(true);   // kết quả phải hiện ra ngay
       break;
     }
@@ -2402,6 +2528,7 @@ function avatarEvent(R, ev) {
       else if (AV.state === 'thinking' && ev.minutes_status === 'done') avSet('idle');
       renderStageMic(); break;
     case 'artifact_created':
+      if (ev.artifact) avCheer();
       if (ev.artifact && ev.artifact.kind === 'minutes') { avSet('idle', 'happy'); say('Biên bản cuộc họp đã xong.', { mood: 'happy' }); }
       break;
   }
@@ -2420,9 +2547,9 @@ function setLive(interim, seg) {
 /* =====================================================================
    DASHBOARD SỐ LIỆU (Chart.js)
    ===================================================================== */
-const VIZ = { surface: '#121a20', ink: '#e9eef1', muted: '#8d99a5', grid: 'rgba(255,255,255,0.07)', axis: 'rgba(255,255,255,0.16)',
-  // 8 màu chuỗi theo thứ tự cố định (không xoay vòng), đã kiểm tra mù màu và độ tương phản trên nền #121a20
-  series: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'] };
+const VIZ = { surface: '#1b142e', ink: '#f1edfa', muted: '#a69bbf', grid: 'rgba(214,196,255,0.08)', axis: 'rgba(214,196,255,0.18)',
+  // 8 màu chuỗi theo thứ tự cố định: tím và vàng UrBox trước, các màu sau khác biệt rõ về sắc và độ sáng trên nền #1b142e
+  series: ['#a67cff', '#ffb700', '#22b8a5', '#ef65c5', '#3987e5', '#d95926', '#e66767', '#9be15d'] };
 const NF = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 });
 const NF_COMPACT = new Intl.NumberFormat('vi-VN', { notation: 'compact', maximumFractionDigits: 1 });
 const fmtNum = (v, unit) => `${NF.format(v)}${unit ? ' ' + unit : ''}`;
@@ -2496,7 +2623,7 @@ function chartConfig(c) {
   const ints = c.series.every(s => s.data.every(v => Number.isInteger(v)));   // số đếm: vạch trục là số nguyên
   const col = i => VIZ.series[Math.min(i, VIZ.series.length - 1)];
   const valueOf = ctx => (typeof ctx.parsed === 'number' ? ctx.parsed : (c.type === 'hbar' ? ctx.parsed.x : ctx.parsed.y));
-  const tooltip = { backgroundColor: '#0b0f12', borderColor: 'rgba(255,255,255,0.14)', borderWidth: 1, titleColor: VIZ.muted,
+  const tooltip = { backgroundColor: '#120d20', borderColor: 'rgba(255,255,255,0.14)', borderWidth: 1, titleColor: VIZ.muted,
     bodyColor: VIZ.ink, bodyFont: { weight: '600' }, padding: 10, cornerRadius: 8, boxWidth: 12, boxHeight: 2,
     callbacks: { label: ctx => ` ${fmtNum(valueOf(ctx), c.unit)}${round ? ` - ${ctx.label}` : multi ? ` - ${ctx.dataset.label}` : ''}` } };
   const legend = (show, line) => ({ display: show, position: 'bottom',

@@ -901,13 +901,13 @@ async def ask_assistant(mid: int, payload: Dict[str, Any]):
         res = await llm.think_and_act(meeting_id=mid, prompt=prompt, segments=segs, trigger="chat_message",
                                       on_thinking=_on_thinking, on_tool=_on_tool, on_insights=_on_insights,
                                       on_progress=_on_progress, meeting=ls.meeting if ls is not None else None,
-                                      stage_art=ls._stage_summary() if ls is not None else None)
+                                      stage_art=ls._stage_summary() if ls is not None else None,
+                                      library=await ls._library_summary() if ls is not None else None)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Trợ lý AI lỗi: {e}")
     if ls is not None:
         await ls.emit({"type": "ai_response", "response": res})
-        if res.get("artifact"):
-            await ls.stage_action("show", artifact_id=res["artifact"]["id"])
+        await ls.apply_ai_result(res)
     return res
 
 

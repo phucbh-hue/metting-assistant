@@ -49,8 +49,8 @@ class DeckFileTests(unittest.TestCase):
 
     def test_intents(self):
         self.assertEqual(llm.stage_intent("em mở slide ở folder mega sale giúp anh")["action"], "open_file")
-        self.assertEqual(llm.stage_intent("quay lại slide cũ khi nãy em đã present"), {"action": "back", "kind": "slides"})
-        self.assertEqual(llm.stage_intent("quay lại cái sơ đồ lúc nãy"), {"action": "back", "kind": "diagram"})
+        self.assertEqual(llm.stage_intent("quay lại slide cũ khi nãy em đã present"), {"action": "back", "kind": "slides", "past": True})
+        self.assertEqual(llm.stage_intent("quay lại cái sơ đồ lúc nãy"), {"action": "back", "kind": "diagram", "past": True})
         self.assertEqual(llm.stage_intent("quay lại slide trước")["action"], "prev")      # vẫn là slide trước trong bộ
 
 
@@ -116,12 +116,12 @@ class StageDeckTests(unittest.IsolatedAsyncioTestCase):
         self.events()
         await self.s._handle_ai_activation("quay lại slide cũ khi nãy em đã present", "Bông ơi, quay lại slide cũ khi nãy em đã present", "Bông")
         self.assertEqual((self.s.stage["artifact_id"], self.s.stage["slide"]), (aid, 2))
-        self.assertIn("quay lại bộ slide", self.events("ai_say")[0]["text"])
+        self.assertIn("mở lại bộ slide", self.events("ai_say")[0]["text"])
         await self.s._handle_ai_activation("quay lại dashboard lúc nãy", "Bông ơi, quay lại dashboard lúc nãy", "Bông")
         self.assertEqual(self.s.stage["artifact_id"], did)
         self.events()
         await self.s._handle_ai_activation("quay lại sơ đồ lúc nãy", "Bông ơi, quay lại sơ đồ lúc nãy", "Bông")
-        self.assertIn("chưa trình bày sơ đồ", self.events("ai_say")[0]["text"])
+        self.assertIn("chưa tạo sơ đồ", self.events("ai_say")[0]["text"])
 
     async def test_present_writes_detailed_scripts_first(self):
         aid = db.save_artifact(self.mid, "slides", "Slide: A", json.dumps(DECK, ensure_ascii=False))
