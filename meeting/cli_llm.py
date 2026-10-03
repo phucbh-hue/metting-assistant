@@ -11,32 +11,40 @@ ký (không phát sinh tiền API). Gói đăng ký có hạn mức theo giờ /
 import json
 import logging
 import os
+import platform
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 log = logging.getLogger("meeting.cli_llm")
 
 TIMEOUT_S = float(os.getenv("CLI_LLM_TIMEOUT", "240"))
+ROOT = Path(__file__).resolve().parent.parent
+# CLI cài riêng cho dự án bằng "pnpm mst-urbox install" (máy mới không cần cài toàn cục)
+NODE_MODULES = Path(os.getenv("MST_NODE_MODULES") or (ROOT / "node_modules"))
+_LOCAL_PKGS = {"claude": "@anthropic-ai/claude-code", "codex": "@openai/codex", "gemini": "@google/gemini-cli"}
+# Gemini CLI: dùng đăng nhập Google (gói đăng ký) kể cả khi chưa chọn trong ~/.gemini/settings.json
+GEMINI_ENV = {"GOOGLE_GENAI_USE_GCA": "true", "GEMINI_CLI_TRUST_WORKSPACE": "true"}
 _SLOTS = threading.BoundedSemaphore(max(1, int(os.getenv("CLI_LLM_CONCURRENCY", "3"))))
 
 PROVIDERS: Dict[str, Dict[str, str]] = {
     "claude-cli": {"label": "Claude.ai", "tool": "Claude Code", "bin": "claude",
                    "plan": "Claude Pro, Max, Team hoặc Enterprise",
-                   "install": "npm install -g @anthropic-ai/claude-code",
+                   "install": "pnpm mst-urbox install",
                    "login": "Mở cửa sổ lệnh, gõ: claude  rồi gõ /login và chọn tài khoản Claude (gói đăng ký)"},
     "codex-cli": {"label": "ChatGPT", "tool": "Codex CLI", "bin": "codex",
                   "plan": "ChatGPT Plus, Pro, Business, Edu hoặc Enterprise",
-                  "install": "npm install -g @openai/codex",
+                  "install": "pnpm mst-urbox install",
                   "login": "Mở cửa sổ lệnh, gõ: codex login  rồi chọn Sign in with ChatGPT"},
     "gemini-cli": {"label": "Gemini", "tool": "Gemini CLI", "bin": "gemini",
                    "plan": "tài khoản Google (miễn phí có hạn mức) hoặc gói Google AI Pro / Ultra",
-                   "install": "npm install -g @google/gemini-cli",
+                   "install": "pnpm mst-urbox install",
                    "login": "Mở cửa sổ lệnh, gõ: gemini  rồi chọn Login with Google, đăng nhập xong gõ /quit"},
 }
 
@@ -86,8 +94,43 @@ def resolve_cmd(name: str) -> Optional[List[str]]:
                 node = str(base / "node.exe") if (base / "node.exe").exists() else shutil.which("node")
                 if js.exists() and node:
                     cmd = [node, str(js)]
+    if cmd is None:
+        cmd = _local_cmd(name)
     _which_cache[name] = (cmd, time.monotonic())
     return cmd
+
+
+def _local_cmd(name: str) -> Optional[List[str]]:
+    """CLI trong node_modules của dự án. Claude Code: chạy thẳng tệp gốc của gói theo nền tảng (pnpm chặn postinstall
+    chép tệp này sang gói chính); Codex, Gemini: node + tệp JS khai báo trong "bin"."""
+    pkg = _LOCAL_PKGS.get(name)
+    d = NODE_MODULES / pkg if pkg else None
+    if d is None or not d.exists():
+        return None
+    try:
+        real = d.resolve()
+    except OSError:
+        return None
+    node = shutil.which("node")
+    if name == "claude":
+        plat = "win32" if os.name == "nt" else "darwin" if sys.platform == "darwin" else "linux"
+        arch = "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x64"
+        exe = "claude.exe" if os.name == "nt" else "claude"
+        for sub in (f"claude-code-{plat}-{arch}", f"claude-code-{plat}-{arch}-musl"):
+            cand = real.parent / sub / exe
+            if cand.is_file():
+                return [str(cand)]
+        wrapper = real / "cli-wrapper.cjs"
+        return [node, str(wrapper)] if wrapper.is_file() and node else None
+    meta = _read_json(real / "package.json")
+    b = meta.get("bin")
+    rel = b.get(name) if isinstance(b, dict) else b if isinstance(b, str) else None
+    target = real / rel if rel else None
+    if target is None or not target.is_file():
+        return None
+    if target.suffix in (".js", ".cjs", ".mjs"):
+        return [node, str(target)] if node else None
+    return [str(target)]
 
 
 def installed(provider: str) -> bool:
@@ -397,7 +440,7 @@ def _gemini(base: List[str], wd: Path, system: str, prompt: str, model: str, tim
     cmd = base + ["-p", tail, "-o", "json", "--approval-mode", "plan", "--skip-trust"]
     if model:
         cmd += ["-m", model]
-    env = _env({"GEMINI_SYSTEM_MD": str(sysfile), "GEMINI_CLI_TRUST_WORKSPACE": "true"})
+    env = _env({"GEMINI_SYSTEM_MD": str(sysfile), **GEMINI_ENV})
     r = _run(cmd, prompt, str(wd), env, timeout)
     data = _json_tail(r.stdout.decode("utf-8", "replace"))
     if data is None or data.get("error"):
@@ -414,3 +457,208 @@ def _gemini(base: List[str], wd: Path, system: str, prompt: str, model: str, tim
         cached += int(tk.get("cached") or 0)
     return {"text": str(data.get("response") or ""), "model": used or model or "gemini", "input": max(0, inp - cached),
             "output": out, "cache_read": cached, "cache_write": 0, "estimated": not (inp or out)}
+
+
+# ------------------------------------------------------------ kết nối: đăng nhập gói đăng ký từ giao diện ---
+LOGIN_TIMEOUT_S = 360
+WATCH_EVERY_S = 1.0
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\r")
+_URL = re.compile(r"https://[^\s\"'<>`)\]]+")
+_DEVICE_CODE = re.compile(r"\b[A-Z0-9]{4}-[A-Z0-9]{4,5}\b")
+_jobs: Dict[str, Dict[str, Any]] = {}
+_jobs_lock = threading.Lock()
+
+
+def cred_file(provider: str) -> Path:
+    """Tệp lưu đăng nhập của từng CLI (đổi thời điểm sửa = vừa đăng nhập xong)."""
+    home = Path.home()
+    if provider == "claude-cli":
+        return Path(os.getenv("CLAUDE_CONFIG_DIR") or home / ".claude") / ".credentials.json"
+    if provider == "codex-cli":
+        return Path(os.getenv("CODEX_HOME") or home / ".codex") / "auth.json"
+    return home / ".gemini" / "oauth_creds.json"
+
+
+def _stamp(provider: str) -> float:
+    try:
+        return cred_file(provider).stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def login_command(provider: str) -> Tuple[List[str], Dict[str, str], str]:
+    """(lệnh, môi trường, chữ gửi vào stdin) để đăng nhập gói đăng ký bằng CLI chính chủ."""
+    spec = PROVIDERS[provider]
+    base = resolve_cmd(spec["bin"])
+    if not base:
+        raise RuntimeError(f"Chưa cài {spec['tool']}. Chạy: pnpm mst-urbox install")
+    if provider == "claude-cli":
+        return base + ["auth", "login", "--claudeai"], _env(), ""
+    if provider == "codex-cli":
+        return base + ["login"], _env(), ""
+    # Gemini CLI không có lệnh đăng nhập riêng: chạy một câu ngắn ở chế độ đăng nhập Google, đồng ý mở trình duyệt ("y")
+    return base + ["-p", "Trả lời đúng một từ: OK", "-o", "json", "--skip-trust"], _env(GEMINI_ENV), "y\n"
+
+
+def start_login(provider: str) -> Dict[str, Any]:
+    """Bắt đầu đăng nhập: CLI mở trình duyệt tới trang đăng nhập của Claude / ChatGPT / Google.
+
+    Claude Code cần màn hình terminal thật: trên Windows mở cửa sổ đăng nhập riêng, máy khác chạy trong terminal giả lập.
+    Codex, Gemini chạy nền, đường dẫn đăng nhập hiện trên giao diện phòng khi trình duyệt không tự mở."""
+    if provider not in PROVIDERS:
+        raise ValueError(f"Nguồn AI không hợp lệ: {provider}")
+    if os.getenv("CLI_LLM_DISABLED") == "1":
+        raise RuntimeError("Kết nối gói đăng ký đang tắt (CLI_LLM_DISABLED=1)")
+    with _jobs_lock:
+        job = _jobs.get(provider)
+        if job and job["state"] == "running":
+            return login_status(provider)
+        cmd, env, stdin_text = login_command(provider)
+        work = tempfile.mkdtemp(prefix="mcopilot-login-")
+        job = {"provider": provider, "state": "running", "lines": [], "url": "", "code": "", "error": "",
+               "started": time.time(), "stamp": _stamp(provider), "work": work, "rc": None, "master": None,
+               "window": False, "proc": None}
+        if provider == "claude-cli" and os.name == "nt":
+            job["proc"] = subprocess.Popen(cmd, cwd=work, env=env, creationflags=subprocess.CREATE_NEW_CONSOLE)
+            job["window"] = True
+        elif provider == "claude-cli":
+            import pty
+            master, slave = pty.openpty()
+            job["proc"] = subprocess.Popen(cmd, stdin=slave, stdout=slave, stderr=slave, cwd=work, env=env, close_fds=True)
+            os.close(slave)
+            job["master"] = master
+        else:
+            flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            job["proc"] = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                           cwd=work, env=env, creationflags=flags)
+            if stdin_text:
+                try:
+                    job["proc"].stdin.write(stdin_text.encode("utf-8"))
+                    job["proc"].stdin.flush()
+                except OSError:
+                    pass
+        _jobs[provider] = job
+    if not job["window"]:
+        threading.Thread(target=_read_output, args=(job,), name=f"login-{provider}", daemon=True).start()
+    threading.Thread(target=_watch_login, args=(job,), name=f"login-watch-{provider}", daemon=True).start()
+    return login_status(provider)
+
+
+def _add_output(job: Dict[str, Any], text: str) -> None:
+    text = _ANSI.sub("", text)
+    for ln in text.splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        job["lines"] = (job["lines"] + [ln[:300]])[-30:]
+        for url in _URL.findall(ln):
+            if not job["url"] or (re.search(r"oauth|authorize|login|device|signin", url, re.I)
+                                  and not re.search(r"oauth|authorize|login|device|signin", job["url"], re.I)):
+                job["url"] = url
+        m = _DEVICE_CODE.search(ln)
+        if m and not job["code"] and (re.search(r"code|mã", ln, re.I) or _DEVICE_CODE.fullmatch(ln)):
+            job["code"] = m.group(0)
+
+
+def _read_output(job: Dict[str, Any]) -> None:
+    try:
+        if job["master"] is not None:
+            while True:
+                try:
+                    chunk = os.read(job["master"], 4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                _add_output(job, chunk.decode("utf-8", "replace"))
+        else:
+            for raw in iter(job["proc"].stdout.readline, b""):
+                _add_output(job, raw.decode("utf-8", "replace"))
+    except Exception as e:                         # đọc đầu ra lỗi không làm hỏng việc đăng nhập
+        log.info("meeting.cli_llm: đọc đầu ra đăng nhập lỗi: %s", e)
+
+
+def _finish(job: Dict[str, Any], state: str, error: str = "") -> None:
+    if job["state"] != "running":
+        return
+    job["state"], job["error"] = state, error
+    if job["master"] is not None:
+        try:
+            os.close(job["master"])
+        except OSError:
+            pass
+    shutil.rmtree(job["work"], ignore_errors=True)
+
+
+def _watch_login(job: Dict[str, Any]) -> None:
+    """Theo dõi đến khi tệp đăng nhập được ghi mới (xong), CLI báo lỗi, quá 6 phút, hoặc bị hủy."""
+    provider, proc = job["provider"], job["proc"]
+    while job["state"] == "running":
+        time.sleep(WATCH_EVERY_S)
+        fresh = _stamp(provider) > job["stamp"] and _login_state(provider)["logged_in"]
+        rc = proc.poll()
+        if fresh:
+            if rc is None and provider == "claude-cli" and job["window"]:
+                time.sleep(min(2.0, WATCH_EVERY_S * 2))   # cửa sổ đăng nhập tự đóng sau khi báo thành công
+            _finish(job, "done")
+        elif rc is not None:
+            job["rc"] = rc
+            time.sleep(min(0.5, WATCH_EVERY_S))
+            if _stamp(provider) > job["stamp"] and _login_state(provider)["logged_in"]:
+                _finish(job, "done")
+            elif rc == 0 and _login_state(provider)["logged_in"]:
+                _finish(job, "done")
+            else:
+                tail = " ".join(job["lines"][-3:])
+                _finish(job, "error", _friendly(provider, tail or f"thoát với mã {rc}") if tail else
+                        "Chưa đăng nhập xong (cửa sổ đăng nhập đã đóng)")
+        elif time.time() - job["started"] > LOGIN_TIMEOUT_S:
+            proc.kill()
+            _finish(job, "error", "Quá 6 phút chưa đăng nhập xong, anh chị bấm Kết nối để thử lại")
+    if job["state"] == "done" and proc.poll() is None and provider != "claude-cli":
+        try:
+            proc.wait(timeout=20)                  # Gemini còn trả lời câu thử sau khi đăng nhập
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+def submit_login_code(provider: str, code: str) -> Dict[str, Any]:
+    """Dán mã xác nhận khi CLI hỏi ("Paste code here if prompted")."""
+    job = _jobs.get(provider)
+    code = (code or "").strip()
+    if not job or job["state"] != "running":
+        raise RuntimeError("Không có phiên đăng nhập nào đang chờ mã")
+    if not code or len(code) > 500 or re.search(r"[\x00-\x1f]", code):
+        raise ValueError("Mã không hợp lệ")
+    data = (code + "\n").encode("utf-8")
+    if job["master"] is not None:
+        os.write(job["master"], data)
+    elif job["proc"].stdin is not None:
+        job["proc"].stdin.write(data)
+        job["proc"].stdin.flush()
+    else:
+        raise RuntimeError("Dán mã vào cửa sổ đăng nhập đang mở")
+    return login_status(provider)
+
+
+def cancel_login(provider: str) -> Dict[str, Any]:
+    job = _jobs.get(provider)
+    if job and job["state"] == "running":
+        try:
+            job["proc"].kill()
+        except OSError:
+            pass
+        _finish(job, "cancelled")
+    return login_status(provider)
+
+
+def login_status(provider: str) -> Dict[str, Any]:
+    st = _login_state(provider)
+    job = _jobs.get(provider)
+    out: Dict[str, Any] = {"provider": provider, "state": "idle", "logged_in": st["logged_in"], "plan": st["plan"],
+                           "installed": installed(provider)}
+    if job:
+        out.update(state=job["state"], url=job["url"], code=job["code"], error=job["error"], window=job["window"],
+                   lines=job["lines"][-6:], elapsed=int(time.time() - job["started"]),
+                   can_paste=job["state"] == "running" and not job["window"])
+    return out

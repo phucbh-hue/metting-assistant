@@ -1,0 +1,18 @@
+{
+  "name": "urbox-meeting-copilot",
+  "version": "3.11.0",
+  "private": true,
+  "description": "UrBox Meeting Copilot: trợ lý cuộc họp nội bộ (bóc băng, nhận người nói, trình chiếu, trợ lý AI)",
+  "type": "module",
+  "scripts": {
+    "mst-urbox": "node scripts/mst-urbox.mjs"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/claude-code": "^2.1.288",
+    "@google/gemini-cli": "^0.62.0",
+    "@openai/codex": "^0.160.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

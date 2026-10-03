@@ -22,13 +22,13 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 import numpy as np  # noqa: E402
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect  # noqa: E402
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import FileResponse, Response  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
-from meeting import artifacts, cli_llm, db, decks, live, llm, mcp, tts, voice, websearch  # noqa: E402
+from meeting import artifacts, cli_llm, db, decks, envfile, live, llm, mcp, tts, voice, websearch  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("meeting.app")
@@ -136,6 +136,15 @@ class ProviderReq(BaseModel):
     api_fallback: Optional[bool] = None
     model: Optional[str] = Field(None, max_length=80)
     models: Optional[Dict[str, str]] = None      # {nguồn: model} cho nhiều nguồn một lần; "" = dùng mặc định
+
+
+class SecretReq(BaseModel):
+    name: str
+    value: str = Field("", max_length=600)
+
+
+class LoginCodeReq(BaseModel):
+    code: str = Field(..., min_length=1, max_length=500)
 
 
 class ProviderTestReq(BaseModel):
@@ -396,6 +405,8 @@ def _providers_info() -> Dict[str, Any]:
             "logged_in": bool(os.getenv("ANTHROPIC_API_KEY")), "login": "Đặt ANTHROPIC_API_KEY trong tệp .env"},
            {"id": "gemini", "kind": "api", "label": "Gemini API (Google)", "installed": True,
             "logged_in": bool(os.getenv("GEMINI_API_KEY")), "login": "Đặt GEMINI_API_KEY trong tệp .env"}]
+    keys = envfile.status()
+    api[0]["key_masked"], api[1]["key_masked"] = keys["ANTHROPIC_API_KEY"]["masked"], keys["GEMINI_API_KEY"]["masked"]
     subs = cli_llm.status()
     for it in api + subs:
         it["model_setting"] = artifacts.provider_model(it["id"])
@@ -417,6 +428,68 @@ async def set_llm_provider(req: ProviderReq):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return await asyncio.to_thread(_providers_info)
+
+
+def _local_only(request: Request) -> None:
+    """Đổi khóa / đăng nhập gói chỉ từ chính máy đang chạy ứng dụng."""
+    host = (request.client.host if request.client else "") or ""
+    if host not in ("127.0.0.1", "::1", "localhost", "testclient"):
+        raise HTTPException(status_code=403, detail="Chỉ đổi khóa và đăng nhập từ chính máy đang chạy ứng dụng")
+
+
+@app.get("/api/settings/secrets")
+def get_secrets():
+    """Khóa dịch vụ trong .env: chỉ báo đã có hay chưa và 4 ký tự cuối, không trả về giá trị."""
+    return envfile.status()
+
+
+@app.put("/api/settings/secrets")
+def put_secret(req: SecretReq, request: Request):
+    """Nhập khóa ngay trên giao diện (máy mới chỉ cần chạy app rồi điền), ghi vào .env và áp dụng ngay."""
+    _local_only(request)
+    try:
+        st = envfile.set_value(req.name, req.value)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if req.name in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
+        artifacts.reset_clients()
+    return {"name": req.name, **st}
+
+
+def _sub_provider(provider: str) -> str:
+    if provider not in cli_llm.PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Nguồn AI không hợp lệ: {provider}")
+    return provider
+
+
+@app.post("/api/llm/connect/{provider}")
+async def llm_connect(provider: str, request: Request):
+    """Nút Kết nối: CLI chính chủ mở trình duyệt để đăng nhập Claude.ai / ChatGPT / Google."""
+    _local_only(request)
+    try:
+        return await asyncio.to_thread(cli_llm.start_login, _sub_provider(provider))
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.get("/api/llm/connect/{provider}")
+def llm_connect_status(provider: str):
+    return cli_llm.login_status(_sub_provider(provider))
+
+
+@app.post("/api/llm/connect/{provider}/code")
+def llm_connect_code(provider: str, req: LoginCodeReq, request: Request):
+    _local_only(request)
+    try:
+        return cli_llm.submit_login_code(_sub_provider(provider), req.code)
+    except (RuntimeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/llm/connect/{provider}")
+def llm_connect_cancel(provider: str, request: Request):
+    _local_only(request)
+    return cli_llm.cancel_login(_sub_provider(provider))
 
 
 @app.get("/api/llm/models")

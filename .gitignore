@@ -57,3 +57,6 @@ debug_*.py
 
 # Kho dữ liệu trên máy khi mất kết nối Atlas: nội dung họp + vector giọng (dữ liệu sinh trắc học), không đưa lên git
 data/
+
+# Node (Claude Code / Codex / Gemini CLI cài riêng cho dự án bằng pnpm mst-urbox install)
+node_modules/

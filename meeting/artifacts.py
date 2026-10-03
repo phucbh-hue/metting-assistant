@@ -142,6 +142,14 @@ def set_provider(name: str, fallback: Optional[bool] = None, model: Optional[str
     return {"provider": provider(), "api_fallback": api_fallback()}
 
 
+def reset_clients() -> None:
+    """Vừa đổi API key trong Cài đặt: tạo lại client và lấy lại danh sách model ở lần gọi sau."""
+    global _anthropic_client, _gemini_client
+    _anthropic_client = None
+    _gemini_client = None
+    _MODELS_CACHE.clear()
+
+
 def _api_ready() -> bool:
     return bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("GEMINI_API_KEY"))
 

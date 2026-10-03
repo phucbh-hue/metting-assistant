@@ -7,12 +7,59 @@ vẽ sơ đồ, dựng dashboard số liệu, báo cáo nhanh và phác thảo t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng tiếng Việt chạy ngay trên máy (miễn phí), vừa làm
 vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.10 - cập nhật 02/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.11 - cập nhật 03/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
 
-## 1. Có gì mới ở bản 3.10
+## 1. Có gì mới ở bản 3.11: cài trên máy mới bằng 3 lệnh, nhập khóa và kết nối gói ngay trên giao diện
+
+### Cài trên máy mới
+Cần sẵn: Node.js 20 trở lên, pnpm (`corepack enable pnpm` hoặc https://pnpm.io), Python 3.10 trở lên (khuyên 3.12) và git.
+
+```powershell
+git clone <repo> meeting-assistant
+cd meeting-assistant
+pnpm mst-urbox install   # .venv + thư viện Python + Claude Code, Codex CLI, Gemini CLI cài riêng cho dự án
+pnpm mst-urbox build     # .env, model nhận diện giọng (28 MB), giọng đọc (67 MB), trình duyệt tra cứu, tự kiểm tra
+pnpm mst-urbox web       # chạy ở http://127.0.0.1:8080 và mở trình duyệt
+```
+
+Mở Cài đặt (biểu tượng bánh răng), rồi:
+- **Kết nối dịch vụ**: dán Soniox API key (bắt buộc để ghi âm), MongoDB Atlas nếu có (để trống thì lưu trên máy ở
+  `data/local_db`).
+- **Nguồn AI**: chọn một nguồn.
+  - API key: dán key vào ô của Claude API hoặc Gemini API rồi bấm **Lưu key**. Key ghi vào `.env` của máy, dùng được ngay.
+  - Gói đăng ký: bấm **Kết nối** ở Claude.ai, ChatGPT hoặc Gemini, đăng nhập tài khoản trên trình duyệt. Xong thì nguồn đó
+    được chọn luôn.
+
+| Lệnh | Việc làm |
+|---|---|
+| `pnpm mst-urbox install` | tạo `.venv`, cài `requirements.txt`, cài 3 CLI vào `node_modules` (`--skip-cli`, `--python <đường dẫn>`) |
+| `pnpm mst-urbox build` | tạo `.env` (khóa để trống), tải model CAM++ (kiểm tra kích thước và SHA-256), giọng đọc Piper, Playwright Chromium (`--skip-browser`) |
+| `pnpm mst-urbox web` | chạy ứng dụng, tự chọn cổng khác nếu 8080 bận, đang chạy sẵn thì chỉ mở trình duyệt (`--port`, `--no-open`) |
+| `pnpm mst-urbox demo` / `test` / `doctor` | bản demo dữ liệu giả lập / bộ test offline / kiểm tra môi trường |
+
+- Lần chạy lệnh pnpm đầu tiên tự tải 3 CLI (khoảng 300 MB). `pnpm-workspace.yaml` cho phép script cài đặt của Claude Code
+  (đặt tệp chạy gốc) và chặn hai module native của Gemini CLI không cần dùng (`keytar`, `node-pty`).
+- Windows: đặt dự án ở thư mục có đường dẫn ngắn (ví dụ `C:\work\meeting-assistant`), đường dẫn quá dài làm pip báo lỗi
+  "tên tệp quá dài" khi cài Playwright; hoặc bật Long Paths của Windows.
+- `run.cmd` vẫn dùng được như cũ (ưu tiên `.venv` của dự án nếu có).
+- Đã thử ngày 03/10/2026 trên máy này: cài mới vào một môi trường Python trống, 227 test qua, `web` chạy được; tải model
+  CAM++ trùng mã SHA-256 với bản đang dùng.
+
+### Nhập khóa và kết nối gói ngay trên giao diện
+- Khóa (Soniox, Anthropic, Gemini, MongoDB) ghi vào `.env` của máy đang chạy ứng dụng, không lưu lên MongoDB; giao diện chỉ
+  hiện "đã có" và 4 ký tự cuối. Chỉ đổi được từ chính máy đó (127.0.0.1).
+- Nút **Kết nối** chạy đúng lệnh đăng nhập của công cụ chính chủ:
+  - Claude.ai: `claude auth login --claudeai`. Trên Windows mở một cửa sổ đăng nhập riêng vì Claude Code cần terminal.
+  - ChatGPT: `codex login`.
+  - Gemini: đăng nhập Google của Gemini CLI.
+- Trình duyệt tự mở trang đăng nhập. Không mở được thì giao diện hiện đường dẫn để bấm, mã xác nhận (nếu có) và ô dán mã.
+- Ứng dụng biết đăng nhập xong khi tệp đăng nhập của công cụ được ghi mới, hoặc công cụ báo thành công; tối đa 6 phút.
+- Claude Code, Codex, Gemini CLI cài riêng trong `node_modules` của dự án được tìm tự động, không cần cài toàn cục.
+
+## 2. Bản 3.10: quay lại nội dung đã trình bày, màu UrBox, linh vật linh động
 
 ### Quay lại nội dung đã trình bày
 Nguyên nhân (xem lại cuộc họp #41, #42): câu "quay lại cái bộ slide mà em vừa trình bày trước đó" không khớp lệnh nào nên
@@ -54,7 +101,7 @@ phóng" còn bị hiểu thành slide số 2.
   theo âm lượng, hai tay luân phiên nhấn ý. Có kết quả: nhảy ăn mừng và tung hoa giấy tím vàng hồng.
 - Áp dụng cho cả linh vật UrBox, hộp quà và khuôn mặt tròn; máy bật giảm chuyển động thì chỉ giữ chớp mắt và miệng.
 
-## 2. Bản 3.9: mở tài liệu, kịch bản, gói đăng ký, chọn model
+## 3. Bản 3.9: mở tài liệu, kịch bản, gói đăng ký, chọn model
 
 ### Mở tài liệu trên máy để trình bày
 - Nói "<tên gọi> ơi, mở file kế hoạch Q4 trong Downloads", "mở cái PowerPoint mega sale", "chiếu file pdf báo cáo tháng 9"
@@ -141,7 +188,7 @@ bản) đi qua nguồn đã chọn:
     mô hình nếu chưa tắt trong cài đặt quyền riêng tư của gói. Nội dung cuộc họp nội bộ nên đi qua gói doanh nghiệp
     (Claude Team / Enterprise, ChatGPT Business / Enterprise, Google Workspace) hoặc API key.
 
-## 3. Bản 3.8: tối ưu chi phí, linh vật UrBox
+## 4. Bản 3.8: tối ưu chi phí, linh vật UrBox
 
 ### Tối ưu chi phí gọi AI
 Phạm vi: mọi chỗ gọi Claude của ứng dụng, chạy trên Claude API của Anthropic, model `claude-opus-4-7`. Dữ liệu: nhật ký
@@ -195,7 +242,7 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
   nói, nơ lắc, vẫy tay khi nghe.
 - Đổi qua lại giữa linh vật UrBox, hộp quà và khuôn mặt tròn: Cài đặt > Hình đại diện trợ lý.
 
-## 4. Bản 3.7: lưu trên máy khi mất Atlas, tra cứu bằng Playwright
+## 5. Bản 3.7: lưu trên máy khi mất Atlas, tra cứu bằng Playwright
 
 ### Không còn mất lịch sử cuộc họp khi Atlas lỗi
 - Nguyên nhân mất lịch sử: máy hiện không kết nối được MongoDB Atlas (Atlas từ chối bắt tay TLS, thường do IP của máy chưa
@@ -230,11 +277,11 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
 - Chạy `run.cmd` khi server cũ vẫn còn ở cửa sổ khác: hỏi dừng server cũ (Y) hay giữ server cũ và chỉ mở trình duyệt
   (N, mặc định sau 20 giây), thay vì báo lỗi trùng cổng 8080.
 
-## 5. Bản 3.6: cổng gọi AI, xuất dữ liệu
+## 6. Bản 3.6: cổng gọi AI, xuất dữ liệu
 
 ### Tra cứu trên mạng
 - "UrBox ơi, em search giúp anh coi giá vàng đang bao nhiêu": trợ lý tìm trên web (bản 3.6 dùng công cụ web_search của
-  Claude, tối đa 5 lượt tìm; từ bản 3.7 mặc định dùng trình duyệt, xem mục 4), viết báo cáo "Tra cứu: ..." gồm kết luận, chi tiết, liên hệ với cuộc họp và danh sách nguồn, chiếu lên
+  Claude, tối đa 5 lượt tìm; từ bản 3.7 mặc định dùng trình duyệt, xem mục 5), viết báo cáo "Tra cứu: ..." gồm kết luận, chi tiết, liên hệ với cuộc họp và danh sách nguồn, chiếu lên
   màn hình, đọc kết luận. Yêu cầu và thời điểm tra cứu được ghi ở cuối báo cáo. Cần `ANTHROPIC_API_KEY`.
 - Một lần tra cứu tốn khoảng 25.000-30.000 token vào (kết quả web tính vào input), tức khoảng 0,15-0,20 USD với Opus 4.7.
 
@@ -249,7 +296,7 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
   hồ sơ người nói, sản phẩm AI, nhật ký gọi AI. Dùng khi server đang chạy DB tạm (in-memory) để không mất dữ liệu, hoặc để
   gửi cho người phân tích lỗi nhận diện người nói.
 
-## 6. Bản 3.4: trợ lý thuyết trình, nội dung bám sát, MCP data server
+## 7. Bản 3.4: trợ lý thuyết trình, nội dung bám sát, MCP data server
 
 ### Trợ lý tự thuyết trình
 - "Thanh ơi, thuyết trình giúp anh" / "present slide" / "tự chuyển slide và nói nội dung bên trong": trợ lý đọc nội dung
@@ -289,7 +336,7 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
   thành người nói mới ngay, không bị gộp vào người đang nói; câu ngắn theo người vừa được nhận ra bằng giọng.
 - Model trợ lý mặc định đổi sang `claude-opus-4-7` (`CLAUDE_MODEL` trong `.env`); muốn nhanh và rẻ hơn dùng `claude-sonnet-5-5`.
 
-## 7. Bản 3.3: slide theo lời trình bày, ghép lệnh bị cắt
+## 8. Bản 3.3: slide theo lời trình bày, ghép lệnh bị cắt
 
 ### Slide tự chuyển theo lời trình bày
 
@@ -318,7 +365,7 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
 - Đo trên 5 cuộc họp thật có nhãn đúng gần đúng: 87,0% -> 89,2% câu (#37: 91% -> 100%, #36: 83% -> 86%), các
   cuộc họp khác không đổi.
 
-## 8. Bản 3.2: kết quả luôn hiện ra, dashboard, giọng đọc chạy trên máy
+## 9. Bản 3.2: kết quả luôn hiện ra, dashboard, giọng đọc chạy trên máy
 
 ### Trợ lý trả lời có nội dung thật và luôn hiện kết quả
 
@@ -365,7 +412,7 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
   Mô phỏng trên #31: bấm một lần ở câu đầu của khách mời thì đúng 95% câu.
 - Giới hạn: giọng phát qua loa máy tính bị kênh âm thanh làm giống nhau; họp trực tiếp với người thật tách tốt hơn.
 
-## 9. Bản 3.1: khuôn mặt, màn hình trình chiếu, tên gọi
+## 10. Bản 3.1: khuôn mặt, màn hình trình chiếu, tên gọi
 
 ### Trợ lý có khuôn mặt, giọng nói và màn hình trình chiếu
 
@@ -373,7 +420,7 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
   trình chiếu: bên trái là khuôn mặt trợ lý, bên phải là nội dung đang trình bày (slide, biên bản, sơ đồ, giao diện).
 - Khuôn mặt đổi theo trạng thái: **chờ**, **lắng nghe** (vòng sáng co giãn theo âm lượng mic), **suy nghĩ**
   (vòng nét đứt xoay, mắt nhìn lên), **nói** (miệng mấp máy theo lời). Nét mặt vui hoặc lo lắng theo nội dung.
-- Giọng nói: từ bản 3.2 dùng giọng Piper chạy trên máy chủ (xem mục 8); giọng của trình duyệt chỉ là dự phòng.
+- Giọng nói: từ bản 3.2 dùng giọng Piper chạy trên máy chủ (xem mục 9); giọng của trình duyệt chỉ là dự phòng.
   Giọng trực tuyến "Online (Natural)" của Microsoft Edge chỉ được dùng khi người dùng bấm cho phép (xem mục Lưu ý
   dữ liệu). Nút "Giọng nói" hoặc phím V để bật/tắt; bấm vào khuôn mặt để trợ lý dừng nói.
 - Khi trợ lý đang nói, mic gửi khoảng lặng thay cho âm thanh để giọng trợ lý không lọt vào transcript
@@ -421,7 +468,7 @@ chờ câu yêu cầu tiếp theo trong 8 giây. Câu chỉ nhắc tới tên (v
 - Menu "..." của cuộc họp -> **Phân tích lại người nói**: chạy lại bộ phân vai trên toàn bộ câu đã lưu.
   Tên đã đặt được giữ cho người nói xuất hiện sớm nhất trong nhóm.
 
-## 10. Bản 3.0: sửa lỗi phân biệt người nói
+## 11. Bản 3.0: sửa lỗi phân biệt người nói
 
 | Vấn đề ở bản 2.5 | Nguyên nhân gốc | Cách sửa |
 |---|---|---|
@@ -439,7 +486,7 @@ Khác:
 - Nội dung do AI sinh ra được làm sạch (DOMPurify) và chạy trong iframe sandbox cô lập.
 - Kết thúc cuộc họp trả về ngay, biên bản lập ở chế độ nền.
 
-## 11. Cách phân biệt người nói
+## 12. Cách phân biệt người nói
 
 ```
 Soniox (nhãn người nói theo phiên)  ─┐
@@ -459,7 +506,7 @@ CAM++ (vector giọng 192D mỗi câu)  ──┘          │               │
 
 Ngưỡng được đo trên dữ liệu thật của model CAM++: cùng người câu ngắn 0.3-0.6, câu dài 0.6-0.87; khác người 0.0-0.4.
 
-## 12. Cấu trúc thư mục
+## 13. Cấu trúc thư mục
 
 ```
 meeting-assistant/
@@ -472,7 +519,8 @@ meeting-assistant/
 │   ├── tts.py          # Giọng đọc tiếng Việt chạy trên máy (Piper qua sherpa-onnx) + chuẩn hóa số, ngày, tiền
 │   ├── follow.py       # Tự chuyển slide theo lời trình bày (so khớp lời nói với từng slide, chống nhảy)
 │   ├── decks.py        # Tài liệu trên máy: tìm theo tên thư mục / tệp, đọc pdf (ảnh trang), pptx, docx, md, txt, json; chia kịch bản
-│   ├── cli_llm.py      # Gọi AI bằng gói đăng ký qua CLI chính chủ: Claude Code, Codex CLI, Gemini CLI
+│   ├── cli_llm.py      # Gọi AI bằng gói đăng ký qua CLI chính chủ: Claude Code, Codex CLI, Gemini CLI; nút Kết nối (đăng nhập)
+│   ├── envfile.py      # Đọc / ghi khóa dịch vụ trong .env khi nhập trên giao diện
 │   ├── mcp_client.py   # Client MCP thật (stdio / streamable-http), dùng khi đặt MCP_SERVER_CMD hoặc MCP_SERVER_URL
 │   ├── skills/         # Skill cho agent: diagram, slides, report, dashboard, assistant (nối vào system prompt)
 │   ├── artifacts.py    # Biên bản, báo cáo nhanh, dashboard, bộ slide, nhận xét, sơ đồ, trang web, co-design
@@ -486,7 +534,10 @@ meeting-assistant/
 ├── data/deck_assets/   # Ảnh từng trang PDF / slide đã dựng khi mở tài liệu (không commit)
 ├── static/mascot/      # Linh vật UrBox chính thức (SVG) dùng làm hình đại diện trợ lý
 ├── tests/              # Test offline (unittest), không gọi API ngoài
+├── package.json        # pnpm mst-urbox install | build | web; Claude Code, Codex, Gemini CLI là phụ thuộc tùy chọn
+├── pnpm-workspace.yaml # cho phép / chặn script cài đặt của các gói phụ thuộc
 ├── scripts/
+│   ├── mst-urbox.mjs               # Bộ lệnh cài và chạy trên máy mới (Node.js, không cần thư viện ngoài)
 │   ├── demo_replay.py              # Server demo phát lại cuộc họp mẫu (có slide + dashboard mẫu), không cần mic
 │   ├── download_tts.py             # Tải giọng đọc tiếng Việt vào models/tts/
 │   └── integration/                # Kiểm thử với Soniox / LLM thật (tính phí)
@@ -495,9 +546,10 @@ meeting-assistant/
 └── static/
 ```
 
-## 13. Chạy
+## 14. Chạy
 
-Cách nhanh nhất: bấm đúp **`run.cmd`** (hoặc gõ `run` trong terminal) -> server chạy ở http://127.0.0.1:8080 và tự mở
+Máy mới: `pnpm mst-urbox install`, `pnpm mst-urbox build`, `pnpm mst-urbox web` (xem mục 1).
+Máy đã cài: bấm đúp **`run.cmd`** (hoặc gõ `run` trong terminal) -> server chạy ở http://127.0.0.1:8080 và tự mở
 trình duyệt; lần đầu tự tải giọng đọc tiếng Việt nếu chưa có. `run.cmd demo` chạy bản demo dữ liệu giả lập ở cổng 8090.
 Chạy tay:
 
@@ -530,7 +582,7 @@ màu riêng -> bấm **Đặt tên** (hoặc xác nhận gợi ý của AI, tick
 Trình bày: nhờ trợ lý soạn slide (hoặc chọn tab **Slide**) -> bấm biểu tượng toàn màn hình ở khung AI ->
 nói "<tên gọi> ơi, chuyển slide", "nhắc bài"... Cần giọng Tiếng Việt cài trên Windows để trợ lý nói thành tiếng.
 
-## 14. Cấu hình
+## 15. Cấu hình
 
 Xem `.env.example`. Các biến quan trọng:
 
@@ -564,7 +616,7 @@ Xem `.env.example`. Các biến quan trọng:
 | `DECK_ASSETS_DIR` | `data/deck_assets` | Nơi lưu ảnh từng trang đã dựng |
 | `MCP_SERVER_CMD` / `MCP_SERVER_URL` | | Trỏ trợ lý tới MCP server thật (stdio hoặc http); không đặt thì dùng dữ liệu tại chỗ |
 
-## 15. API chính
+## 16. API chính
 
 | Method | Đường dẫn | Mô tả |
 |---|---|---|
@@ -596,20 +648,22 @@ Xem `.env.example`. Các biến quan trọng:
 | GET | `/api/llm/providers` | Các nguồn AI: đã cài / đã đăng nhập / model |
 | PUT | `/api/llm/provider` | Chọn nguồn AI (`provider`, `api_fallback`, `model`) |
 | POST | `/api/llm/test` | Gửi một câu ngắn qua nguồn AI để kiểm tra (`provider`, `model`) |
+| GET/PUT | `/api/settings/secrets` | Khóa dịch vụ trong .env: xem đã có chưa / lưu (`name`, `value`), chỉ từ 127.0.0.1 |
+| POST/GET/DELETE | `/api/llm/connect/{provider}` | Kết nối gói đăng ký: bắt đầu đăng nhập / xem tiến trình / hủy; `POST .../code` để dán mã |
 | GET | `/api/llm/models?provider=` | Danh sách model của một nguồn (`refresh=true` để lấy lại); `PUT /api/llm/provider` nhận `models: {nguồn: model}` |
 | POST | `/api/meetings/{id}/inferences/{iid}/accept` \| `dismiss` | Xác nhận / bỏ qua gợi ý của AI |
 | GET/POST/PATCH/DELETE | `/api/voices` | Hồ sơ giọng nói; `POST /api/voices/enroll-audio` để thu mẫu |
 | WS | `/ws/meeting/{id}/audio` | PCM16 16kHz mono từ mic (một thiết bị ghi mỗi cuộc họp) |
 | WS | `/ws/meeting/{id}/events` | Sự kiện: `segment`, `segments_relabeled`, `speakers`, `speakers_split`, `interim`, `identity_suggestion`, `ai_progress`, `ai_say`, `ai_insights`, `stage_state`, `stage_command`, `stage_prompt`... |
 
-## 16. Lưu ý dữ liệu
+## 17. Lưu ý dữ liệu
 
 - `data/local_db/` (lưu trên máy khi mất kết nối Atlas) chứa nội dung cuộc họp và vector giọng nói: không chia sẻ, không đưa
   lên git (đã có trong `.gitignore`). Xóa thư mục này khi chưa đồng bộ sẽ mất các cuộc họp trong đó.
 - Mở tài liệu: chỉ quét tên tệp trong các thư mục tài liệu; nội dung tệp chỉ được đọc khi người dùng mở, và được gửi cho
   nguồn AI đang chọn khi nhờ trợ lý tự viết lời hoặc ghép kịch bản. Ảnh trang lưu ở `data/deck_assets/` trên máy.
 - Gói đăng ký (Claude.ai, ChatGPT, Gemini): nội dung cuộc họp đi theo điều khoản của gói đó, không phải điều khoản API.
-  Xem lưu ý ở mục 2 trước khi dùng cho cuộc họp có nội dung nhạy cảm.
+  Xem lưu ý ở mục 3 trước khi dùng cho cuộc họp có nội dung nhạy cảm.
 - Tra cứu trên mạng gửi từ khóa tìm kiếm tới Bing và mở các trang kết quả; không đưa nội dung cuộc họp vào từ khóa.
   Nội dung trang đã đọc (cùng tối đa 2.000 ký tự cuối của cuộc họp để liên hệ) được gửi cho AI để tóm tắt.
 
