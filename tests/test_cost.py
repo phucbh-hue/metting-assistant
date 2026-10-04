@@ -146,7 +146,7 @@ class IdentityTriggerTests(SessionTestCase):
         e = s.identity
         self.assertEqual(e.fresh_names("Anh Tuấn ơi, xong chưa? Hôm nay bàn Jira với UrBox."), {"tuấn"})
         self.assertEqual(e.fresh_names("Ok Bông ơi, mở slide giúp anh."), set())               # tên trợ lý
-        self.assertEqual(e.fresh_names("cảm ơn chị Lan Anh nhé"), {"lan"})
+        self.assertEqual(e.fresh_names("cảm ơn chị Lan Anh nhé"), {"lan anh"})                # "Anh" là tên đệm
         self.assertEqual(e.fresh_names("Xin tự giới thiệu, tôi là Bùi Hồng Phúc."), {"bùi hồng phúc"})
         self.assertEqual(e.fresh_names("Trời ơi, dự án EduStation chạy trên Redis"), set())      # không phải tên người
         await self.feed(s, [(0, "1", 3.0, "Xin chào mọi người"), (1, "2", 3.0, "Chào anh")])
@@ -171,6 +171,43 @@ class IdentityTriggerTests(SessionTestCase):
         # "Minh" chỉ là thông tin mới ở 3 lần nhắc đầu; sau đó không gọi lại (dự phòng 40 câu chưa tới)
         self.assertLessEqual(len(calls), 3)
         self.assertGreaterEqual(len(calls), 1)
+
+    async def test_called_by_name_waits_for_the_reply(self):
+        """Lỗi thật: "Tuấn ơi" -> AI chạy ngay lúc Tuấn chưa trả lời nên không đoán được, câu trả lời đến sau không
+        kích hoạt lại -> người dùng phải bấm "AI đoán tên". Bây giờ chờ người khác đáp lời rồi mới đoán, một lần."""
+        llm.set_assistant_config("Bông", ["Bong"])
+        mid = db.create_meeting("Họp")
+        s = await live.get_session(mid)
+        calls = []
+
+        async def _call(system, prompt, max_tokens=4000):
+            calls.append(prompt)
+            return json.dumps({"predictions": []})
+        with mock.patch.object(artifacts, "llm_available", lambda: True), mock.patch.object(artifacts, "_call_llm", _call), \
+                mock.patch("meeting.identity.MIN_INTERVAL_S", 0.0), mock.patch("meeting.identity.REPLY_SETTLE_S", 0.0):
+            await self.feed(s, [(0, "1", 3.0, "Hôm nay mình rà soát sprint"),
+                                (0, "1", 3.0, "Tuấn ơi, phần deploy xong chưa?")])
+            await asyncio.sleep(0.1)
+            self.assertEqual(calls, [])                      # Tuấn chưa trả lời: chưa đoán
+            await self.feed(s, [(1, "2", 3.0, "Dạ em deploy xong rồi anh")], t0=10)
+            await self.settle(s, lambda: bool(calls) and not s.identity._running and s.identity._timer is None,
+                              timeout=4.0)
+            await self.feed(s, [(1, "2", 3.0, "Tối nay em theo dõi thêm")], t0=20)
+            await asyncio.sleep(0.1)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("Dạ em deploy xong rồi anh", calls[0])
+        self.assertIn("Tên gọi trợ lý AI", calls[0])
+        self.assertIn("Bông, Bong", calls[0])
+
+    async def test_short_one_off_voice_is_not_guessed_automatically(self):
+        """Người chỉ nói một câu ngắn (tiếng vọng, người đi ngang) không đáng tốn lượt gọi AI; bấm nút thì vẫn đoán."""
+        mid = db.create_meeting("Họp")
+        s = await live.get_session(mid)
+        await self.feed(s, [(0, "1", 3.0, "Mình bắt đầu nhé"), (1, "2", 1.2, "Ừ"), (0, "1", 3.0, "Ok")])
+        auto = {p.label for p in s.identity.targets()}
+        everyone = {p.label for p in s.identity.targets(everyone=True)}
+        self.assertEqual(auto, {"Người nói 1"})
+        self.assertEqual(everyone, {"Người nói 1", "Người nói 2"})
 
 
 class FragmentCallTests(SessionTestCase):

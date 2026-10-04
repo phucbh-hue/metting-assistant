@@ -7,7 +7,7 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng tiếng Việt chạy ngay trên máy (miễn phí), vừa làm
 vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.12.2 - cập nhật 04/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.12.3 - cập nhật 04/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
@@ -63,6 +63,30 @@ vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng 
 - Chạy lại trên 17 cuộc họp thật có dữ liệu giọng: #44 về đúng 1 người (46/46 câu), 16 cuộc họp còn lại không đổi; 5 cuộc
   họp có nhãn đúng giữ nguyên 93,3% câu. Cuộc họp cũ muốn áp dụng: mở cuộc họp, nút Tùy chọn cuộc họp > Phân tích lại
   người nói.
+
+### AI tự đoán tên người nói, không cần bấm nút (bản 3.12.3)
+- Lỗi cũ: phải bấm "AI đoán tên" mới ra tên. Khi ai đó được gọi tên ("Tuấn ơi, xong chưa?"), AI chạy ngay sau 2 giây
+  lúc Tuấn chưa trả lời nên không biết ai là Tuấn; câu trả lời đến sau không kích hoạt lại, phải chờ 40 câu. Ngoài ra
+  tên đoán đúng ở mức 75-80% vẫn chỉ là gợi ý chờ bấm Xác nhận (#38-#42: 7/7 gợi ý như vậy đều được bấm xác nhận).
+- Bây giờ trợ lý tự đoán đúng lúc:
+  - Có người tự giới thiệu ("tôi là Phúc", "mình tên Lan", "em là Tuấn bên DevOps"): đoán ngay.
+  - Có người được gọi tên ("Tuấn ơi", "mời anh Duy Leo", "chào thầy Minh"): chờ người đó đáp lời rồi đoán. Chưa ai đáp
+    sau 12 giây vẫn đoán, vì câu có thể nhắc người vừa nói ("cảm ơn anh Tuấn", "người nãy giờ nói là thầy Trung").
+  - Dự phòng như cũ: cứ 40 câu mới mà người chưa có tên nói thêm thì đoán lại một lần.
+- Tự đặt tên từ 70% (trước là 85%). Dưới 70%, hoặc tên đang thuộc về người khác (xác nhận sẽ gộp 2 người), mới hiện gợi ý
+  chờ xác nhận. Đoán lại ra cùng tên thì cập nhật thẻ gợi ý cũ, không hiện nhiều thẻ trùng nhau như trước. Tên sai thì
+  bấm vào tên để sửa. Tự lưu mẫu giọng (khi bật `AUTO_ENROLL_VOICES`) vẫn chỉ từ 85%.
+- Bớt lượt gọi vô ích: chữ "giới thiệu" chung chung ("giới thiệu nội dung hôm nay") không còn bị coi là manh mối tên;
+  người chỉ nói một câu ngắn (tiếng vọng, người đi ngang) không được tự đoán (bấm nút vẫn đoán).
+- AI đọc đúng hơn: cuộc họp dài vẫn gửi kèm các câu giới thiệu ở đầu buổi; AI được báo tên gọi trợ lý để không nhầm
+  "Thanh ơi..." là gọi người; tên có chữ "Anh" ở cuối (Lan Anh, Đức Anh) không còn bị cắt thành "Lan", "Đức".
+- Chạy lại bằng AI thật (Claude Sonnet 5.5, DB giả lập) trên lời thoại 5 cuộc họp thật, không bấm nút lần nào:
+  - #30: tự đặt "Đặng Thế Trung"; #40: "Bùi Hồng Phúc" và "Duy Leo" (trước chỉ là gợi ý); #41: "Bùi Hồng Phúc" và
+    "Trung" (câu mang đúng tên 10 -> 38).
+  - #44 không có ai xưng tên nên không đoán.
+  - Tổng 26 lượt gọi, chi phí 0,34 USD.
+- Không có manh mối tên trong lời nói thì AI không đoán được (ví dụ chỉ ra lệnh cho trợ lý). Muốn trợ lý luôn nhận ra
+  một người, hãy thu mẫu giọng của người đó (trang Hồ sơ giọng nói > Thu mẫu giọng, khi người đó đồng ý).
 
 ## 2. Bản 3.11: cài trên máy mới bằng 3 lệnh, nhập khóa và kết nối gói ngay trên giao diện
 
@@ -528,7 +552,7 @@ chờ câu yêu cầu tiếp theo trong 8 giây. Câu chỉ nhắc tới tên (v
 | Đặt tên xong, câu mới lại hiện nhãn tạm; tên mất khi khởi động lại server | Tên gắn với chuỗi nhãn, nhãn đổi theo cụm; không lưu hồ sơ người nói theo cuộc họp; nhãn mới không ghi lại xuống DB | Mỗi người nói là một **hồ sơ ổn định** (`sid`), lưu ở collection `meeting_speakers`; mọi thay đổi ghi xuống DB theo thứ tự; phiên họp được khôi phục từ DB khi server khởi động lại |
 | Timestamp sai sau khi Soniox nối lại | `tok_off` được tính nhưng không dùng | Mỗi kết nối Soniox là một "epoch" có offset riêng; audio chưa chốt được phát lại khi nối lại (không mất chữ) |
 | Tốn phí Soniox khi tắt mic | Stream giữ mở vô thời hạn bằng keepalive | Tắt mic: gửi `finalize`, nghỉ quá `SONIOX_IDLE_CLOSE_S` giây thì đóng |
-| Gọi LLM đoán tên sau **mỗi** câu | Không có debounce | Chỉ chạy khi có tín hiệu tên ("em là...", "... ơi", lời chào) hoặc đủ câu mới; một lần gọi cho tất cả người chưa định danh; mỗi tên chỉ gán cho một người |
+| Gọi LLM đoán tên sau **mỗi** câu | Không có debounce | Chỉ chạy khi có tín hiệu tên: tự giới thiệu thì đoán ngay, gọi tên người khác thì chờ người đó đáp lời (tối đa 12 giây), hoặc đủ câu mới; một lần gọi cho tất cả người chưa định danh; mỗi tên chỉ gán cho một người |
 | Giao diện: 2 nút "Tạo cuộc họp", 4 nút "Thu mẫu giọng", dashboard số liệu giả | | Mỗi hành động một chỗ; trang chủ chỉ hiện số liệu thật; phòng họp 3 cột với danh sách người nói, đặt tên, gộp, sửa người nói của từng câu |
 | Test ghi vector ngẫu nhiên vào MongoDB thật | Test dùng DB thật | Bộ test offline dùng DB in-memory (`MEETING_DB=mock`), không gọi API ngoài |
 
@@ -652,6 +676,7 @@ Xem `.env.example`. Các biến quan trọng:
 | `SONIOX_IDLE_CLOSE_S` | `30` | Tắt mic quá ngần này giây thì đóng stream |
 | `SONIOX_LANGUAGE_HINTS` | `vi,en` | Gợi ý ngôn ngữ cho Soniox |
 | `IDENTITY_MIN_INTERVAL_S` | `20` | Khoảng cách tối thiểu giữa 2 lần AI đoán tên |
+| `IDENTITY_AUTO_APPLY_T` | `0.70` | AI đoán tên từ mức này thì tự đặt tên, thấp hơn thì chỉ gợi ý chờ xác nhận |
 | `IDENTITY_FALLBACK_SEGMENTS` | `40` | Không có tên người mới được nhắc thì cứ bấy nhiêu câu mới đoán lại tên một lần |
 | `TTS_VOICE` | `vits-piper-vi_VN-vais1000-medium` | Giọng đọc trong `models/tts/` |
 | `TTS_SPEED` | `1.05` | Tốc độ đọc |

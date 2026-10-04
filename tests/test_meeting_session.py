@@ -5,7 +5,7 @@ import unittest
 from unittest import mock
 
 from tests.helpers import VoiceBank, reset_db
-from meeting import artifacts, db, live
+from meeting import artifacts, db, identity, live
 
 
 class SessionTestCase(unittest.IsolatedAsyncioTestCase):
@@ -178,7 +178,7 @@ class IdentityEngineTests(SessionTestCase):
         preds = [
             {"unknown_label": "Người nói 2", "predicted_name": "anh Lê Văn Tuấn", "predicted_role": "DevOps",
              "confidence": 0.93, "reasoning": "tự giới thiệu", "evidence": ["Dạ em là Tuấn bên DevOps"]},
-            {"unknown_label": "Người nói 3", "predicted_name": "Đỗ Minh Quân", "confidence": 0.7,
+            {"unknown_label": "Người nói 3", "predicted_name": "Đỗ Minh Quân", "confidence": 0.65,
              "reasoning": "nhắc payment"},
             {"unknown_label": "Người nói 1", "predicted_name": "", "confidence": 0.1},
         ]
@@ -202,6 +202,94 @@ class IdentityEngineTests(SessionTestCase):
         self.assertEqual(s.speakers.profile(3).name, "Đỗ Minh Quân")
         self.assertTrue(s.speakers.profile(3).locked)
         self.assertEqual(s.identity.pending_suggestions(), [])
+
+    async def test_probable_name_is_applied_without_clicking(self):
+        """Cuộc họp thật #38-#42: gợi ý 0.75-0.80 ("Chào thầy Mạnh" rồi người kia đáp) đều đúng mà vẫn phải bấm xác
+        nhận. Bây giờ >= 0.70 thì tự đặt tên, dưới mức đó mới là gợi ý."""
+        mid = db.create_meeting("Podcast")
+        s = await live.get_session(mid)
+        await self.feed(s, [(0, "1", 3.0, "Xin chào thầy Mạnh, cảm ơn thầy đã đến"),
+                            (1, "2", 3.0, "Cảm ơn bạn đã mời mình"),
+                            (2, "3", 3.0, "Mình cũng có câu hỏi")])
+        preds = [{"unknown_label": "Người nói 2", "predicted_name": "Mạnh", "confidence": 0.78,
+                  "reasoning": "được chào là thầy Mạnh và đáp lời ngay sau đó"},
+                 {"unknown_label": "Người nói 3", "predicted_name": "Hải", "confidence": 0.65, "reasoning": "đoán"}]
+        with mock.patch.object(artifacts, "llm_available", lambda: True), \
+                mock.patch.object(artifacts, "_call_llm", fake_llm(preds)):
+            results = await s.identity.run(force=True)
+        self.assertEqual({r["sid"]: r["action"] for r in results}, {2: "applied", 3: "suggested"})
+        self.assertEqual(s.speakers.profile(2).name, "Mạnh")
+        self.assertEqual(s.speakers.profile(2).origin, "ai")
+        self.assertFalse(s.speakers.profile(2).locked)          # vẫn sửa / đoán lại được
+
+    async def test_auto_enroll_only_for_confident_names(self):
+        """Bật AUTO_ENROLL_VOICES: tên tự đặt ở mức 0.70-0.85 không được lưu mẫu giọng (dữ liệu sinh trắc học),
+        chỉ từ 0.85 mới lưu như trước."""
+        mid = db.create_meeting("Họp test")
+        s = await live.get_session(mid)
+        await self.feed(s, [(0, "1", 4.0, "Chào cả nhà, hôm nay bàn kế hoạch quý"),
+                            (1, "2", 4.0, "Chào mọi người, mình là Lan bên marketing")])
+        preds = [{"unknown_label": "Người nói 1", "predicted_name": "Hải", "confidence": 0.75},
+                 {"unknown_label": "Người nói 2", "predicted_name": "Lan", "confidence": 0.92}]
+        with mock.patch.object(live, "AUTO_ENROLL_AI", True), mock.patch.object(artifacts, "llm_available", lambda: True), \
+                mock.patch.object(artifacts, "_call_llm", fake_llm(preds)):
+            results = await s.identity.run(force=True)
+        await s.drain()
+        self.assertEqual({r["new_name"]: r["action"] for r in results}, {"Hải": "applied", "Lan": "applied"})
+        self.assertIsNone(db.get_voice_by_name("Hải"))
+        self.assertIsNotNone(db.get_voice_by_name("Lan"))
+
+    async def test_repeated_guess_updates_one_suggestion_card(self):
+        """Lỗi thật #40: mỗi lần đoán lại hiện thêm một thẻ "Duy Leo" giống hệt. Cùng tên -> một thẻ (độ tin cậy cao
+        nhất); đoán ra tên khác -> thay thẻ cũ."""
+        mid = db.create_meeting("Họp test")
+        s = await live.get_session(mid)
+        await self.feed(s, [(0, "1", 3.0, "Mời anh Duy Leo"), (1, "2", 3.0, "Chào Leo, phim hay đó")])
+
+        async def guess(name, conf):
+            preds = [{"unknown_label": "Người nói 2", "predicted_name": name, "confidence": conf}]
+            with mock.patch.object(artifacts, "llm_available", lambda: True), \
+                    mock.patch.object(artifacts, "_call_llm", fake_llm(preds)):
+                return await s.identity.run(force=True)
+        await guess("Duy Leo", 0.62)
+        await guess("Duy Leo", 0.66)
+        sugg = s.identity.pending_suggestions()
+        self.assertEqual([(x["suggested_name"], x["confidence"]) for x in sugg], [("Duy Leo", 0.66)])
+        await guess("Minh", 0.64)
+        self.assertEqual([x["suggested_name"] for x in s.identity.pending_suggestions()], ["Minh"])
+        self.assertEqual(sorted(i["status"] for i in db.get_inferences(mid)), ["pending", "superseded"])
+
+    async def test_thanks_to_the_previous_speaker_is_guessed_without_a_reply(self):
+        """"Cảm ơn anh Tuấn" nói về người VỪA nói xong: không ai đáp lại nhưng vẫn phải đoán (sau thời gian chờ)."""
+        mid = db.create_meeting("Họp test")
+        s = await live.get_session(mid)
+        calls = []
+
+        async def _call(system, prompt, max_tokens=4000):
+            calls.append(prompt)
+            return json.dumps({"predictions": []})
+        with mock.patch.object(artifacts, "llm_available", lambda: True), mock.patch.object(artifacts, "_call_llm", _call), \
+                mock.patch("meeting.identity.MIN_INTERVAL_S", 0.0), mock.patch("meeting.identity.REPLY_WAIT_S", 0.2):
+            await self.feed(s, [(1, "2", 4.0, "Bên em đã chuyển xong hệ thống thanh toán"),
+                                (0, "1", 3.0, "Cảm ơn anh Tuấn nhé, phần tiếp theo là marketing")])
+            await self.settle(s, lambda: bool(calls), timeout=3.0)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("Cảm ơn anh Tuấn", calls[0])
+
+    def test_long_meeting_keeps_early_introductions(self):
+        """Cuộc họp dài: lời tự giới thiệu đầu buổi (và câu đáp ngay sau) vẫn được gửi cho AI cùng các câu gần nhất."""
+        segs = [{"seq": 1, "t_start": 5, "speaker_label": "Người nói 1", "text": "Xin chào, mình là Lan Anh bên marketing"},
+                {"seq": 2, "t_start": 9, "speaker_label": "Người nói 2", "text": "Chào Lan Anh, anh là Quân"}]
+        segs += [{"seq": i, "t_start": 10 + i * 5, "speaker_label": f"Người nói {1 + i % 2}", "text": f"ý kiến số {i}"}
+                 for i in range(3, 130)]
+        picked = identity.pick_segments(segs)
+        self.assertEqual(len(picked), identity.TRANSCRIPT_LIMIT)
+        self.assertEqual([s["seq"] for s in picked[:2]], [1, 2])
+        self.assertEqual(picked[-1]["seq"], 129)
+        text = identity.format_transcript(picked)
+        self.assertIn("mình là Lan Anh", text)
+        self.assertIn("[...]", text)
+        self.assertEqual(identity.pick_segments(segs[:50]), segs[:50])     # cuộc họp ngắn: gửi nguyên văn
 
     async def test_same_name_never_assigned_to_two_speakers(self):
         mid = db.create_meeting("Họp test")

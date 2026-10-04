@@ -1136,7 +1136,8 @@ function onEvent(R, ev) {
     case 'interim': setInterim(ev); break;
     case 'identity_suggestion':
       R.suggestions.set(ev.inference_id, ev); renderSuggestions();
-      toast(`AI gợi ý: ${ev.label} có thể là ${ev.suggested_name}.`, 'info'); break;
+      if (!ev.update) toast(`AI gợi ý: ${ev.label} có thể là ${ev.suggested_name}.`, 'info');
+      break;
     case 'suggestion_resolved': R.suggestions.delete(ev.inference_id); renderSuggestions(); break;
     case 'stream_status': onStreamStatus(ev); break;
     case 'ai_listening': {
