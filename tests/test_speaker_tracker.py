@@ -100,24 +100,42 @@ class SonioxErrorRecoveryTests(unittest.TestCase):
         self.assertEqual(label(sp, back[0]), "Người nói 2")
 
     @staticmethod
-    def _similar_bank(r: float, seed: int = 42) -> VoiceBank:
+    def _similar_bank(r: float, seed: int = 42, n: int = 2) -> VoiceBank:
         """Hai giọng gần nhau (ví dụ cùng phát qua loa): tâm giọng giống ~0.7-0.8 dù là hai người."""
-        bank = VoiceBank(seed=seed, n=2, channel=0.7)
+        bank = VoiceBank(seed=seed, n=n, channel=0.7)
         rng = np.random.default_rng(seed + 100)
         bank.base[1] = voice.unit(r * bank.base[0] + np.sqrt(1 - r * r) * voice.unit(rng.standard_normal(voice.DIM)))
         return bank
 
     def test_similar_voices_under_one_label_split_once(self):
-        """Lỗi thật (#31, #32): người dẫn podcast và khách mời giống giọng, Soniox gắn chung nhãn. Từng câu vẫn gần
-        cụm của mình hơn hẳn cụm kia -> tách một lần, không tách-gộp lặp lại."""
+        """Lỗi thật (#31, #32): người dẫn podcast và khách mời giống giọng, Soniox gắn chung nhãn (người trong phòng
+        nói trước đó có nhãn khác). Từng câu vẫn gần cụm của mình hơn hẳn cụm kia -> tách một lần, không tách-gộp."""
+        bank = self._similar_bank(0.65, n=3)
+        sp = voice.MeetingSpeakers()
+        user = script_add(sp, bank, [(2, "2", 3.0), (2, "2", 2.5)])
+        a = script_add(sp, bank, [(0, "1", v) for v in (4.0, 5.0, 3.5, 6.0, 4.5, 5.0)], start_key=10, t0=20)
+        b = script_add(sp, bank, [(1, "1", v) for v in (4.0, 5.5, 3.0, 6.0, 4.0, 5.0, 4.5)], start_key=50, t0=80)
+        self.assertEqual(sp.pop_splits(), [(2, 3)])
+        self.assertEqual(sp.pop_merges(), [])
+        self.assertEqual(set(labels_of(sp, user)), {"Người nói 1"})
+        self.assertEqual(set(labels_of(sp, a)), {"Người nói 2"})
+        self.assertEqual(set(labels_of(sp, b)), {"Người nói 3"})
+
+    def test_one_voice_drifting_under_the_only_label_is_not_split(self):
+        """Lỗi thật #44: một người nói suốt buổi, Soniox chỉ có một nhãn; giọng đổi dần (tư thế, khoảng cách tới mic)
+        thành 2 cụm gần nhau như 2 người. Soniox chưa nghe thấy ai khác -> vẫn là một người."""
         bank = self._similar_bank(0.65)
         sp = voice.MeetingSpeakers()
-        a = script_add(sp, bank, [(0, "1", v) for v in (4.0, 5.0, 3.5, 6.0, 4.5, 5.0)])
-        b = script_add(sp, bank, [(1, "1", v) for v in (4.0, 5.5, 3.0, 6.0, 4.0, 5.0, 4.5)], start_key=50, t0=60)
-        self.assertEqual(sp.pop_splits(), [(1, 2)])
-        self.assertEqual(sp.pop_merges(), [])
-        self.assertEqual(set(labels_of(sp, a)), {"Người nói 1"})
-        self.assertEqual(set(labels_of(sp, b)), {"Người nói 2"})
+        early = script_add(sp, bank, [(0, "1", v) for v in (4.0, 5.0, 3.5, 6.0, 4.5, 5.0)])
+        late = script_add(sp, bank, [(1, "1", v) for v in (4.0, 5.5, 3.0, 6.0, 4.0, 5.0, 4.5)], start_key=50, t0=60)
+        self.assertEqual(sp.pop_splits(), [])
+        self.assertEqual(set(labels_of(sp, early + late)), {"Người nói 1"})
+        # Giọng khác hẳn dưới cùng nhãn thì vẫn tách như cũ
+        other = VoiceBank(seed=43, n=1, channel=0.7)
+        other.channel = bank.channel
+        newcomer = script_add(sp, other, [(0, "1", v) for v in (5.0, 4.5, 6.0, 5.0)], start_key=80, t0=150)
+        self.assertEqual(set(labels_of(sp, newcomer)), {"Người nói 2"})
+        self.assertEqual(set(labels_of(sp, early + late)), {"Người nói 1"})
 
     def test_nearly_identical_voices_are_not_split(self):
         bank = self._similar_bank(0.9)

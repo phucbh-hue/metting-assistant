@@ -333,6 +333,9 @@ class MeetingSpeakers:
     SPLIT_MEMBER_AGREE = 0.75  # ... và >= 75% (theo thời lượng) số câu gần cụm mình hơn
     # Đo trên 3 cuộc họp thật có người nói trực tiếp + podcast phát qua loa: đúng 82% -> 87% câu,
     # không đổi kết quả ở các cuộc họp khác (#15, #26, #30).
+    # Tách theo từng câu chỉ dùng khi Soniox đã nghe thấy nhiều người trong phiên stream. Một người nói suốt buổi
+    # (Soniox chỉ có một nhãn) mà giọng đổi dần (đổi tư thế, xa/gần mic) cũng tạo ra 2 cụm gần nhau như vậy:
+    # lỗi thật #44 bị tách đôi từ phút 15 (tâm 2 cụm giống 0.75). Khi đó chỉ tách nếu 2 giọng khác hẳn nhau.
     MAX_W = 8.0                # Trọng số tối đa của một câu khi cộng vào centroid
     # Soniox dùng lại một nhãn cho nhiều người (podcast phát qua loa + người trong phòng). Câu quá ngắn không có
     # vector thì theo NGƯỜI VỪA ĐƯỢC XÁC ĐỊNH BẰNG GIỌNG gần nhất của nhãn đó, không theo tổng phiếu cả buổi.
@@ -727,9 +730,10 @@ class MeetingSpeakers:
             return None
         V = np.stack([s["v"] for s in members]).astype(np.float64)
         W = np.array([s["w"] for s in members], dtype=np.float64)
+        close_ok = not self._soniox_one_voice(members)
         best = None
         for lab in _two_way_partitions(V, W, self.SPLIT_MIN_SEGS):
-            res = self._eval_partition(V, W, lab)
+            res = self._eval_partition(V, W, lab, close_ok)
             if res is not None and (best is None or res[0] < best[0]):
                 best = (res[0], lab)
         if best is None:
@@ -786,8 +790,23 @@ class MeetingSpeakers:
                  len(moved), p.sid, q.sid, best[0])
         return q
 
-    def _eval_partition(self, V: np.ndarray, W: np.ndarray, lab: np.ndarray) -> Optional[Tuple[float, float]]:
-        """Trả về (độ giống giữa 2 cụm, độ chặt nhỏ nhất) nếu phân chia hợp lệ."""
+    def _soniox_one_voice(self, members: List[Dict[str, Any]]) -> bool:
+        """Soniox chưa từng nghe thấy người thứ hai trong các phiên stream chứa các câu đang xét: mọi câu của các
+        phiên đó (cả câu ngắn không có vector) chỉ mang một nhãn."""
+        if not members or any(s["rk"] is None for s in members):
+            return False
+        sessions = {s["rk"][:2] for s in members}
+        seen: Dict[Tuple[str, int], Set[str]] = {}
+        for s in self.segs:
+            rk = s["rk"]
+            if rk is not None and rk[:2] in sessions:
+                seen.setdefault(rk[:2], set()).add(rk[2])
+        return all(len(x) == 1 for x in seen.values())
+
+    def _eval_partition(self, V: np.ndarray, W: np.ndarray, lab: np.ndarray,
+                        close_ok: bool = True) -> Optional[Tuple[float, float]]:
+        """Trả về (độ giống giữa 2 cụm, độ chặt nhỏ nhất) nếu phân chia hợp lệ.
+        close_ok=False: chỉ chấp nhận 2 giọng khác hẳn nhau (a), không tách 2 giọng gần nhau (b)."""
         idx = [np.where(lab == c)[0] for c in (0, 1)]
         if min(len(i) for i in idx) < self.SPLIT_MIN_SEGS or min(W[i].sum() for i in idx) < self.SPLIT_MIN_W:
             return None
@@ -801,6 +820,8 @@ class MeetingSpeakers:
             coh = min(float(np.mean([V[j] @ unit(sums[c] - V[j] * W[j]) for j in idx[c]])) for c in (0, 1))
             if coh >= cross + self.SPLIT_COHESION_GAP:
                 return cross, coh
+        if not close_ok:
+            return None
         # (b) Hai giọng gần nhau (tâm cụm vẫn giống ~0.7-0.8, ví dụ cùng phát qua loa) nhưng TỪNG CÂU vẫn gần
         # cụm của mình hơn hẳn cụm kia. Tâm cụm lớn bị "làm mượt" nên so tâm-tâm đánh giá quá cao độ giống.
         gaps, agrees = [], []

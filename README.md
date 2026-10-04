@@ -7,7 +7,7 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng tiếng Việt chạy ngay trên máy (miễn phí), vừa làm
 vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.12.1 - cập nhật 04/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.12.2 - cập nhật 04/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
@@ -54,6 +54,15 @@ vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng 
   trợ lý vẫn hỏi trước, trả lời xong vẫn chỉ trình bày slide đã chọn.
 - Chạy thử ngày 04/10/2026 với Claude Sonnet 5.5 trên một cuộc họp mẫu 7 câu: vẽ sơ đồ (19 ý, 4 nhánh) mất khoảng 19 giây,
   giải thích một ý khoảng 3 giây, soạn lời thuyết trình 6 bước khoảng 5 giây; 4 lượt gọi AI tốn 0,062 USD.
+
+### Phân biệt người nói (bản 3.12.2)
+- Lỗi thật ở #44: một người nói suốt 27 phút, Soniox chỉ có một nhãn, nhưng từ phút 15 giọng đổi dần (đổi tư thế, xa/gần
+  mic) nên bị tự tách thành "Người nói 2" và không bao giờ gộp lại (22/46 câu sai người). Bây giờ khi Soniox chưa từng nghe
+  thấy người thứ hai trong phiên, hệ thống chỉ tự tách khi hai giọng khác hẳn nhau. Hai giọng gần nhau (ví dụ podcast phát
+  qua loa) vẫn được tách như trước khi Soniox đã nghe thấy nhiều người.
+- Chạy lại trên 17 cuộc họp thật có dữ liệu giọng: #44 về đúng 1 người (46/46 câu), 16 cuộc họp còn lại không đổi; 5 cuộc
+  họp có nhãn đúng giữ nguyên 93,3% câu. Cuộc họp cũ muốn áp dụng: mở cuộc họp, nút Tùy chọn cuộc họp > Phân tích lại
+  người nói.
 
 ## 2. Bản 3.11: cài trên máy mới bằng 3 lệnh, nhập khóa và kết nối gói ngay trên giao diện
 
