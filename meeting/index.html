@@ -366,6 +366,84 @@
     .dash-wide .dash-title { font-size: 22px; }
     @media (max-width: 1023px) { .dash-wide .charts { grid-template-columns: minmax(0, 1fr); } }
     .stage-scroll { width: 100%; height: 100%; overflow-y: auto; padding-right: 4px; }
+    /* dashboard đang thuyết trình: phần đang nói sáng lên, phần khác mờ đi */
+    .dash.is-presenting .kpis, .dash.is-presenting .chart-card, .dash.is-presenting .dash-hl { opacity: .3; transition: opacity .35s, box-shadow .35s; }
+    .dash.is-presenting .is-focus { opacity: 1; box-shadow: 0 0 0 2px rgb(var(--gold)), 0 12px 32px rgb(var(--gold) / .14); border-radius: 14px; }
+    .dash.is-presenting .dash-hl.is-focus { padding: 10px 12px; }
+
+    /* --------- sơ đồ tư duy kiểu NotebookLM: cây ngang, mở / thu nhánh, bấm một ý để trợ lý giải thích --------- */
+    .mm-host { position: relative; width: 100%; height: 100%; min-height: 320px; }
+    .mm-host.mm-panel { height: min(500px, 56vh); min-height: 300px; }
+    .mm { position: absolute; inset: 0; overflow: hidden; border-radius: 16px; border: 1px solid var(--line); cursor: grab;
+      touch-action: none; user-select: none; outline: none;
+      background: radial-gradient(900px 520px at 0% 50%, rgb(var(--brand) / .12), transparent 62%), var(--viz-surface); }
+    .mm.is-panning { cursor: grabbing; }
+    .mm-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+    .mm.is-anim .mm-world { transition: transform .6s cubic-bezier(.2, .7, .2, 1); }
+    .mm-links { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+    .mm-links path { fill: none; stroke-width: 2; stroke-opacity: .5; stroke-linecap: round;
+      transition: d .45s cubic-bezier(.2, .7, .2, 1), stroke-opacity .3s, opacity .3s; }
+    .mm-links path.on-path { stroke-opacity: 1; stroke-width: 2.6; }
+    .mm-links path.is-hidden { opacity: 0; }
+    .mm-node { position: absolute; left: 0; top: 0; width: max-content; max-width: 240px; padding: 8px 13px; border-radius: 12px; cursor: pointer;
+      font-size: 14px; line-height: 1.35; font-weight: 500; color: rgb(var(--ink)); overflow-wrap: anywhere;
+      background: color-mix(in srgb, var(--c) 15%, #1c1432); border: 1.5px solid color-mix(in srgb, var(--c) 58%, transparent);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, .25);
+      transition: transform .45s cubic-bezier(.2, .7, .2, 1), opacity .3s, box-shadow .2s, background-color .2s; }
+    .mm-node:hover { background: color-mix(in srgb, var(--c) 26%, #1c1432); }
+    .mm-node:focus-visible { outline: 2px solid rgb(var(--gold)); outline-offset: 3px; }
+    .mm-node.d0 { max-width: 280px; padding: 12px 18px; font-size: 16.5px; font-weight: 700; color: #fff;
+      background: linear-gradient(135deg, #6821C2, #A426ED); border-color: rgba(255, 255, 255, .2); }
+    .mm-node.d1 { font-size: 15px; font-weight: 600; }
+    .mm-node.d3, .mm-node.d4 { font-size: 13px; font-weight: 400; background: color-mix(in srgb, var(--c) 8%, #19122c); }
+    .mm-node.has-kids { padding-right: 24px; }       /* chừa chỗ cho nút mở / thu nhánh ở mép phải */
+    .mm-node.is-hidden { opacity: 0; pointer-events: none; }
+    .mm-node.on-path { border-color: var(--c); }
+    .mm-node.is-sel { box-shadow: 0 0 0 3px rgb(var(--gold)), 0 8px 24px rgba(0, 0, 0, .35); }
+    .mm-tone { display: inline-block; margin-left: 7px; padding: 0 7px; border-radius: 99px; font-size: 11px; font-weight: 600;
+      line-height: 18px; vertical-align: 1px; color: #160f26; background: var(--tc); }
+    .mm-tg { position: absolute; left: 100%; top: 50%; transform: translate(-50%, -50%); min-width: 24px; height: 24px; padding: 0 6px;
+      border-radius: 99px; display: inline-flex; align-items: center; justify-content: center; gap: 2px; white-space: nowrap;
+      font-size: 13px; font-weight: 700; line-height: 1; color: rgb(var(--ink)); cursor: pointer;
+      background: #2a1f48; border: 1.5px solid color-mix(in srgb, var(--c) 72%, transparent); }
+    .mm-tg:hover { background: #3b2b64; }
+    .mm-tg .mm-n { font-size: 10.5px; }
+    .mm-tools { position: absolute; right: 10px; top: 10px; z-index: 2; display: flex; gap: 6px; }
+    .mm-tools button { height: 30px; min-width: 30px; padding: 0 9px; border-radius: 9px; font-size: 12.5px; display: grid; place-items: center;
+      color: rgb(var(--ink)); background: rgba(20, 14, 36, .85); border: 1px solid var(--line-strong); }
+    .mm-tools button:hover { background: rgba(48, 34, 88, .95); }
+    .mm-hint { position: absolute; left: 12px; bottom: 10px; z-index: 1; max-width: calc(100% - 24px); font-size: 12px; color: rgb(var(--muted));
+      background: rgba(15, 11, 26, .66); padding: 4px 10px; border-radius: 8px; pointer-events: none; }
+    .mm.is-presenting .mm-node:not(.is-focus):not(.on-path):not(.is-kid):not(.is-hidden) { opacity: .26; }
+    .mm.is-presenting .mm-links path:not(.on-path):not(.is-kid) { stroke-opacity: .12; }
+    .mm-node.is-focus { box-shadow: 0 0 0 3px rgb(var(--gold)), 0 0 30px rgb(var(--gold) / .35); }
+    .mm-compact .mm-node { font-size: 13px; max-width: 200px; padding: 7px 11px; }
+    .mm-compact .mm-node.d0 { font-size: 14.5px; max-width: 220px; }
+    .mm-compact .mm-node.has-kids { padding-right: 22px; }
+    /* khung trợ lý giải thích một ý */
+    .mm-x { position: absolute; right: 12px; top: 52px; bottom: 12px; width: min(360px, 44%); z-index: 3; display: flex;
+      flex-direction: column; gap: 8px; padding: 14px 16px; border-radius: 14px; cursor: default; user-select: text;
+      background: rgba(27, 20, 46, .97); border: 1px solid rgb(var(--accent) / .35); box-shadow: 0 16px 40px rgba(0, 0, 0, .45); }
+    .mm-x-path { font-size: 12px; color: rgb(var(--muted)); padding-right: 26px; }
+    .mm-x-title { font-size: 16px; font-weight: 700; line-height: 1.35; padding-right: 26px; }
+    .mm-x-detail { font-size: 13px; color: rgb(var(--muted)); border-left: 3px solid rgb(var(--accent) / .5); padding-left: 9px; }
+    .mm-x-body { flex: 1; min-height: 0; overflow-y: auto; font-size: 14.5px; line-height: 1.6; }
+    .mm-x-foot { display: flex; flex-wrap: wrap; gap: 6px; }
+    .mm-x-close { position: absolute; right: 8px; top: 8px; width: 28px; height: 28px; border-radius: 8px; font-size: 18px; line-height: 1;
+      color: rgb(var(--muted)); }
+    .mm-x-close:hover { color: rgb(var(--ink)); background: rgba(255, 255, 255, .06); }
+    .mm-compact .mm-x { top: auto; left: 10px; right: 10px; width: auto; max-height: 58%; }
+    @media (max-width: 767px) { .mm-x { top: auto; left: 10px; right: 10px; width: auto; max-height: 58%; } }
+    /* sơ đồ Mermaid: bấm vào nút để nghe giải thích */
+    .mmd-wrap { position: absolute; inset: 0; border-radius: 16px; overflow: hidden; background: rgb(var(--panel)); border: 1px solid var(--line); }
+    .mmd-scroll { position: absolute; inset: 0; overflow: auto; display: grid; place-items: center; padding: 24px; }
+    .mmd-wrap g.node, .mmd-wrap g.mindmap-node, .mmd-wrap text.actor { cursor: pointer; transition: opacity .3s; }
+    .mmd-wrap g.node:hover > rect, .mmd-wrap g.node:hover > polygon, .mmd-wrap g.node:hover > circle { filter: brightness(1.3); }
+    .mmd-wrap .mmd-sel > rect, .mmd-wrap .mmd-sel > polygon, .mmd-wrap .mmd-sel > circle, .mmd-wrap .mmd-sel > path {
+      stroke: #ffb700 !important; stroke-width: 3px !important; }
+    .mmd-wrap.mmd-dim g.node:not(.mmd-sel) { opacity: .3; }
+    @media (min-width: 768px) { .mmd-wrap.has-x .mmd-scroll { padding-right: calc(min(360px, 44%) + 36px); } }
+    @media (prefers-reduced-motion: reduce) { .mm-node, .mm-links path, .mm.is-anim .mm-world { transition: none; } }
     .report-stage { max-width: 960px; margin: 0 auto; font-size: 16.5px; line-height: 1.7; }
     .report-stage h1 { font-size: 26px; } .report-stage h2 { font-size: 19px; }
     .report-stage table { font-size: 15px; }
@@ -1111,6 +1189,11 @@ function onEvent(R, ev) {
       if (t && !t.done && !t.listening) { t.done = true; t.response = ev.text; renderJarvis(); } else appendAssistantNote(ev.text);
       break;
     }
+    case 'node_explained': {          // hỏi bằng giọng nói "giải thích nhánh X": đóng lượt hỏi đang mở
+      const t = R.turns[R.turns.length - 1];
+      if (!ev.req && t && !t.done && !t.listening) { t.done = true; t.response = `${ev.label}: ${ev.text}`; renderJarvis(); }
+      break;
+    }
     case 'ai_insights': {
       const t = R.turns[R.turns.length - 1];
       const items = ev.items || [];
@@ -1511,7 +1594,7 @@ async function exportMarkdown(mid) {
 const QUICK = [
   'Tóm tắt các quyết định từ đầu buổi đến giờ',
   'Liệt kê việc cần làm, người phụ trách và hạn chót',
-  'Vẽ sơ đồ luồng xử lý đang được bàn',
+  'Vẽ sơ đồ tư duy các ý chính đang bàn',
   'Tra cứu ticket Jira liên quan tới nội dung vừa nói',
 ];
 const KIND_LABEL = { minutes: 'Biên bản', diagram: 'Sơ đồ', web_design: 'Giao diện', slides: 'Slide', dashboard: 'Dashboard', report: 'Báo cáo' };
@@ -1609,6 +1692,7 @@ async function renderArtifactPane() {
   const list = R.artifacts.filter(a => inTab(a, R.tab));
   const art = currentArtifact();
   unmountDash(pane);
+  if (R.panelView && R.panelView.destroy) { R.panelView.destroy(); R.panelView = null; }
   $('#web-tools').classList.toggle('hidden', R.tab !== 'web_design' || !art);
   if (!art) {
     bar.classList.add('hidden');
@@ -1619,7 +1703,7 @@ async function renderArtifactPane() {
       const hint = {
         docs: [`Biên bản được lập tự động khi kết thúc cuộc họp. Hỏi ${AN()} "tổng hợp nhanh cuộc họp" để có báo cáo ngay.`, 'Lập biên bản ngay', 'Lập biên bản cuộc họp với quyết định và bảng việc cần làm'],
         dashboard: [`Nhờ ${AN()} vẽ biểu đồ, báo cáo số liệu kiểu Power BI từ dữ liệu Jira và thống kê cuộc họp.`, 'Dựng dashboard', 'Dựng dashboard số liệu: tiến độ ticket và thời lượng phát biểu của từng người'],
-        diagram: [`Nhờ ${AN()} vẽ sơ đồ từ nội dung đang bàn.`, 'Vẽ sơ đồ luồng đang bàn', 'Vẽ sơ đồ luồng xử lý đang được bàn trong cuộc họp'],
+        diagram: [`Nhờ ${AN()} vẽ sơ đồ tư duy từ nội dung đang bàn, rồi bấm vào từng ý để nghe ${AN()} giải thích.`, 'Vẽ sơ đồ các ý chính', 'Vẽ sơ đồ tư duy các ý chính đang bàn trong cuộc họp: quyết định, việc cần làm, người phụ trách, rủi ro'],
         web_design: [`Nhờ ${AN()} phác thảo giao diện cho ý tưởng trong cuộc họp.`, 'Phác thảo giao diện', 'Thiết kế giao diện web cho ý tưởng chính đang bàn'],
         slides: [`Nhờ ${AN()} soạn bộ slide từ nội dung cuộc họp, rồi trình chiếu và điều khiển bằng giọng nói.`, 'Soạn slide báo cáo', 'Làm slide báo cáo tiến độ và các quyết định của cuộc họp'],
       }[R.tab];
@@ -1653,13 +1737,14 @@ async function renderArtifactPane() {
     pane.innerHTML = `<article class="md">${renderMd(art.content)}</article>
       <div class="flex justify-end mt-3"><button class="btn btn-ghost btn-sm" data-act="stage-show" data-aid="${art.id}">Trình chiếu</button></div>`;
   } else if (art.kind === 'diagram') {
-    pane.innerHTML = '<div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang vẽ sơ đồ...</div>';
+    pane.innerHTML = `<div class="mm-host mm-panel"><div class="flex items-center gap-2 text-muted p-4"><span class="spinner"></span>Đang vẽ sơ đồ...</div></div>
+      <div class="flex justify-end mt-3"><button class="btn btn-primary btn-sm" data-act="stage-show" data-aid="${art.id}">Trình chiếu</button></div>`;
+    const host = $('.mm-host', pane);
+    if (R.panelView && R.panelView.destroy) R.panelView.destroy();
     try {
-      if (!window.mermaid) throw new Error('Chưa tải được thư viện Mermaid');
-      const { svg } = await mermaid.render(`mmd-${art.id}-${Date.now()}`, art.content);
-      if (currentArtifact() === art && S.room.tab === 'diagram') pane.innerHTML = `<div class="w-full overflow-auto">${svg}</div>`;
+      R.panelView = await mountDiagram(host, art, { compact: true });
     } catch (e) {
-      pane.innerHTML = `<p class="mb-2" style="color:rgb(var(--danger))">Không vẽ được sơ đồ: ${esc(e.message || e)}</p><pre class="text-[12px] text-muted whitespace-pre-wrap">${esc(art.content)}</pre>`;
+      if (currentArtifact() === art && S.room.tab === 'diagram') host.outerHTML = `<p class="mb-2" style="color:rgb(var(--danger))">Không vẽ được sơ đồ: ${esc(e.message || e)}</p><pre class="text-[12px] text-muted whitespace-pre-wrap">${esc(parseDiagram(art.content).code || art.content)}</pre>`;
     }
   } else if (art.kind === 'web_design') {
     const mobile = R.vp === 'mobile';
@@ -2522,6 +2607,10 @@ function avatarEvent(R, ev) {
     case 'stage_state': applyStage(ev.stage, ev.auto); break;
     case 'stage_command': avSet('idle', 'happy'); if (ev.action === 'open') openStage(true); else closeStage(); break;
     case 'stage_present': if (ev.action === 'start') { hideAsk(); startPresent(ev.slide); } else stopPresent('Dạ, em dừng thuyết trình.'); break;
+    case 'node_explaining':
+      if (!ev.req || !XPL.applied.has(ev.req)) { avSet('thinking', 'neutral'); mmEach(ev.artifact_id, v => v.showExplain({ node: ev.node, label: ev.label, path: ev.path, loading: true })); }
+      break;
+    case 'node_explained': applyExplained(ev); break;
     case 'stage_prompt': avSet('idle', 'happy'); break;
     case 'meeting_status':
       if (ev.minutes_status === 'pending') { avSet('thinking', 'neutral'); showBubble('Em đang lập biên bản cuộc họp...'); }
@@ -2686,6 +2775,363 @@ function mountDash(root, d) {
 }
 
 /* =====================================================================
+   SƠ ĐỒ TƯ DUY KIỂU NOTEBOOKLM: cây ngang, mở / thu từng nhánh, kéo để di chuyển, cuộn để phóng to,
+   bấm vào một ý để trợ lý giải thích ý đó theo nội dung cuộc họp (đọc to và hiện bên cạnh sơ đồ).
+   ===================================================================== */
+const MM_COLORS = ['#a67cff', '#ffb700', '#22b8a5', '#ef65c5', '#3987e5', '#f08a4b', '#9be15d', '#e66767'];
+const MM_TONES = { risk: ['Rủi ro', '#ff8a8a'], todo: ['Cần làm', '#ffc145'], done: ['Đã xong', '#7ddc8a'],
+  doing: ['Đang làm', '#5ab2ff'], idea: ['Ý tưởng', '#f3a5dd'], info: ['Ghi nhận', '#b9b0cc'] };
+const MM = { live: new Set(), seq: 0 };    // sơ đồ đang hiện (màn trình chiếu, khung bên)
+const foldVi = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[đĐ]/g, 'd').toLowerCase()
+  .replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const ICON_PLUS = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+const ICON_MINUS = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 12h14"/></svg>';
+/** Mã nút theo thứ tự duyệt (n0 là gốc), giống hệt cách máy chủ chuẩn hóa: bấm vào ý nào máy chủ cũng tìm đúng ý đó. */
+function normMindmap(d) {
+  let count = 0;
+  const node = (raw, depth) => {
+    if (typeof raw === 'string') raw = { label: raw };
+    if (!raw || typeof raw !== 'object' || count >= 90) return null;
+    const label = String(raw.label || raw.title || raw.name || raw.text || '').replace(/\s+/g, ' ').trim().slice(0, 90);
+    if (!label) return null;
+    const out = { ...raw, id: `n${count++}`, label, children: [] };
+    if (depth < 4) (raw.children || []).slice(0, 12).forEach(c => { const n = node(c, depth + 1); if (n) out.children.push(n); });
+    return out;
+  };
+  const root = node(d.root, 0);
+  return root && root.children.length ? { ...d, root } : null;
+}
+function parseDiagram(content) {
+  const s = typeof content === 'string' ? content.trim() : '';
+  let d = content && typeof content === 'object' ? content : null;
+  if (!d && s.startsWith('{')) { try { d = JSON.parse(s); } catch (e) { d = null; } }
+  if (d && d.type === 'mindmap' && d.root) { const mm = normMindmap(d); if (mm) return mm; }
+  if (d && d.type === 'mermaid') return { type: 'mermaid', code: String(d.code || ''), walkthrough: d.walkthrough || [] };
+  return { type: 'mermaid', code: s };
+}
+/** Khung giải thích dùng chung cho sơ đồ tư duy và sơ đồ Mermaid. */
+function xShow(view, st) {
+  let x = $('.mm-x', view.root);
+  if (!x) { x = document.createElement('aside'); x.className = 'mm-x'; x.setAttribute('aria-live', 'polite'); x.setAttribute('aria-label', 'Giải thích ý đã chọn'); view.root.appendChild(x); }
+  view.xState = st; view.xOpen = true; view.root.classList.add('has-x');
+  const path = (st.path || []).slice(0, -1);
+  x.innerHTML = `<button type="button" class="mm-x-close" data-mmx="close" aria-label="Đóng phần giải thích">×</button>
+    ${path.length ? `<div class="mm-x-path">${path.map(esc).join(' › ')}</div>` : ''}
+    <div class="mm-x-title">${esc(st.label || '')}</div>
+    ${st.detail && st.detail !== st.text ? `<div class="mm-x-detail">${esc(st.detail)}</div>` : ''}
+    <div class="mm-x-body">${st.loading ? `<div class="flex items-center gap-2 text-muted"><span class="spinner"></span>${esc(AN())} đang giải thích...</div>`
+      : st.error ? `<p style="color:rgb(var(--danger))">${esc(st.error)}</p>` : `<p>${esc(st.text || '')}</p>`}</div>
+    ${st.text ? `<div class="mm-x-foot"><button type="button" class="btn btn-ghost btn-sm" data-mmx="replay">Nghe lại</button>${STAGE.open && view.onStage ? '<button type="button" class="btn btn-ghost btn-sm" data-mmx="ask">Hỏi thêm về ý này</button>' : ''}</div>` : ''}`;
+}
+function xHide(view) { const x = $('.mm-x', view.root); if (x) x.remove(); view.xOpen = false; view.xState = null; view.root.classList.remove('has-x'); }
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-mmx]'); if (!b) return;
+  const view = [...MM.live].find(v => v.root.contains(b)); if (!view) return;
+  const st = view.xState || {};
+  if (b.dataset.mmx === 'close') { view.hideExplain(); if (view.select) view.select(null); }
+  else if (b.dataset.mmx === 'replay' && st.text) { stopVoice(); say(st.text, { mood: 'happy', bubble: st.text }); }
+  else if (b.dataset.mmx === 'ask') { const inp = $('#stage-input'); if (inp) { inp.value = `Giải thích thêm về "${st.label}": `; inp.focus(); } }
+});
+function mmEach(aid, fn) {
+  [...MM.live].forEach(v => { if (!document.contains(v.root)) { if (v.destroy) v.destroy(); else MM.live.delete(v); } else if (v.aid === aid) fn(v); });
+}
+
+class MindMap {
+  constructor(host, data, opts = {}) {
+    this.host = host; this.data = data; this.aid = opts.aid; this.compact = !!opts.compact; this.onStage = !!opts.onStage;
+    this.items = new Map(); this.order = []; this.s = 1; this.x = 0; this.y = 0; this.sel = null; this.userMoved = false;
+    host.innerHTML = `<div class="mm${this.compact ? ' mm-compact' : ''}" role="tree" aria-label="${esc(data.title || 'Sơ đồ tư duy')}">
+      <div class="mm-world"><svg class="mm-links" aria-hidden="true"></svg></div>
+      <div class="mm-tools" role="toolbar" aria-label="Điều khiển sơ đồ">
+        <button type="button" data-mm="in" aria-label="Phóng to">${ICON_PLUS}</button><button type="button" data-mm="out" aria-label="Thu nhỏ">${ICON_MINUS}</button>
+        <button type="button" data-mm="fit">Vừa khung</button><button type="button" data-mm="all">Mở hết</button><button type="button" data-mm="none">Thu gọn</button></div>
+      <div class="mm-hint">Bấm vào một ý để ${esc(AN())} giải thích${this.compact ? '' : ' · bấm vòng tròn để mở / thu nhánh · kéo để di chuyển'}</div></div>`;
+    this.root = $('.mm', host); this.world = $('.mm-world', host); this.svg = $('.mm-links', host);
+    const add = (n, parent, depth, color) => {
+      const it = { n, parent, depth, color, kids: [], open: false, x: 0, y: 0, w: 0, h: 0, sh: 0, vis: false };
+      this.items.set(n.id, it); this.order.push(n.id);
+      if (parent) this.items.get(parent).kids.push(n.id);
+      (n.children || []).forEach((c, k) => add(c, n.id, depth + 1, depth === 0 ? MM_COLORS[k % MM_COLORS.length] : color));
+    };
+    add(data.root, null, 0, '#a67cff');
+    this.rootId = data.root.id;
+    const r = this.items.get(this.rootId); r.open = true;
+    const second = r.kids.reduce((s, k) => s + this.items.get(k).kids.length, 0);
+    if (r.kids.length + second <= (this.compact ? 8 : 30)) r.kids.forEach(k => { this.items.get(k).open = true; });   // ít ý: mở sẵn nhánh cấp 1
+    const frag = document.createDocumentFragment();
+    this.order.forEach(id => {
+      const it = this.items.get(id); const n = it.n; const tone = n.tone && MM_TONES[n.tone];
+      const el = document.createElement('div');
+      el.className = `mm-node d${Math.min(it.depth, 4)}${it.kids.length ? ' has-kids' : ''}`; el.dataset.id = id; el.tabIndex = id === this.rootId ? 0 : -1;
+      el.setAttribute('role', 'treeitem'); el.setAttribute('aria-level', String(it.depth + 1));
+      el.style.setProperty('--c', it.color);
+      el.innerHTML = `<span class="mm-l">${esc(n.label)}</span>${tone ? `<span class="mm-tone" style="--tc:${tone[1]}">${tone[0]}</span>` : ''}`
+        + (it.kids.length ? '<button type="button" class="mm-tg" data-mm-tg tabindex="-1"></button>' : '');
+      it.el = el; frag.appendChild(el);
+      if (it.parent) { const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('stroke', it.color); it.link = p; this.svg.appendChild(p); }
+    });
+    this.world.appendChild(frag);
+    this.measure(); this.layout(); this.fit(false);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (!document.contains(this.root)) return; this.measure(); this.layout(); if (!this.userMoved) this.fit(false); });
+    this.bind();
+    MM.live.add(this);
+  }
+  destroy() { if (this.ro) this.ro.disconnect(); MM.live.delete(this); }
+  measure() { this.items.forEach(it => { it.w = it.el.offsetWidth; it.h = it.el.offsetHeight; }); }
+  labelOf(id) { const it = this.items.get(id); return it ? it.n.label : ''; }
+  detailOf(id) { const it = this.items.get(id); return it ? it.n.detail || '' : ''; }
+  pathOf(id) { const out = []; let it = this.items.get(id); while (it) { out.unshift(it.n.label); it = it.parent ? this.items.get(it.parent) : null; } return out; }
+  layout() {
+    const GX = this.compact ? 42 : 58, GY = this.compact ? 8 : 12;
+    const root = this.items.get(this.rootId);
+    const sub = it => {                     // chiều cao phần cây đang mở của nút
+      const kids = it.open ? it.kids.map(k => this.items.get(k)) : [];
+      it.sh = kids.length ? Math.max(it.h, kids.reduce((s, k) => s + sub(k), 0) + GY * (kids.length - 1)) : it.h;
+      return it.sh;
+    };
+    const hide = (it, at) => {             // ý đang thu: nằm sau mép phải của nút cha đang hiện, mờ đi
+      it.vis = false; it.x = at.x + at.w - it.w; it.y = at.y + (at.h - it.h) / 2;
+      it.kids.forEach(k => hide(this.items.get(k), at));
+    };
+    const place = (it, x, top) => {
+      it.vis = true; it.x = x; it.y = top + (it.sh - it.h) / 2;
+      const kids = it.kids.map(k => this.items.get(k));
+      if (it.open && kids.length) {
+        const total = kids.reduce((s, k) => s + k.sh, 0) + GY * (kids.length - 1);
+        let y = top + (it.sh - total) / 2;
+        kids.forEach(k => { place(k, x + it.w + GX, y); y += k.sh + GY; });
+      } else kids.forEach(k => hide(k, it));
+    };
+    sub(root); place(root, 0, 0);
+    let y0 = Infinity, y1 = -Infinity, x1 = 0;
+    this.items.forEach(it => {
+      it.el.style.transform = `translate(${it.x}px, ${it.y}px)`;
+      it.el.classList.toggle('is-hidden', !it.vis);
+      it.el.setAttribute('aria-hidden', it.vis ? 'false' : 'true');
+      if (it.kids.length) {
+        it.el.setAttribute('aria-expanded', String(it.open));
+        const tg = $('.mm-tg', it.el);
+        tg.innerHTML = it.open ? '‹' : `<span class="mm-n">${it.kids.length}</span>›`;
+        tg.setAttribute('aria-label', it.open ? 'Thu nhánh này' : `Mở ${it.kids.length} ý con`);
+      }
+      if (it.link) {
+        const p = this.items.get(it.parent);
+        const ax = p.x + p.w, ay = p.y + p.h / 2, bx = it.x, by = it.y + it.h / 2, dx = Math.max(20, (bx - ax) / 2);
+        const d = `M ${ax.toFixed(1)} ${ay.toFixed(1)} C ${(ax + dx).toFixed(1)} ${ay.toFixed(1)}, ${(bx - dx).toFixed(1)} ${by.toFixed(1)}, ${bx.toFixed(1)} ${by.toFixed(1)}`;
+        it.link.setAttribute('d', d); it.link.style.d = `path("${d}")`;
+        it.link.classList.toggle('is-hidden', !it.vis);
+      }
+      if (it.vis) { y0 = Math.min(y0, it.y); y1 = Math.max(y1, it.y + it.h); x1 = Math.max(x1, it.x + it.w + (it.kids.length ? 18 : 0)); }
+    });
+    this.bounds = { x: 0, y: y0, w: x1, h: y1 - y0 };
+  }
+  apply(anim) {
+    this.root.classList.toggle('is-anim', !!anim && !REDUCED_MOTION);
+    this.world.style.transform = `translate(${this.x}px, ${this.y}px) scale(${this.s})`;
+  }
+  viewport() {
+    const r = this.root.getBoundingClientRect();
+    const side = this.xOpen && !this.compact && r.width > 767 ? Math.min(360, r.width * 0.44) + 24 : 0;   // chừa chỗ cho khung giải thích
+    return { w: Math.max(120, r.width - side), h: r.height };
+  }
+  fit(anim = true, box, maxScale) {
+    const b = box || this.bounds; if (!b || !isFinite(b.h)) return;
+    const v = this.viewport(); const pad = this.compact ? 22 : 44;
+    const top = this.compact ? 12 : 46;    // chừa thanh công cụ phía trên
+    const s = Math.max(0.25, Math.min(maxScale || (this.compact ? 1 : 1.3), (v.w - pad * 2) / Math.max(1, b.w), (v.h - pad - top) / Math.max(1, b.h)));
+    this.s = s; this.x = (v.w - b.w * s) / 2 - b.x * s; this.y = top + (v.h - top - b.h * s) / 2 - b.y * s;
+    this.apply(anim);
+  }
+  boxOf(ids) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    ids.forEach(id => { const it = this.items.get(id); if (!it || !it.vis) return;
+      x0 = Math.min(x0, it.x); y0 = Math.min(y0, it.y); x1 = Math.max(x1, it.x + it.w + 18); y1 = Math.max(y1, it.y + it.h); });
+    return x0 === Infinity ? null : { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+  /** Đưa các nút vào khung nhìn nếu đang nằm ngoài (không phóng to thêm). */
+  ensureVisible(ids) {
+    const b = this.boxOf(ids); if (!b) return;
+    const v = this.viewport();
+    const sx = this.x + b.x * this.s, sy = this.y + b.y * this.s, ex = sx + b.w * this.s, ey = sy + b.h * this.s;
+    if (sx >= 8 && sy >= 40 && ex <= v.w - 8 && ey <= v.h - 8) return;
+    this.fit(true, b, this.s);
+  }
+  zoomAt(f, cx, cy) {
+    const s = Math.max(0.25, Math.min(2.6, this.s * f)); const k = s / this.s;
+    this.x = cx - (cx - this.x) * k; this.y = cy - (cy - this.y) * k; this.s = s; this.userMoved = true;
+    this.apply(false);
+  }
+  closeDeep(it) { it.open = false; it.kids.forEach(k => this.closeDeep(this.items.get(k))); }
+  toggle(id, open) {
+    const it = this.items.get(id); if (!it || !it.kids.length) return;
+    it.open = open === undefined ? !it.open : open;
+    if (!it.open) this.closeDeep(it);
+    this.layout();
+    this.ensureVisible(it.open ? [id, ...it.kids] : [id]);
+  }
+  setAll(open) {
+    this.items.forEach(it => { if (it.kids.length) it.open = open || it.depth === 0; });
+    this.layout(); this.userMoved = false; this.fit(true);
+  }
+  reveal(id) {
+    let it = this.items.get(id), changed = false;
+    while (it && it.parent) { const p = this.items.get(it.parent); if (!p.open) { p.open = true; changed = true; } it = p; }
+    if (changed) this.layout();
+  }
+  select(id) {
+    this.items.forEach(it => { it.el.classList.remove('is-sel', 'on-path'); if (it.link) it.link.classList.remove('on-path'); });
+    this.sel = id || null;
+    let it = id ? this.items.get(id) : null; if (!it) return;
+    it.el.classList.add('is-sel');
+    while (it) { it.el.classList.add('on-path'); if (it.link) it.link.classList.add('on-path'); it = it.parent ? this.items.get(it.parent) : null; }
+  }
+  pick(id) {
+    const it = this.items.get(id); if (!it) return;
+    this.select(id);
+    explainNode(this.aid, { node: id, label: it.n.label, path: this.pathOf(id), detail: it.n.detail || '' });
+  }
+  showExplain(st) {
+    if (st.node && this.items.has(st.node)) { this.reveal(st.node); this.select(st.node); }
+    const wasOpen = this.xOpen;
+    xShow(this, { ...st, detail: st.detail || this.detailOf(st.node) });
+    if (!wasOpen && !this.userMoved && !this.root.classList.contains('is-presenting')) this.fit(true);   // nhường chỗ cho khung giải thích
+    if (st.node && this.items.has(st.node)) this.ensureVisible([st.node]);
+  }
+  hideExplain() {
+    const was = this.xOpen; xHide(this);
+    if (was && !this.userMoved && !this.root.classList.contains('is-presenting')) this.fit(true);
+  }
+  /* thuyết trình: mở nhánh đang nói, thu các nhánh khác, đưa nhánh vào giữa và làm sáng nó */
+  setPresenting(on) {
+    this.root.classList.toggle('is-presenting', on);
+    if (!on) this.items.forEach(it => { it.el.classList.remove('is-focus', 'is-kid'); if (it.link) it.link.classList.remove('is-kid'); });
+  }
+  present(id) {
+    const it = this.items.get(id); if (!it) return;
+    this.hideExplain();
+    if (it.depth === 1) this.items.get(this.rootId).kids.forEach(k => { if (k !== id) this.closeDeep(this.items.get(k)); });
+    this.reveal(id);
+    if (it.kids.length) it.open = true;
+    this.layout();
+    this.items.forEach(x => { x.el.classList.remove('is-focus', 'is-kid'); if (x.link) x.link.classList.remove('is-kid'); });
+    it.el.classList.add('is-focus');
+    it.kids.forEach(k => { const c = this.items.get(k); c.el.classList.add('is-kid'); if (c.link) c.link.classList.add('is-kid'); });
+    this.select(id);
+    const ids = id === this.rootId ? this.order.filter(k => this.items.get(k).vis) : [it.parent, id, ...it.kids];   // giữ nút cha để không mất ngữ cảnh
+    this.fit(true, this.boxOf(ids), 1.25);
+  }
+  fitAll() { this.userMoved = false; this.layout(); this.fit(true); }
+  bind() {
+    const r = this.root;
+    r.addEventListener('click', e => {
+      const tool = e.target.closest('[data-mm]');
+      if (tool) {
+        const b = r.getBoundingClientRect(), cx = b.width / 2, cy = b.height / 2;
+        if (tool.dataset.mm === 'in') this.zoomAt(1.2, cx, cy); else if (tool.dataset.mm === 'out') this.zoomAt(1 / 1.2, cx, cy);
+        else if (tool.dataset.mm === 'fit') { this.userMoved = false; this.fit(true); } else if (tool.dataset.mm === 'all') this.setAll(true);
+        else if (tool.dataset.mm === 'none') this.setAll(false);
+        return;
+      }
+      if (e.target.closest('.mm-x')) return;
+      if (this.dragged) { this.dragged = false; return; }
+      const node = e.target.closest('.mm-node'); if (!node) return;
+      if (e.target.closest('[data-mm-tg]')) this.toggle(node.dataset.id); else this.pick(node.dataset.id);
+    });
+    r.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || e.target.closest('.mm-tools, .mm-x, .mm-node')) return;
+      this.pan = { x: e.clientX, y: e.clientY, ox: this.x, oy: this.y, moved: false };
+      try { r.setPointerCapture(e.pointerId); } catch (err) { /* bỏ qua */ }
+      r.classList.add('is-panning');
+    });
+    r.addEventListener('pointermove', e => {
+      if (!this.pan) return;
+      const dx = e.clientX - this.pan.x, dy = e.clientY - this.pan.y;
+      if (Math.abs(dx) + Math.abs(dy) > 3) { this.pan.moved = true; this.userMoved = true; }
+      this.x = this.pan.ox + dx; this.y = this.pan.oy + dy; this.apply(false);
+    });
+    const end = () => { if (!this.pan) return; this.dragged = this.pan.moved; this.pan = null; r.classList.remove('is-panning'); };
+    r.addEventListener('pointerup', end); r.addEventListener('pointercancel', end);
+    r.addEventListener('wheel', e => {
+      if (e.target.closest('.mm-x')) return;
+      e.preventDefault();
+      const b = r.getBoundingClientRect();
+      this.zoomAt(e.deltaY < 0 ? 1.1 : 1 / 1.1, e.clientX - b.left, e.clientY - b.top);
+    }, { passive: false });
+    r.addEventListener('keydown', e => {
+      const el = e.target.closest && e.target.closest('.mm-node'); if (!el) return;
+      const it = this.items.get(el.dataset.id);
+      const go = id => { const n = this.items.get(id); if (!n || !n.vis) return; el.tabIndex = -1; n.el.tabIndex = 0; n.el.focus({ preventScroll: true }); this.ensureVisible([id]); };
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.pick(it.n.id); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); if (it.kids.length && !it.open) this.toggle(it.n.id, true); else if (it.kids.length) go(it.kids[0]); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); if (it.open && it.kids.length && it.depth > 0) this.toggle(it.n.id, false); else if (it.parent) go(it.parent); }
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault(); const sib = it.parent ? this.items.get(it.parent).kids : [it.n.id];
+        const j = sib.indexOf(it.n.id) + (e.key === 'ArrowDown' ? 1 : -1); if (sib[j]) go(sib[j]);
+      }
+    });
+    if (window.ResizeObserver) { this.ro = new ResizeObserver(() => { if (!this.userMoved && !this.root.classList.contains('is-presenting')) this.fit(false); }); this.ro.observe(r); }
+  }
+}
+
+/** Sơ đồ Mermaid (luồng có mũi tên, sequence, gantt): bấm vào nút để nghe giải thích, thuyết trình làm sáng từng nút. */
+class MermaidView {
+  constructor(host, aid, svg, opts = {}) {
+    this.aid = aid; this.onStage = !!opts.onStage;
+    host.innerHTML = `<div class="mmd-wrap"><div class="mmd-scroll">${svg}</div></div>`;
+    this.root = $('.mmd-wrap', host);
+    this.nodes().forEach(g => { g.setAttribute('tabindex', '0'); g.setAttribute('role', 'button'); });
+    const pick = g => { const label = g.textContent.trim().replace(/\s+/g, ' '); this.select(label); explainNode(this.aid, { node: '', label, path: [label] }); };
+    this.root.addEventListener('click', e => { if (e.target.closest('.mm-x')) return; const g = e.target.closest('g.node, g.mindmap-node, text.actor'); if (g) pick(g); });
+    this.root.addEventListener('keydown', e => { const g = e.target.closest && e.target.closest('g.node, g.mindmap-node, text.actor'); if (g && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); pick(g); } });
+    MM.live.add(this);
+  }
+  destroy() { MM.live.delete(this); }
+  nodes() { return $$('g.node, g.mindmap-node, text.actor', this.root); }
+  find(label) {
+    const want = foldVi(label); if (!want) return null;
+    const all = this.nodes();
+    return all.find(g => foldVi(g.textContent) === want) || all.find(g => foldVi(g.textContent).includes(want)) || null;
+  }
+  labelOf(label) { return label; }
+  select(label) { this.nodes().forEach(g => g.classList.remove('mmd-sel')); const g = label ? this.find(label) : null; if (g) g.classList.add('mmd-sel'); return g; }
+  showExplain(st) { this.select(st.label); xShow(this, st); }
+  hideExplain() { xHide(this); }
+  setPresenting(on) { this.root.classList.toggle('mmd-dim', on); if (!on) this.select(null); }
+  present(label) { this.hideExplain(); const g = this.select(label); if (g) g.scrollIntoView({ block: 'center', inline: 'center', behavior: REDUCED_MOTION ? 'auto' : 'smooth' }); }
+  fitAll() { /* sơ đồ Mermaid tự vừa khung */ }
+}
+async function mountDiagram(host, art, opts = {}) {
+  const dg = parseDiagram(art.content);
+  if (dg.type === 'mindmap') return new MindMap(host, dg, { aid: art.id, compact: opts.compact, onStage: opts.onStage });
+  if (!window.mermaid) throw new Error('Chưa tải được thư viện Mermaid');
+  const { svg } = await mermaid.render(`mmd-${art.id}-${++MM.seq}`, dg.code);
+  return new MermaidView(host, art.id, svg, opts);
+}
+
+/* ---------- giải thích một ý: gọi trợ lý, hiện bên cạnh sơ đồ và đọc to ---------- */
+const XPL = { seq: 0, applied: new Set() };
+async function explainNode(aid, nd) {
+  const R = S.room; if (!R) return;
+  const req = `x${Date.now().toString(36)}${++XPL.seq}`;
+  const st = { req, node: nd.node, label: nd.label, path: nd.path || [nd.label], detail: nd.detail || '', loading: true };
+  mmEach(aid, v => v.showExplain(st));
+  stopVoice(); avSet('thinking', 'neutral');
+  try {
+    const r = await POST(`/api/meetings/${R.id}/explain`, { artifact_id: aid, node: nd.node || '', label: nd.label || '', req });
+    applyExplained({ ...r, artifact_id: aid, req });
+  } catch (e) {
+    avSet('idle', 'concerned');
+    mmEach(aid, v => v.showExplain({ ...st, loading: false, error: e.message || 'Em chưa giải thích được ý này.' }));
+  }
+}
+function applyExplained(ev) {
+  if (ev.req) { if (XPL.applied.has(ev.req)) return; XPL.applied.add(ev.req); }
+  mmEach(ev.artifact_id, v => v.showExplain({ node: ev.node, label: ev.label, path: ev.path, text: ev.text }));
+  avSet('idle', 'happy');
+  if (ev.text) { stopVoice(); say(ev.text, { mood: 'happy', bubble: ev.text }); }
+}
+
+/* =====================================================================
    SÂN KHẤU: TRÌNH CHIẾU CÙNG TRỢ LÝ
    ===================================================================== */
 const STAGE = { open: false };
@@ -2772,11 +3218,17 @@ function fitSlide() {
 if (window.ResizeObserver) new ResizeObserver(fitSlide).observe($('#stage-frame'));
 let stageRenderSeq = 0;
 const OPEN_DOC_BTN = '<button class="btn btn-ghost btn-sm" data-act="open-doc" title="Mở PDF, PowerPoint, Word trên máy để trình bày">Mở tài liệu</button>';
-async function renderStageFrame(animate) {
+function dropStageView() {
+  if (STAGE.view && STAGE.view.destroy) STAGE.view.destroy();
+  STAGE.view = null; STAGE.ready = Promise.resolve(null);
+}
+/** navOnly: chỉ đổi thanh điều khiển (bật / tắt thuyết trình), giữ nguyên sơ đồ, dashboard đang hiện. */
+async function renderStageFrame(animate, navOnly) {
   const R = S.room; const frame = $('#stage-frame'); const nav = $('#stage-nav'); if (!frame || !R) return;
-  const my = ++stageRenderSeq;
-  unmountDash(frame);
   const art = stageArtifact();
+  const keepBody = !!navOnly && !!art && art.kind !== 'slides' && frame.dataset.aid === String(art.id) && !!frame.firstElementChild;
+  const my = keepBody ? stageRenderSeq : ++stageRenderSeq;
+  if (!keepBody) { unmountDash(frame); dropStageView(); frame.dataset.aid = art ? String(art.id) : ''; }
   const picker = R.artifacts.length ? `<select class="input" data-stage-pick style="height:32px;width:auto;max-width:280px;font-size:12.5px" aria-label="Chọn nội dung trình bày">
       ${art ? '' : '<option value="">Chọn nội dung...</option>'}${[...R.artifacts].reverse().map(a => `<option value="${a.id}" ${art && a.id === art.id ? 'selected' : ''}>${esc(artLabel(a))} - v${a.version || 1}</option>`).join('')}</select>` : '';
   if (!art) {
@@ -2811,8 +3263,10 @@ async function renderStageFrame(animate) {
       <div class="thumbs" aria-label="Danh sách slide">${deck.slides.map((sl, k) => `<button class="thumb" data-act="stage-goto" data-slide="${k}" aria-current="${k === i}">${k + 1}. ${esc(sl.title)}</button>`).join('')}</div>`;
     const cur = $('.thumb[aria-current="true"]', nav); if (cur) cur.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   } else {
-    const presentBtn = art.kind === 'dashboard' ? `<button class="btn ${PRESENT.on ? 'btn-primary' : 'btn-ghost'} btn-sm" data-act="stage-present" aria-pressed="${PRESENT.on}">${PRESENT.on ? 'Dừng thuyết trình' : 'Thuyết trình'}</button>` : '';
+    const canPresent = art.kind === 'dashboard' || art.kind === 'diagram';
+    const presentBtn = canPresent ? `<button class="btn ${PRESENT.on ? 'btn-primary' : 'btn-ghost'} btn-sm" data-act="stage-present" aria-pressed="${PRESENT.on}" title="${esc(AN())} đi qua từng phần, phần đang nói sáng lên (nói: 'thuyết trình ${art.kind === 'diagram' ? 'sơ đồ' : 'dashboard'} này')">${PRESENT.on ? 'Dừng thuyết trình' : 'Thuyết trình'}</button>` : '';
     nav.innerHTML = `<div class="flex flex-wrap items-center justify-end gap-2">${back}${presentBtn}${OPEN_DOC_BTN}${picker}</div>`;
+    if (keepBody) { renderPrompter(); return; }
     if (art.kind === 'dashboard') {
       const d = parseDash(art.content);
       frame.innerHTML = `<div class="stage-scroll">${dashHtml(d, true)}</div>`;
@@ -2824,12 +3278,15 @@ async function renderStageFrame(animate) {
       frame.innerHTML = `<iframe title="Bản thiết kế giao diện" sandbox="allow-scripts allow-modals allow-forms" class="bg-white rounded-xl w-full h-full border divider"></iframe>`;
       $('iframe', frame).srcdoc = art.content;
     } else if (art.kind === 'diagram') {
-      frame.innerHTML = '<div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang vẽ sơ đồ...</div>';
-      try {
-        if (!window.mermaid) throw new Error('Chưa tải được thư viện Mermaid');
-        const { svg } = await mermaid.render(`smmd-${art.id}-${Date.now()}`, art.content);
-        if (my === stageRenderSeq) frame.innerHTML = `<div class="panel p-6 w-full h-full overflow-auto grid place-items-center">${svg}</div>`;
-      } catch (e) { if (my === stageRenderSeq) frame.innerHTML = `<pre class="text-[12px] text-muted whitespace-pre-wrap">${esc(art.content)}</pre>`; }
+      frame.innerHTML = '<div class="mm-host"><div class="flex items-center gap-2 text-muted p-4"><span class="spinner"></span>Đang vẽ sơ đồ...</div></div>';
+      const host = $('.mm-host', frame);
+      STAGE.ready = mountDiagram(host, art, { onStage: true })
+        .then(v => { if (my === stageRenderSeq) STAGE.view = v; else if (v && v.destroy) v.destroy(); return v; })
+        .catch(e => {
+          if (my === stageRenderSeq) frame.innerHTML = `<pre class="text-[12px] text-muted whitespace-pre-wrap">${esc(parseDiagram(art.content).code || art.content)}</pre>`;
+          return null;
+        });
+      await STAGE.ready;
     }
   }
   renderPrompter();
@@ -2946,23 +3403,124 @@ function slideNarration(deck, i) {
 function voiceIdle() {
   return new Promise(resolve => { const tick = () => (!VOICE.current && !VOICE.queue.length) ? resolve() : setTimeout(tick, 150); tick(); });
 }
-function dashNarration(d) {
-  const parts = [`${d.title || 'Dashboard'}.`];
-  if (d.subtitle) parts.push(`${d.subtitle}.`);
-  (d.kpis || []).forEach(k => parts.push(`${k.label}: ${k.value}${k.unit ? ' ' + k.unit : ''}${k.delta ? ', ' + k.delta : ''}.`));
-  (d.highlights || []).forEach(h => parts.push(String(h).replace(/[.]*$/, '.')));
+const pause = ms => new Promise(r => setTimeout(r, ms));
+const endDot = t => String(t || '').trim().replace(/[.]*$/, '.');
+/** Câu nói về một biểu đồ khi chưa có lời thuyết trình do AI soạn: tiêu đề, giá trị nổi bật, ghi chú. */
+function chartSpeech(c) {
+  const parts = [endDot(c.title)];
+  if (c.type === 'table') parts.push(`Bảng có ${(c.rows || []).length} dòng.`);
+  else if ((c.series || []).length && (c.labels || []).length) {
+    const s = c.series[0], data = s.data || [];
+    if (c.type === 'line' || c.type === 'area') {
+      const a = data[0], b = data[data.length - 1];
+      parts.push(`Từ ${c.labels[0]} đến ${c.labels[c.labels.length - 1]}, ${s.name || 'số liệu'} ${b >= a ? 'tăng' : 'giảm'} từ ${fmtNum(a, c.unit)} ${b >= a ? 'lên' : 'xuống'} ${fmtNum(b, c.unit)}.`);
+    } else {
+      let hi = 0; data.forEach((v, j) => { if (v > data[hi]) hi = j; });
+      parts.push(`Cao nhất là ${c.labels[hi]} với ${fmtNum(data[hi], c.unit)}.`);
+    }
+  }
+  if (c.note) parts.push(endDot(c.note));
   return parts.join(' ');
+}
+function dashSteps(d) {
+  const w = (d.walkthrough || []).filter(s => s && s.text);
+  if (w.length) return w;
+  const intro = [endDot(d.title || 'Dashboard'), d.subtitle ? endDot(d.subtitle) : ''];
+  const steps = [(d.kpis || []).length
+    ? { target: 'kpis', text: [...intro, ...d.kpis.map(k => `${k.label}: ${k.value}${k.unit ? ' ' + k.unit : ''}${k.delta ? ', ' + k.delta : ''}.`)].join(' ') }
+    : { target: '', text: intro.join(' ') }];
+  (d.charts || []).forEach((c, i) => steps.push({ target: `chart:${i}`, text: chartSpeech(c) }));
+  if ((d.highlights || []).length) steps.push({ target: 'highlights', text: d.highlights.map(endDot).join(' ') });
+  return steps;
+}
+function diagramSteps(dg) {
+  const w = (dg.walkthrough || []).filter(s => s && s.text);
+  if (w.length) return w;
+  if (dg.type === 'mindmap') {
+    const r = dg.root;
+    const steps = [{ target: r.id, text: `${endDot(dg.title || r.label)} ${r.detail ? endDot(r.detail) : ''}`.trim() }];
+    (r.children || []).forEach((c, k) => steps.push({ target: c.id, text: [`${k < ORDINALS.length ? ORDINALS[k] + ', ' : ''}${endDot(c.label)}`,
+      c.detail ? endDot(c.detail) : '', (c.children || []).length ? `Gồm: ${c.children.map(x => x.label).join(', ')}.` : ''].filter(Boolean).join(' ') }));
+    return steps;
+  }
+  const labels = [...new Set($$('#stage-frame g.node, #stage-frame g.mindmap-node, #stage-frame text.actor').map(g => g.textContent.trim().replace(/\s+/g, ' ')).filter(Boolean))];
+  const steps = [];
+  for (let i = 0; i < labels.length; i += 3) {
+    const part = labels.slice(i, i + 3);
+    steps.push({ target: part[0], text: `${i === 0 ? 'Sơ đồ bắt đầu từ' : 'Tiếp theo là'} ${part.join(', ')}.` });
+  }
+  return steps.length ? steps : [{ target: '', text: 'Em trình bày sơ đồ đang chiếu trên màn hình.' }];
+}
+/** Làm sáng phần của dashboard đang được nói tới, cuộn tới đó, biểu đồ vẽ lại từ đầu cho người xem dõi theo. */
+function focusDash(frame, target) {
+  const dash = $('.dash', frame); if (!dash) return '';
+  $$('.is-focus', dash).forEach(e => e.classList.remove('is-focus'));
+  let el = null, label = '';
+  if (target === 'kpis') { el = $('.kpis', dash); label = 'Các chỉ số chính'; }
+  else if (target === 'highlights') { el = $('.dash-hl', dash); label = 'Điểm chính'; }
+  else if (/^chart:\d+$/.test(target || '')) { el = $(`.chart-card[data-chart="${target.split(':')[1]}"]`, dash); label = el ? $('.chart-t', el).textContent : ''; }
+  if (!el) { dash.classList.remove('is-presenting'); return ''; }
+  dash.classList.add('is-presenting'); el.classList.add('is-focus');
+  el.scrollIntoView({ behavior: REDUCED_MOTION ? 'auto' : 'smooth', block: 'center' });
+  const canvas = $('canvas', el); const ch = canvas && (frame._charts || []).find(c => c.canvas === canvas);
+  if (ch && !REDUCED_MOTION) { try { ch.reset(); ch.update(); } catch (e) { /* bỏ qua */ } }
+  return label;
+}
+async function presentDash(art, token) {
+  const frame = $('#stage-frame'); const d = parseDash(art.content); const steps = dashSteps(d);
+  for (const st of steps) {
+    if (!PRESENT.on || PRESENT.token !== token) return false;
+    const label = focusDash(frame, st.target);
+    say(st.text, { mood: 'happy', bubble: label ? `Dashboard: ${label}` : `Đang trình bày: ${d.title || art.title}` });
+    await voiceIdle();
+    if (!PRESENT.on || PRESENT.token !== token) return false;
+    await pause(700);
+  }
+  return true;
+}
+async function presentDiagram(art, token) {
+  const v = await STAGE.ready;
+  if (!v || STAGE.view !== v || !PRESENT.on || PRESENT.token !== token) return false;
+  const dg = parseDiagram(art.content); const steps = diagramSteps(dg);
+  v.setPresenting(true);
+  try {
+    for (const st of steps) {
+      if (!PRESENT.on || PRESENT.token !== token || STAGE.view !== v) return false;
+      if (st.target) v.present(st.target);
+      const label = st.target && v.labelOf ? v.labelOf(st.target) : '';
+      say(st.text, { mood: 'happy', bubble: label ? `Sơ đồ: ${label}` : `Đang trình bày: ${dg.title || art.title}` });
+      await voiceIdle();
+      if (!PRESENT.on || PRESENT.token !== token) return false;
+      await pause(700);
+    }
+    return true;
+  } finally { if (STAGE.view === v) { v.setPresenting(false); v.fitAll(); } }
+}
+/** Nút Thuyết trình của sơ đồ, dashboard: nhờ máy chủ soạn lời theo cuộc họp (nếu chưa có) rồi mới trình bày. */
+async function presentOnServer(art) {
+  const R = S.room; const btn = $('[data-act="stage-present"]');
+  if (btn) { btn.disabled = true; btn.textContent = 'Đang chuẩn bị...'; }
+  try {
+    await POST(`/api/meetings/${R.id}/present`, { artifact_id: art.id });
+    await pause(400);
+    if (!PRESENT.on) startPresent();          // không có kết nối sự kiện (cuộc họp đã kết thúc): tự bắt đầu
+  } catch (e) { toast(e.message, 'err'); if (!PRESENT.on) startPresent(); }
+  finally { if (!PRESENT.on) renderStageFrame(false, true); }
 }
 async function startPresent(fromSlide) {
   const R = S.room; const art = stageArtifact();
-  if (!R || !art || !['slides', 'dashboard'].includes(art.kind)) { say('Chưa có bộ slide hay dashboard nào trên màn hình để em thuyết trình.', { mood: 'concerned' }); return; }
+  if (!R || !art || !['slides', 'dashboard', 'diagram'].includes(art.kind)) { say('Chưa có bộ slide, sơ đồ hay dashboard nào trên màn hình để em thuyết trình.', { mood: 'concerned' }); return; }
   if (!STAGE.open) openStage(true);
   stopVoice();
-  const token = ++PRESENT.token; PRESENT.on = true; renderStageFrame(false);
-  if (art.kind === 'dashboard') {
-    say(dashNarration(parseDash(art.content)), { mood: 'happy', bubble: `Đang trình bày: ${art.title}` });
-    await voiceIdle();
-    if (PRESENT.on && PRESENT.token === token) { PRESENT.on = false; renderStageFrame(false); }
+  const token = ++PRESENT.token; PRESENT.on = true; renderStageFrame(false, true);
+  if (art.kind === 'dashboard' || art.kind === 'diagram') {
+    const done = art.kind === 'dashboard' ? await presentDash(art, token) : await presentDiagram(art, token);
+    if (art.kind === 'dashboard') { const dash = $('#stage-frame .dash'); if (dash) { dash.classList.remove('is-presenting'); $$('.is-focus', dash).forEach(e => e.classList.remove('is-focus')); } }
+    if (PRESENT.on && PRESENT.token === token) {
+      PRESENT.on = false; renderStageFrame(false, true);
+      if (done) say(art.kind === 'diagram' ? 'Em đã trình bày xong sơ đồ. Anh chị bấm vào ý nào, em giải thích thêm ý đó ạ.'
+        : 'Em đã trình bày xong dashboard. Anh chị cần em nói kỹ biểu đồ nào không ạ?', { mood: 'happy' });
+    }
     return;
   }
   const deck = parseDeck(art.content);
@@ -2984,7 +3542,7 @@ function stopPresent(message) {
   if (!PRESENT.on) return;
   PRESENT.on = false; PRESENT.token += 1;
   stopVoice();
-  renderStageFrame(false);
+  renderStageFrame(false, true);
   if (message) showBubble(message);
 }
 /* ---------- tài liệu trên máy: mở, hỏi tự trình bày hay theo kịch bản ---------- */
@@ -3715,7 +4273,11 @@ document.addEventListener('click', async e => {
     case 'stage-goto': return stageAction('goto', { slide: parseInt(el.dataset.slide, 10) });
     case 'stage-show': { const sl = parseInt(el.dataset.slide, 10) || 0; openStage(true); return stageAction('show', { artifact_id: parseInt(el.dataset.aid, 10), slide: sl }); }
     case 'stage-prompter': return togglePrompter();
-    case 'stage-present': return PRESENT.on ? stopPresent('Dạ, em dừng thuyết trình.') : startPresent();
+    case 'stage-present': {
+      if (PRESENT.on) return stopPresent('Dạ, em dừng thuyết trình.');
+      const sa = stageArtifact();
+      return sa && (sa.kind === 'diagram' || sa.kind === 'dashboard') ? presentOnServer(sa) : startPresent();
+    }
     case 'stage-follow': return stageAction('follow', { follow: !(S.room.stage && S.room.stage.follow !== false) });
     case 'storage-sync': return syncStorage();
     case 'avatar-style': {

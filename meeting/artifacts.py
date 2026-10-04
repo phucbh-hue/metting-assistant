@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -740,21 +741,20 @@ async def generate_meeting_minutes(meeting_id: int, segments: List[Dict[str, Any
 
 
 # ==============================================================================
-# 2. VẼ DIAGRAM (MERMAID.JS)
+# 2. VẼ SƠ ĐỒ: SƠ ĐỒ TƯ DUY KIỂU NOTEBOOKLM (MẶC ĐỊNH) HOẶC MERMAID (LUỒNG CÓ MŨI TÊN)
 # ==============================================================================
-DIAGRAM_SYSTEM = """Bạn là Chuyên gia Kiến trúc Hệ thống & Trực quan hóa Sơ đồ (Diagram Specialist).
-Nhiệm vụ: Dựa vào yêu cầu và bối cảnh cuộc họp, hãy sinh mã Mermaid.js chuẩn xác, đẹp mắt và hợp lệ.
+DIAGRAM_SYSTEM = """Bạn là chuyên gia trực quan hóa nội dung cuộc họp thành sơ đồ, theo phong cách sơ đồ tư duy của NotebookLM:
+một chủ đề ở gốc, các nhánh tỏa sang phải, mỗi ý ngắn gọn; người xem bấm vào ý nào cũng nghe giải thích được ý đó.
 
-Hỗ trợ các loại sơ đồ:
-- `graph TD` hoặc `graph LR`: Luồng quy trình, kiến trúc dịch vụ, luồng dữ liệu.
-- `sequenceDiagram`: Luồng tương tác giữa các service, API calls, webhooks, auth.
-- `classDiagram` / `erDiagram`: Thiết kế schema database, thực thể dữ liệu.
-- `mindmap`: Sơ đồ tư duy brainstorming ý tưởng cuộc họp.
+MẶC ĐỊNH trả về sơ đồ tư duy là MỘT JSON, không kèm chữ nào khác:
+{"type": "mindmap", "title": "tiêu đề ngắn",
+ "root": {"label": "chủ đề chính", "detail": "1-2 câu tóm tắt",
+          "children": [{"label": "nhánh", "detail": "1-2 câu", "tone": "risk|todo|done|doing|idea|info",
+                        "children": [{"label": "ý con", "detail": "..."}]}]}}
 
-Quy tắc BẮT BUỘC:
-- CHỈ trả về đoạn mã Mermaid nằm trong khối ```mermaid ... ```.
-- Tuyệt đối không dùng ký tự đặc biệt làm hỏng cú pháp Mermaid.
-- Đặt nhãn rõ ràng bằng tiếng Việt / tiếng Anh kỹ thuật."""
+CHỈ khi nội dung cần mũi tên nối các bước có rẽ nhánh và gộp nhánh, tương tác theo thời gian giữa các hệ thống (API,
+webhook, thanh toán), lược đồ dữ liệu, lịch Gantt, hoặc người dùng nói rõ flowchart / lưu đồ / sequence / ERD / Gantt,
+thì trả về mã Mermaid trong khối ```mermaid ... ``` (không kèm JSON)."""
 
 
 MERMAID_TYPES = ("flowchart", "graph", "sequenceDiagram", "stateDiagram-v2", "stateDiagram", "erDiagram", "gantt",
@@ -795,33 +795,368 @@ def diagram_title(code: str) -> str:
     return m.group(1).strip().strip('"')[:60] if m else ""
 
 
+def _fold(text: Any) -> str:
+    """Bỏ dấu tiếng Việt, chữ thường, gộp khoảng trắng (so khớp nhãn nút)."""
+    t = unicodedata.normalize("NFD", str(text or "")).replace("\u0111", "d").replace("\u0110", "d")
+    t = "".join(ch for ch in t if unicodedata.category(ch) != "Mn").lower()
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", t)).strip()
+
+
+def _clean_text(text: Any, limit: int) -> str:
+    t = str(text or "").replace("\u2014", " - ").replace("\u2013", "-")
+    t = re.sub(r"\s+", " ", t).strip().strip("*_`#").strip()
+    return t[:limit].rstrip()
+
+
+# ------------------------------------------------------------ sơ đồ tư duy ---
+MINDMAP_MAX_NODES = 90
+MINDMAP_MAX_DEPTH = 4                    # gốc là tầng 0: tối đa 5 tầng
+MINDMAP_TONES = ("risk", "todo", "done", "doing", "idea", "info")
+_TONE_ALIASES = {"rủi ro": "risk", "warning": "risk", "danger": "risk", "issue": "risk", "blocked": "risk",
+                 "việc cần làm": "todo", "task": "todo", "action": "todo", "xong": "done", "đã xong": "done",
+                 "completed": "done", "đang làm": "doing", "in_progress": "doing", "progress": "doing",
+                 "ý tưởng": "idea", "note": "info", "ghi nhận": "info"}
+
+
+def normalize_mindmap(data: Any) -> Optional[Dict[str, Any]]:
+    """Chuẩn hóa sơ đồ tư duy: {"type": "mindmap", "title", "root": {"id", "label", "detail", "tone", "children"}}.
+
+    Mã nút đặt lại theo thứ tự duyệt (n0 là gốc), tối đa 90 nút và 5 tầng. None nếu không dùng được."""
+    if isinstance(data, dict) and isinstance(data.get("mindmap"), dict):
+        data = data["mindmap"]
+    if not isinstance(data, dict):
+        return None
+    root_raw = data.get("root") if isinstance(data.get("root"), dict) else \
+        (data if (data.get("label") or data.get("children")) else None)
+    if not isinstance(root_raw, dict):
+        return None
+    count = 0
+
+    def node(raw: Any, depth: int) -> Optional[Dict[str, Any]]:
+        nonlocal count
+        if isinstance(raw, str):
+            raw = {"label": raw}
+        if not isinstance(raw, dict) or count >= MINDMAP_MAX_NODES:
+            return None
+        label = _clean_text(raw.get("label") or raw.get("title") or raw.get("name") or raw.get("text"), 90)
+        if not label:
+            return None
+        out: Dict[str, Any] = {"id": f"n{count}", "label": label}
+        count += 1
+        detail = _clean_text(raw.get("detail") or raw.get("description") or raw.get("note"), 400)
+        if detail and _fold(detail) != _fold(label):
+            out["detail"] = detail
+        tone = str(raw.get("tone") or raw.get("status") or "").strip().lower()
+        tone = _TONE_ALIASES.get(tone, tone)
+        if tone in MINDMAP_TONES:
+            out["tone"] = tone
+        kids = []
+        if depth < MINDMAP_MAX_DEPTH:
+            for ch in (raw.get("children") or [])[:12]:
+                n = node(ch, depth + 1)
+                if n is not None:
+                    kids.append(n)
+        if kids:
+            out["children"] = kids
+        return out
+
+    root = node(root_raw, 0)
+    if root is None or not root.get("children"):
+        return None
+    mm: Dict[str, Any] = {"type": "mindmap", "title": _clean_text(data.get("title"), 120) or root["label"], "root": root}
+    steps = normalize_walkthrough(mm, data.get("walkthrough"))
+    if steps:
+        mm["walkthrough"] = steps
+    return mm
+
+
+def mindmap_index(mm: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Mã nút -> {"node", "path" (nhãn từ gốc tới nút), "parent", "depth"}, theo thứ tự duyệt."""
+    out: Dict[str, Dict[str, Any]] = {}
+
+    def walk(n: Dict[str, Any], path: List[str], parent: Optional[str]):
+        out[n["id"]] = {"node": n, "path": path + [n["label"]], "parent": parent, "depth": len(path)}
+        for c in n.get("children") or []:
+            walk(c, path + [n["label"]], n["id"])
+    walk(mm["root"], [], None)
+    return out
+
+
+def mindmap_outline(mm: Dict[str, Any], max_chars: int = 6000) -> str:
+    """Sơ đồ dạng dàn ý có mã nút, để đưa vào prompt."""
+    lines = []
+    for nid, e in mindmap_index(mm).items():
+        n = e["node"]
+        lines.append(f"{'  ' * e['depth']}- [{nid}] {n['label']}" + (f" ({n['tone']})" if n.get("tone") else "")
+                     + (f": {n['detail']}" if n.get("detail") else ""))
+    text = "\n".join(lines)
+    return text if len(text) <= max_chars else text[:max_chars] + "\n(... còn nữa ...)"
+
+
+_MERMAID_NODE = re.compile(r"\b([A-Za-z_][\w-]*)\s*(?:\[\[|\[\(|\(\[|\(\(|\[|\(|\{\{|\{|>)\s*\"?([^\]\)\}\"]+?)\"?\s*"
+                           r"(?:\]\]|\)\]|\]\)|\)\)|\]|\)|\}\}|\})")
+
+
+def mermaid_labels(code: str) -> List[str]:
+    """Nhãn các nút trong mã Mermaid (flowchart, sơ đồ trạng thái, người tham gia sequence), theo thứ tự xuất hiện."""
+    out: List[str] = []
+    for ln in (code or "").splitlines():
+        s = ln.strip()
+        if not s or s.startswith(("%%", "classDef", "class ", "style ", "linkStyle", "click ")):
+            continue
+        m = re.match(r"(?:participant|actor)\s+\S+(?:\s+as\s+\"?(.+?)\"?)?$", s)
+        if m:
+            out.append(m.group(1) or s.split()[1])
+            continue
+        for _, lab in _MERMAID_NODE.findall(s):
+            lab = _clean_text(lab.replace("<br>", " ").replace("<br/>", " "), 90)
+            if lab:
+                out.append(lab)
+    seen, uniq = set(), []
+    for lab in out:
+        k = _fold(lab)
+        if k and k not in seen:
+            seen.add(k)
+            uniq.append(lab)
+    return uniq
+
+
+def load_diagram(content: Any) -> Dict[str, Any]:
+    """Sơ đồ đã lưu: sơ đồ tư duy (JSON) hoặc Mermaid (mã thuần, hoặc JSON {"type": "mermaid", "code", "walkthrough"})."""
+    data: Any = content
+    if isinstance(content, str):
+        s = content.strip()
+        if not s.startswith("{"):
+            return {"type": "mermaid", "code": s}
+        try:
+            data = json.loads(s)
+        except Exception:
+            return {"type": "mermaid", "code": s}
+    if isinstance(data, dict):
+        if data.get("type") == "mermaid" and isinstance(data.get("code"), str):
+            out: Dict[str, Any] = {"type": "mermaid", "code": data["code"]}
+            steps = normalize_walkthrough(out, data.get("walkthrough"))
+            if steps:
+                out["walkthrough"] = steps
+            return out
+        mm = normalize_mindmap(data)
+        if mm:
+            return mm
+    return {"type": "mermaid", "code": str(content or "")}
+
+
+def _parse_diagram_reply(raw: str) -> Tuple[str, Any, str]:
+    """Phản hồi của LLM -> ("mindmap", dict, "") | ("mermaid", mã, "") | (loại, giá trị, lỗi cần sửa)."""
+    if re.search(r"```\s*mermaid", raw or "", re.I):
+        code = extract_mermaid(raw)
+        return "mermaid", code, mermaid_problem(code)
+    data = _json_from_text(raw)
+    if isinstance(data, dict) and (data.get("root") or data.get("mindmap") or data.get("children")):
+        mm = normalize_mindmap(data)
+        if mm:
+            return "mindmap", mm, ""
+        return "mindmap", None, "sơ đồ tư duy cần nút gốc có label và ít nhất một nhánh con"
+    code = extract_mermaid(raw)
+    problem = mermaid_problem(code)
+    return ("mermaid", code, "") if not problem else ("mermaid", code, problem)
+
+
 async def generate_diagram(meeting_id: int, prompt_request: str,
                            context_text: str = "", data_text: str = "") -> Dict[str, Any]:
+    """Sơ đồ tư duy kiểu NotebookLM (mặc định) hoặc Mermaid khi nội dung cần mũi tên luồng / tuần tự."""
     set_meeting(meeting_id, "sơ đồ")
     user_prompt = (f"Yêu cầu vẽ sơ đồ: {prompt_request}\n\nDữ liệu tra cứu nội bộ:\n{data_text or '(không có)'}\n\n"
                    f"Nội dung cuộc họp:\n{context_text}")
     system = with_skill(DIAGRAM_SYSTEM, "diagram")
-    mermaid_code, problem = "", ""
+    kind, value, problem = "mermaid", "", ""
     for attempt in range(2):
         raw = await _call_llm(system, user_prompt if not problem else
-                              f"{user_prompt}\n\nMã lần trước bị lỗi: {problem}. Hãy sửa và trả về mã Mermaid hợp lệ.",
-                              max_tokens=2500)
-        mermaid_code = extract_mermaid(raw)
-        problem = mermaid_problem(mermaid_code)
+                              f"{user_prompt}\n\nMã lần trước bị lỗi: {problem}. Hãy sửa và trả về đúng định dạng "
+                              "(JSON sơ đồ tư duy, hoặc mã Mermaid hợp lệ trong khối ```mermaid).",
+                              max_tokens=5000)
+        kind, value, problem = _parse_diagram_reply(raw)
         if not problem:
             break
     if problem:
         raise RuntimeError(f"Sơ đồ chưa hợp lệ: {problem}")
+    if kind == "mindmap":
+        content = json.dumps(value, ensure_ascii=False)
+        title = f"Sơ đồ: {value['title'][:60]}"
+    else:
+        content = value
+        title = f"Sơ đồ: {diagram_title(value) or prompt_request[:50]}"
+    aid = db.save_artifact(meeting_id=meeting_id, kind="diagram", title=title, content=content,
+                           prompt_trigger=prompt_request)
+    return {"id": aid, "kind": "diagram", "title": title, "content": content}
 
-    title = f"Sơ đồ: {diagram_title(mermaid_code) or prompt_request[:50]}"
-    aid = db.save_artifact(
-        meeting_id=meeting_id,
-        kind="diagram",
-        title=title,
-        content=mermaid_code,
-        prompt_trigger=prompt_request
-    )
-    return {"id": aid, "kind": "diagram", "title": title, "content": mermaid_code}
+
+# ------------------------------------------------------------ lời thuyết trình cho sơ đồ, dashboard ---
+def _content_kind(obj: Dict[str, Any]) -> str:
+    return obj.get("type") if obj.get("type") in ("mindmap", "mermaid") else "dashboard"
+
+
+def normalize_walkthrough(obj: Dict[str, Any], steps: Any) -> List[Dict[str, str]]:
+    """Lời thuyết trình từng bước [{"target", "text"}]. target: mã nút (sơ đồ tư duy), nhãn nút (Mermaid),
+    "kpis" / "chart:i" / "highlights" (dashboard). Bước trỏ tới thứ không có thì giữ lời, bỏ target."""
+    if not isinstance(steps, list) or not isinstance(obj, dict):
+        return []
+    kind = _content_kind(obj)
+    if kind == "mindmap":
+        valid = {k: k for k in mindmap_index(obj)}
+    elif kind == "mermaid":
+        valid = {_fold(lab): lab for lab in mermaid_labels(obj.get("code", ""))}
+    else:
+        valid = {f"chart:{i}": f"chart:{i}" for i in range(len(obj.get("charts") or []))}
+        if obj.get("kpis"):
+            valid["kpis"] = "kpis"
+        if obj.get("highlights"):
+            valid["highlights"] = "highlights"
+    out = []
+    for s in steps[:14]:
+        if not isinstance(s, dict):
+            continue
+        text = _clean_text(s.get("text") or s.get("script") or s.get("say"), 900)
+        if not text:
+            continue
+        raw = str(s.get("target") or s.get("node") or s.get("id") or "").strip()
+        key = _fold(raw) if kind == "mermaid" else raw.lower().replace(" ", "")
+        if kind == "mindmap":
+            key = raw
+        out.append({"target": valid.get(key, ""), "text": text})
+    return out
+
+
+def has_walkthrough(art: Optional[Dict[str, Any]]) -> bool:
+    if not art:
+        return False
+    if art.get("kind") == "diagram":
+        return bool(load_diagram(art.get("content", "")).get("walkthrough"))
+    if art.get("kind") == "dashboard":
+        d = normalize_dashboard(_json_from_text(art.get("content", "")))
+        return bool(d and d.get("walkthrough"))
+    return False
+
+
+def dump_content(kind: str, obj: Dict[str, Any]) -> str:
+    """Nội dung đã chuẩn hóa -> chuỗi lưu DB (Mermaid kèm lời thuyết trình lưu dạng JSON)."""
+    if kind == "diagram" and obj.get("type") == "mermaid" and not obj.get("walkthrough"):
+        return obj.get("code", "")
+    return json.dumps(obj, ensure_ascii=False)
+
+
+WALK_SYSTEM = """Bạn soạn lời để trợ lý cuộc họp ĐỌC TO khi thuyết trình {what} đang chiếu trên màn hình chung.
+Mỗi bước gắn với một phần trên màn hình (target); phần đó được làm nổi bật trong lúc trợ lý đọc.
+
+Trả về MỘT JSON, không kèm chữ nào khác: {"steps": [{"target": "...", "text": "lời đọc"}]}
+{targets}
+
+Quy tắc:
+- 4-9 bước, mỗi bước 1-3 câu (25-70 từ), văn nói tự nhiên, xưng "em", gọi người nghe "anh chị".
+- Bước đầu giới thiệu tổng quan; các bước sau đi theo thứ tự trên màn hình; bước cuối chốt điều cần nhớ hoặc việc cần làm.
+- Nói ra thông tin thật: tên người, con số, hạn chót, quyết định. Chỉ dùng nội dung trên màn hình và trong cuộc họp, không bịa.
+- Đừng chỉ đọc lại nhãn: giải thích ý nghĩa, so sánh, nêu kết luận.
+- Người chưa rõ tên (nhãn "Người nói N") thì nói theo vai trò hoặc "người nói 1"; không ghép thành "anh Người nói 1".
+- Không markdown, không gạch đầu dòng, không dùng gạch dài. Tiền viết gọn để đọc to (2,5 tỷ đồng hoặc 1.800.000.000đ),
+  ngày dd/mm/yyyy."""
+
+_WALK_TARGETS = {
+    "mindmap": ('một sơ đồ tư duy', 'target là mã nút trong ngoặc vuông của sơ đồ (n0 là gốc). Bước đầu target "n0"; mỗi '
+                'nhánh cấp 1 một bước theo thứ tự (target là mã nhánh đó), nói gộp các ý con quan trọng của nhánh.'),
+    "mermaid": ("một sơ đồ luồng", "target là nhãn của nút đang nói tới, viết đúng như trong danh sách nhãn; đi theo "
+                "luồng chính rồi tới các nhánh rẽ."),
+    "dashboard": ("một dashboard số liệu", 'target là "kpis" (dãy chỉ số), "chart:0", "chart:1"... (biểu đồ theo thứ '
+                  'tự trên màn hình) hoặc "highlights" (các điểm kết luận). Mỗi biểu đồ một bước.'),
+}
+
+
+def _dash_brief(d: Dict[str, Any]) -> str:
+    charts = []
+    for i, c in enumerate(d.get("charts") or []):
+        item = {"target": f"chart:{i}", "type": c.get("type"), "title": c.get("title"), "unit": c.get("unit"),
+                "note": c.get("note")}
+        if c.get("type") == "table":
+            item.update(columns=c.get("columns"), rows=(c.get("rows") or [])[:12])
+        else:
+            item.update(labels=(c.get("labels") or [])[:24],
+                        series=[{"name": s.get("name"), "data": (s.get("data") or [])[:24]} for s in c.get("series") or []])
+        charts.append(item)
+    return json.dumps({"title": d.get("title"), "subtitle": d.get("subtitle"), "kpis": d.get("kpis"), "charts": charts,
+                       "highlights": d.get("highlights")}, ensure_ascii=False)
+
+
+async def generate_walkthrough(art: Dict[str, Any], context_text: str = "") -> Dict[str, Any]:
+    """Lời thuyết trình cho sơ đồ / dashboard: trả về nội dung đã chuẩn hóa kèm "walkthrough"."""
+    if art.get("kind") == "diagram":
+        obj = load_diagram(art.get("content", ""))
+    elif art.get("kind") == "dashboard":
+        obj = normalize_dashboard(_json_from_text(art.get("content", "")))
+        if obj is None:
+            raise RuntimeError("Dashboard không đọc được")
+    else:
+        raise ValueError("Chỉ soạn lời thuyết trình cho sơ đồ và dashboard")
+    kind = _content_kind(obj)
+    what, targets = _WALK_TARGETS[kind]
+    if kind == "mindmap":
+        screen = mindmap_outline(obj)
+    elif kind == "mermaid":
+        screen = f"{obj.get('code', '')[:4000]}\n\nDanh sách nhãn nút: {json.dumps(mermaid_labels(obj.get('code', '')), ensure_ascii=False)}"
+    else:
+        screen = _dash_brief(obj)
+    prompt = (f"## {art.get('title', '')} - nội dung trên màn hình\n{screen}\n\n"
+              f"## Nội dung cuộc họp\n{(context_text or '(chưa có)')[-8000:]}")
+    system = WALK_SYSTEM.replace("{what}", what).replace("{targets}", targets)
+    data = _json_from_text(await _call_llm(system, prompt, max_tokens=2500))
+    steps = normalize_walkthrough(obj, data.get("steps") if isinstance(data, dict) else None)
+    if len(steps) < 2:
+        raise RuntimeError("AI chưa soạn được lời thuyết trình")
+    out = dict(obj)
+    out["walkthrough"] = steps
+    return out
+
+
+# ------------------------------------------------------------ giải thích một ý trong sơ đồ ---
+EXPLAIN_SYSTEM = """Bạn là trợ lý cuộc họp của UrBox, xưng "em", gọi người nghe "anh chị". Người dùng vừa chọn một ý trong sơ đồ
+đang chiếu và muốn nghe em giải thích. Giải thích ý đó trong 2-4 câu (tối đa 80 từ) để ĐỌC TO:
+- Ý này nghĩa là gì trong nhánh của nó; cuộc họp đã nói gì về nó (ai nói, con số, hạn chót, quyết định); điều gì còn chưa
+  rõ hoặc cần chốt.
+- Chỉ dùng thông tin trong cuộc họp, sơ đồ và dữ liệu đi kèm. Cuộc họp chưa nhắc tới thì nói "Trong cuộc họp chưa nhắc tới
+  ý này", rồi giải thích ngắn theo hiểu biết chung và nói rõ đó là hiểu biết chung.
+- Người chưa rõ tên (nhãn "Người nói N") thì nói theo vai trò hoặc "người nói 1"; không ghép thành "anh Người nói 1".
+- Văn nói tự nhiên, không markdown, không gạch đầu dòng, không dùng gạch dài. Tiền viết gọn để đọc to (2,5 tỷ đồng hoặc
+  1.800.000.000đ), ngày dd/mm/yyyy."""
+
+
+def diagram_node(dg: Dict[str, Any], node: str = "", label: str = "") -> Optional[Dict[str, Any]]:
+    """Ý được chọn: {"key", "label", "path", "detail", "children"}; key là mã nút (sơ đồ tư duy) hoặc nhãn đã bỏ dấu."""
+    if dg.get("type") == "mindmap":
+        idx = mindmap_index(dg)
+        e = idx.get(node)
+        if e is None and label:
+            want = _fold(label)
+            e = next((v for v in idx.values() if _fold(v["node"]["label"]) == want), None)
+        if e is None:
+            return None
+        n = e["node"]
+        return {"key": n["id"], "label": n["label"], "path": e["path"], "detail": n.get("detail", ""),
+                "children": [c["label"] for c in n.get("children") or []]}
+    lab = _clean_text(label or node, 120)
+    if not lab:
+        return None
+    return {"key": _fold(lab), "label": lab, "path": [lab], "detail": "", "children": []}
+
+
+async def explain_node(dg: Dict[str, Any], picked: Dict[str, Any], context_text: str = "") -> str:
+    """Giải thích một ý trong sơ đồ, bám nội dung cuộc họp (để đọc to)."""
+    screen = mindmap_outline(dg, 4000) if dg.get("type") == "mindmap" else dg.get("code", "")[:3000]
+    prompt = (f"## Sơ đồ trên màn hình\n{screen}\n\n## Ý người dùng chọn\n{' > '.join(picked['path'])}"
+              + (f"\nGhi chú trong sơ đồ: {picked['detail']}" if picked.get("detail") else "")
+              + (f"\nCác ý con: {', '.join(picked['children'])}" if picked.get("children") else "")
+              + f"\n\n## Nội dung cuộc họp\n{(context_text or '(chưa có)')[-9000:]}")
+    text = await _call_llm(EXPLAIN_SYSTEM, prompt, max_tokens=500)
+    text = re.sub(r"[*`#]+", "", text or "")              # bỏ ký hiệu markdown, đọc to cho tự nhiên
+    text = re.sub(r"[_>|]+", " ", text)
+    text = re.sub(r"^\s*[-•]\s+", "", text, flags=re.M)
+    return re.sub(r"\s+([,.;:!?])", r"\1", _clean_text(text, 1200))
 
 
 # ==============================================================================
@@ -1253,11 +1588,15 @@ def normalize_dashboard(data: Any) -> Optional[Dict[str, Any]]:
         charts.append(item)
     if not kpis and not charts:
         return None
-    return {"title": str(data.get("title") or "Dashboard").strip()[:100],
-            "subtitle": str(data.get("subtitle") or "").strip()[:180],
-            "kpis": kpis, "charts": charts[:6],
-            "highlights": [str(h).strip()[:220] for h in (data.get("highlights") or []) if str(h).strip()][:5],
-            "source": str(data.get("source") or "").strip()[:200]}
+    out = {"title": str(data.get("title") or "Dashboard").strip()[:100],
+           "subtitle": str(data.get("subtitle") or "").strip()[:180],
+           "kpis": kpis, "charts": charts[:6],
+           "highlights": [str(h).strip()[:220] for h in (data.get("highlights") or []) if str(h).strip()][:5],
+           "source": str(data.get("source") or "").strip()[:200]}
+    steps = normalize_walkthrough(out, data.get("walkthrough"))     # lời thuyết trình đã soạn (nếu có)
+    if steps:
+        out["walkthrough"] = steps
+    return out
 
 
 def _data_prompt(prompt_request: str, context_text: str, data_text: str, facts: Optional[Dict[str, Any]]) -> str:
@@ -1368,6 +1707,30 @@ async def _refine_slides(meeting_id: int, art: Dict[str, Any], user_feedback: st
     return out
 
 
+MINDMAP_REFINE_SYSTEM = """Bạn sửa sơ đồ tư duy (JSON) theo yêu cầu của người dùng trong cuộc họp, giữ nguyên những phần không được
+nhắc tới. Trả về MỘT JSON, không kèm chữ nào khác:
+{"chat_message": "1 câu nói em đã sửa gì", "mindmap": {"title": "...", "root": {"label", "detail", "tone", "children": [...]}}}
+mindmap là sơ đồ ĐẦY ĐỦ sau khi sửa. Nhãn ngắn (tối đa 8 từ), tiếng Việt, không dùng gạch dài."""
+
+
+async def _refine_mindmap(meeting_id: int, art: Dict[str, Any], user_feedback: str,
+                          dg: Dict[str, Any]) -> Dict[str, Any]:
+    prompt = (f"## Sơ đồ hiện tại (JSON):\n{json.dumps({'title': dg['title'], 'root': dg['root']}, ensure_ascii=False)}\n\n"
+              f"## Yêu cầu chỉnh sửa:\n\"{user_feedback}\"")
+    data = _json_from_text(await _call_llm(MINDMAP_REFINE_SYSTEM, prompt, max_tokens=5000))
+    data = data if isinstance(data, dict) else {}
+    mm = normalize_mindmap(data.get("mindmap") if isinstance(data.get("mindmap"), dict) else data)
+    if mm is None:
+        raise RuntimeError("AI chưa sửa được sơ đồ, anh chị nói rõ hơn cần sửa nhánh nào, sửa gì")
+    mm.pop("walkthrough", None)                    # cấu trúc đã đổi: lời thuyết trình cũ không còn khớp
+    new_aid = db.save_artifact(meeting_id=meeting_id, kind="diagram", title=art.get("title", ""),
+                               content=json.dumps(mm, ensure_ascii=False), prompt_trigger=user_feedback,
+                               parent_id=art["id"])
+    out = db.get_artifact(new_aid)
+    out["chat_message"] = str(data.get("chat_message") or "").strip() or f"Đã sửa sơ đồ: {user_feedback}"
+    return out
+
+
 async def co_design_refine(meeting_id: int, artifact_id: int, user_feedback: str,
                            slide_index: Optional[int] = None) -> Dict[str, Any]:
     """Cập nhật bản thiết kế theo đàm thoại trực tiếp với người dùng (Co-Design Loop)."""
@@ -1383,6 +1746,11 @@ async def co_design_refine(meeting_id: int, artifact_id: int, user_feedback: str
     kind = art.get("kind", "web_design")
     cur_content = art.get("content", "")
     title = art.get("title", "")
+    if kind == "diagram":
+        dg = load_diagram(cur_content)
+        if dg["type"] == "mindmap":
+            return await _refine_mindmap(meeting_id, art, user_feedback, dg)
+        cur_content = dg["code"]             # Mermaid kèm lời thuyết trình: chỉ đưa mã cho AI sửa
 
     prompt = f"""
 ## Loại thiết kế: {kind}

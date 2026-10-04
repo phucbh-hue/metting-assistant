@@ -166,6 +166,20 @@ _TOPIC_ANY = re.compile(r"(?:quay|trở|chuyển|mở|xem|sang|qua|tới|đến)
 _TOPIC_TAIL = re.compile(r"(\s+(coi|nha|nhé|nhá|giúp anh|giúp chị|giúp em|giùm|đi|ạ|với|hồi nãy|lúc nãy|khi nãy|cho anh|cho chị))+$", re.I)
 _CREATE_DECK = re.compile(r"\b(tạo|làm|soạn|viết|dựng|chuẩn bị|thiết kế)\s+(giúp\s+|cho\s+)?(anh\s+|chị\s+|em\s+)?(một\s+|1\s+)?"
                           r"(cái\s+|bộ\s+|bài\s+)?(slide|bài thuyết trình|bài trình bày)", re.I)
+# "vẽ sơ đồ quy trình rồi thuyết trình luôn": tạo mới rồi mới trình bày, không trình bày cái đang chiếu
+_CREATE_VISUAL = re.compile(r"\b(vẽ|tạo|làm|soạn|dựng|lập|thiết kế)\s+(giúp\s+|cho\s+|hộ\s+)?(anh\s+|chị\s+|em\s+|mình\s+)?"
+                            r"(một\s+|1\s+)?(cái\s+|bộ\s+|bản\s+)?(lại\s+)?(sơ đồ|mind\s*map|dashboard|biểu đồ|bảng số liệu)", re.I)
+# "thuyết trình sơ đồ này", "giải thích cái dashboard", "đi qua biểu đồ giúp anh": trình bày nội dung theo loại
+_PRESENT_KIND = re.compile(r"(trình bày|giải thích|thuyết minh|đi qua|điểm qua|nói qua|đọc)\s*(giúp|cho|hộ|giùm|lại|qua|hết|luôn)?\s*"
+                           r"(anh|chị|em|mình|tôi|cả nhà)?\s*(về\s*)?(cái\s*|bộ\s*)?(nội dung\s*)?((của|trong|trên)\s*)?(cái\s*)?"
+                           r"(sơ đồ|mind\s*map|dashboard|biểu đồ|bảng số liệu)", re.I)
+_KIND_IN_TEXT = re.compile(r"(sơ đồ|mind\s*map|dashboard|biểu đồ|bảng số liệu|slide)", re.I)
+_PRESENT_KINDS = {"sơ đồ": "diagram", "mind map": "diagram", "mindmap": "diagram", "dashboard": "dashboard",
+                  "biểu đồ": "dashboard", "bảng số liệu": "dashboard", "slide": "slides"}
+# "giải thích nhánh nạp voucher", "nói rõ hơn ý banner mobile": giải thích một ý của sơ đồ đang chiếu
+_EXPLAIN = re.compile(r"^(?:em\s+)?(?:hãy\s+)?(giải thích|nói rõ|nói thêm|làm rõ|diễn giải|nói kỹ|phân tích)\s*"
+                      r"(?:giúp|cho|hộ|giùm)?\s*(?:anh|chị|em|mình|tôi)?\s*(?:thêm|rõ|kỹ|chi tiết)?\s*(?:hơn)?\s*"
+                      r"(?:về\s*)?(?:cái\s*)?(?:(nhánh|nút|ý|mục|phần|node|ô|bước)\s+)?(.+)$", re.I)
 _WEB_SEARCH = re.compile(r"\b(search|sớt|xớt|research|google)\b|(tra cứu|tìm kiếm|tìm|kiểm tra|xem)\s*(giúp|giùm|hộ|cho)?\s*(anh|chị|em|mình|tôi)?\s*"
                          r"(coi|xem|thử)?\s*(trên\s*)?(mạng|internet|google|web|online)", re.I)
 _WEB_FILLER = re.compile(r"^(em\s+)?(hãy\s+)?(search|sớt|xớt|research|tra cứu|tìm kiếm|tìm|kiểm tra|xem|google)\s*(trên\s*)?(mạng|internet|google|web|online)?"
@@ -267,10 +281,10 @@ _PAST_REF = re.compile(r"\bcũ\b|lúc nãy|hồi nãy|khi nãy|ban nãy|vừa n�
                        r"dựng|mở|xem|nói|đưa)", re.I)
 _FIRST_REF = re.compile(r"đầu tiên|lúc đầu|ban đầu", re.I)
 _TIME_REF = re.compile(r"\bcũ\b|lúc nãy|hồi nãy|khi nãy|ban nãy|vừa nãy|vừa rồi|trước đó|lúc trước|hồi trước", re.I)
-_RECALL_KIND = re.compile(r"(bộ slide|slides|slide|slai|xlai|sơ đồ|bản vẽ|biểu đồ|dashboard|báo cáo|biên bản|trang web|"
-                          r"giao diện|bản thiết kế)", re.I)
+_RECALL_KIND = re.compile(r"(bộ slide|slides|slide|slai|xlai|sơ đồ|bản vẽ|mind map|mindmap|biểu đồ|dashboard|báo cáo|biên bản|"
+                          r"trang web|giao diện|bản thiết kế)", re.I)
 RECALL_KINDS = {"bộ slide": "slides", "slides": "slides", "slide": "slides", "slai": "slides", "xlai": "slides",
-                "sơ đồ": "diagram", "bản vẽ": "diagram", "biểu đồ": "dashboard", "dashboard": "dashboard",
+                "sơ đồ": "diagram", "bản vẽ": "diagram", "mind map": "diagram", "mindmap": "diagram", "biểu đồ": "dashboard", "dashboard": "dashboard",
                 "báo cáo": "report", "biên bản": "minutes", "trang web": "web_design", "giao diện": "web_design",
                 "bản thiết kế": "web_design"}
 # từ đệm của câu nói (đã bỏ dấu): không dùng để tìm theo chủ đề
@@ -358,7 +372,8 @@ def stage_intent(command: str) -> Optional[Dict[str, Any]]:
     if m and _NAV_VERB.search(c):
         k = re.search(_KIND_ALT, c)
         return {"action": "version", "n": int(m.group(1)), "kind": KIND_WORDS.get(k.group(1), "slides") if k else None}
-    creating = bool(_CREATE_DECK.search(c))      # "làm slide thuyết trình về Q4" là soạn slide, không phải trình bày
+    # "làm slide thuyết trình về Q4", "vẽ sơ đồ rồi trình bày luôn": tạo mới, không phải trình bày cái đang chiếu
+    creating = bool(_CREATE_DECK.search(c) or _CREATE_VISUAL.search(c))
     if _OPEN_FILE.search(c):
         return {"action": "open_file", "query": c}
     if _WEB_SEARCH.search(c):
@@ -368,13 +383,22 @@ def stage_intent(command: str) -> Optional[Dict[str, Any]]:
     for action, pat in _STAGE_PATTERNS:
         if action == "present" and creating:
             continue
-        if pat.search(c):
+        if pat.search(c) or (action == "present" and _PRESENT_KIND.search(c)):
             if action == "present" and _TIME_REF.search(c):
                 km = _RECALL_KIND.search(c)
                 if km:      # "thuyết trình lại cái slide hồi nãy": mở lại bộ đó rồi mới trình bày
                     return {"action": "present", "recall": {"action": "back", "kind": RECALL_KINDS[km.group(1).lower()],
                                                             "past": True}}
+            if action == "present":
+                km = _KIND_IN_TEXT.search(c)
+                kind = _PRESENT_KINDS.get(re.sub(r"\s+", " ", km.group(1).lower())) if km else None
+                return {"action": "present", "kind": kind} if kind in ("diagram", "dashboard") else {"action": "present"}
             return {"action": action}
+    m = _EXPLAIN.match(c)
+    if m and (m.group(2) or m.group(1).lower() != "phân tích"):     # "phân tích X" chung chung để trợ lý xử lý
+        q = _TOPIC_TAIL.sub("", m.group(3)).strip(" ?.!,")
+        if q:
+            return {"action": "explain", "query": q, "loose": not m.group(2)}
     m = re.search(rf"{_SLIDE}\s*(?:số\s*)?(\d{{1,2}}|{'|'.join(_NUM_WORDS)})(?!\w)", c)
     if m and not m.group(1).isdigit() and topic_words(c[m.end():]):
         m = None          # "slide hai cách hiểu về khai phóng" là tên slide, không phải slide số 2
@@ -480,13 +504,15 @@ Cách làm việc:
  "artifact_prompt": "mô tả chi tiết cho bộ tạo sản phẩm: dùng dữ liệu nào, biểu đồ/bố cục nào",
  "report_markdown": "nội dung chi tiết để HIỂN THỊ trên màn hình (markdown: gạch đầu dòng, bảng)",
  "show": {"artifact_id": id trong "Nội dung đã có", "slide": số slide tính từ 1 hoặc null} hoặc null,
+ "present": true khi người dùng muốn em thuyết trình luôn sản phẩm vừa tạo hoặc vừa mở lại, ngược lại false,
  "chat_response": "1-3 câu nói thành tiếng"}
 
 Chọn sản phẩm (artifact_needed):
 - "dashboard": vẽ chart, biểu đồ, báo cáo số liệu, thống kê, KPI, dashboard kiểu Power BI.
 - "report": báo cáo nhanh, tổng hợp, review, liệt kê bằng chữ.
 - "slides": slide, bài trình bày. "web_design": trang web, giao diện, landing page, prototype.
-- "diagram": sơ đồ, luồng xử lý, kiến trúc. "minutes": biên bản cuộc họp.
+- "diagram": sơ đồ (mặc định là sơ đồ tư duy kiểu NotebookLM, bấm vào ý nào cũng nghe giải thích được), quy trình,
+  luồng xử lý, kiến trúc. "minutes": biên bản cuộc họp.
 - null: câu hỏi ngắn trả lời được ngay trong 1-3 câu.
 
 Màn hình trình chiếu (em điều khiển được):
@@ -512,7 +538,7 @@ _KIND_HINTS = [
     ("dashboard", r"dashboard|power\s*bi|chart|chạt|biểu\s*đồ|đồ\s*thị|kpi|thống\s*kê|số\s*liệu"),
     ("slides", r"slide|trình\s*chiếu|thuyết\s*trình|bài\s*trình\s*bày|deck"),
     ("web_design", r"trang\s*web|website|landing|giao\s*diện|\bweb\b|html|prototype"),
-    ("diagram", r"sơ\s*đồ|diagram|flowchart|luồng"),
+    ("diagram", r"sơ\s*đồ|diagram|flowchart|luồng|mind\s*map|tư\s*duy"),
     ("minutes", r"biên\s*bản|minutes"),
     ("report", r"báo\s*cáo|report|tổng\s*hợp|review|liệt\s*kê"),
 ]
@@ -969,7 +995,8 @@ async def think_and_act(meeting_id: int, prompt: str, segments: List[Dict[str, A
     db.record_interaction(meeting_id=meeting_id, prompt=prompt, trigger=trigger, thinking="\n".join(thinking_trace),
                           tool_calls=tool_results, response={"chat_response": chat, "artifact": art, "show": show_out})
     return {"chat_response": chat, "report": report_md, "thinking": "\n".join(thinking_trace),
-            "tool_calls": tool_results, "insights": insights, "artifact": art, "show": show_out}
+            "tool_calls": tool_results, "insights": insights, "artifact": art, "show": show_out,
+            "present": plan.get("present") is True and (art is not None or show_out is not None)}
 
 
 def _pick_show(value: Any, library: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:

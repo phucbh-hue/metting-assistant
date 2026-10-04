@@ -122,6 +122,17 @@ class OpenFileReq(BaseModel):
     path: str = Field(..., min_length=3, max_length=1000)
 
 
+class ExplainReq(BaseModel):
+    artifact_id: int
+    node: str = Field("", max_length=200)       # mã nút của sơ đồ tư duy
+    label: str = Field("", max_length=300)      # nhãn nút (sơ đồ Mermaid)
+    req: str = Field("", max_length=80)         # mã yêu cầu để trang không áp dụng hai lần
+
+
+class PresentReq(BaseModel):
+    artifact_id: Optional[int] = None           # trống = nội dung đang chiếu
+
+
 class PresentModeReq(BaseModel):
     mode: str                                   # auto | script | human
     source: Optional[str] = None                # notes | file | text
@@ -363,6 +374,30 @@ async def open_file(mid: int, req: OpenFileReq):
         events.append(q.get_nowait())
     s.dispose_if_idle()
     return {"events": events, "artifact_id": s.stage["artifact_id"]}
+
+
+@app.post("/api/meetings/{mid}/explain")
+async def explain_diagram_node(mid: int, req: ExplainReq):
+    """Bấm vào một ý của sơ đồ: trợ lý giải thích ý đó theo nội dung cuộc họp (đọc to và hiện bên cạnh sơ đồ)."""
+    s = await _session_or_404(mid)
+    try:
+        res = await s.explain_node(req.artifact_id, node=req.node, label=req.label, req=req.req)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e).strip("'\""))
+    s.dispose_if_idle()
+    return res
+
+
+@app.post("/api/meetings/{mid}/present")
+async def present_on_stage(mid: int, req: PresentReq):
+    """Nút Thuyết trình cho sơ đồ, dashboard: soạn lời nếu chưa có rồi trình bày từng phần (slide do trang tự đọc)."""
+    s = await _session_or_404(mid)
+    art = await s._get_artifact(req.artifact_id if req.artifact_id is not None else s.stage["artifact_id"])
+    if not art or art.get("kind") not in ("diagram", "dashboard"):
+        raise HTTPException(status_code=400, detail="Chỉ thuyết trình được sơ đồ hoặc dashboard ở đây")
+    await s.present_artifact(art)
+    s.dispose_if_idle()
+    return {"ok": True, "artifact_id": s.stage["artifact_id"]}
 
 
 @app.post("/api/meetings/{mid}/present-mode")
@@ -929,7 +964,9 @@ async def assistant_command(mid: int, payload: Dict[str, Any]):
     if not text:
         raise HTTPException(status_code=400, detail="Thiếu nội dung câu lệnh")
     s = await _session_or_404(mid)
-    needs_llm = llm.stage_intent(text) is None and not (s.stage["artifact_id"] and llm.is_edit_command(text))
+    intent = llm.stage_intent(text)
+    loose = bool(intent and intent.get("action") == "explain" and intent.get("loose"))   # có thể là câu hỏi chung
+    needs_llm = (intent is None or loose) and not (s.stage["artifact_id"] and llm.is_edit_command(text))
     if needs_llm and not artifacts.llm_available():
         raise HTTPException(status_code=503, detail=NO_LLM)
     q = await s.subscribe()

@@ -5,8 +5,9 @@
 - DB in-memory (không đụng MongoDB thật), không cần mic, không gọi Soniox.
 - Vector giọng là dữ liệu tổng hợp (không phải giọng người thật).
 - Mặc định tắt LLM để không tốn phí; thêm --with-llm để AI tự đoán tên người nói từ hội thoại.
-- Có sẵn một bộ slide mẫu và một dashboard mẫu (dữ liệu Jira giả lập): gõ "chuyển slide", "quay lại", "nhắc bài"
-  vào ô lệnh (các lệnh này chạy không cần LLM), hoặc để kịch bản tự gọi "Jarvis ơi, chuyển slide".
+- Có sẵn một bộ slide mẫu, một dashboard mẫu (dữ liệu Jira giả lập) và một sơ đồ tư duy mẫu: gõ "chuyển slide",
+  "quay lại", "nhắc bài", "thuyết trình sơ đồ" vào ô lệnh (các lệnh này chạy không cần LLM), bấm vào một ý của sơ đồ
+  để nghe ghi chú của ý đó, hoặc để kịch bản tự gọi "Jarvis ơi, chuyển slide".
 Mở http://127.0.0.1:8090 rồi vào cuộc họp "Demo: Review Sprint 39" để xem transcript chạy trực tiếp.
 """
 import argparse
@@ -75,6 +76,26 @@ def demo_deck():
          "bullets": ["Hương: xong bản mobile trước thứ sáu", "Tuấn: chạy thử staging cuối tuần",
                      "Marketing: gửi số liệu đổi voucher", "Cả nhóm: review lại vào thứ hai"], "notes": ""},
     ]}
+
+
+def demo_mindmap():
+    """Sơ đồ tư duy mẫu (kiểu NotebookLM) khớp với kịch bản họp; bấm vào ý nào cũng có ghi chú để đọc khi không có AI."""
+    return artifacts.normalize_mindmap({"type": "mindmap", "title": "Review Sprint 39", "root": {
+        "label": "Review Sprint 39", "detail": "Hai mục chính: tiến độ Mega Sale 10.10 và hạ tầng; chốt lịch review thứ hai.",
+        "children": [
+            {"label": "Mega Sale 10.10", "tone": "doing", "detail": "Hương báo cáo: landing page xong bản desktop, mobile còn banner.",
+             "children": [{"label": "Desktop đã xong", "tone": "done"},
+                          {"label": "Banner mobile trước thứ sáu", "tone": "risk",
+                           "detail": "Bản mobile còn phần banner, Hương hẹn xong thứ sáu."},
+                          {"label": "Cần số liệu đổi voucher theo ngày", "tone": "todo",
+                           "detail": "Marketing cần để làm báo cáo cho đối tác."}]},
+            {"label": "Hiệu năng backend", "tone": "done", "detail": "Tuấn đã cache danh mục voucher bằng Redis.",
+             "children": [{"label": "Redis cache danh mục voucher"}, {"label": "Độ trễ còn 80 ms", "tone": "done"}]},
+            {"label": "DevOps: Postgres 18", "tone": "doing", "detail": "Đang review connection pool, cuối tuần chạy thử staging.",
+             "children": [{"label": "Review connection pool"}, {"label": "Staging cuối tuần", "tone": "todo"}]},
+            {"label": "Việc cần làm", "tone": "todo", "detail": "Ba việc đã có người nhận, review lại vào thứ hai.",
+             "children": [{"label": "Hương: mobile trước thứ sáu"}, {"label": "Tuấn: staging cuối tuần"},
+                          {"label": "Cả nhóm: review thứ hai"}]}]}})
 
 
 def demo_dashboard():
@@ -159,6 +180,7 @@ async def replay():
                                 agenda=["Tiến độ Mega Sale 10.10", "Migrate Postgres 18"])
         s = await live.get_session(mid)
         db.save_artifact(mid, "dashboard", "Dashboard: Tiến độ Sprint 39", json.dumps(demo_dashboard(), ensure_ascii=False))
+        db.save_artifact(mid, "diagram", "Sơ đồ: Review Sprint 39", json.dumps(demo_mindmap(), ensure_ascii=False))
         deck_id = db.save_artifact(mid, "slides", "Slide: Review Sprint 39", json.dumps(demo_deck(), ensure_ascii=False))
         await s.stage_action("show", artifact_id=deck_id)
         print(f"\n>>> Demo sẵn sàng: http://{args.host}:{args.port}/#/m/{mid}\n", flush=True)

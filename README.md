@@ -3,16 +3,54 @@
 Trợ lý cuộc họp nội bộ: bóc băng thời gian thực (Soniox), **tự tách và nhận ra từng người nói** (CAM++ 192D),
 AI đoán tên người nói từ hội thoại, trợ lý (tên gọi tùy chọn, mặc định Jarvis) có khuôn mặt và giọng nói,
 tra cứu dữ liệu nội bộ qua MCP, soạn và trình chiếu slide theo lệnh giọng nói, nhắc bài, tự lập biên bản,
-vẽ sơ đồ, dựng dashboard số liệu, báo cáo nhanh và phác thảo trang web, mở PDF / PowerPoint / Word trên máy để
+vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải thích), dựng dashboard số liệu, báo cáo nhanh và phác thảo trang web, mở PDF / PowerPoint / Word trên máy để
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng tiếng Việt chạy ngay trên máy (miễn phí), vừa làm
 vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.11 - cập nhật 03/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.12 - cập nhật 04/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
 
-## 1. Có gì mới ở bản 3.11: cài trên máy mới bằng 3 lệnh, nhập khóa và kết nối gói ngay trên giao diện
+## 1. Có gì mới ở bản 3.12: sơ đồ tư duy kiểu NotebookLM, bấm vào ý để nghe giải thích, thuyết trình sơ đồ và dashboard
+
+### Sơ đồ tư duy kiểu NotebookLM
+- "Bông ơi, vẽ sơ đồ..." mặc định ra sơ đồ tư duy: chủ đề ở gốc bên trái, các nhánh tỏa sang phải, mỗi nhánh một màu, ý
+  ngắn gọn kèm nhãn trạng thái (Rủi ro, Cần làm, Đang làm, Đã xong, Ý tưởng). AI viết sẵn 1-2 câu ghi chú cho gốc và các
+  nhánh chính, lấy từ nội dung cuộc họp.
+- Bấm vòng tròn ở mép phải một ý để mở / thu nhánh (đang thu thì hiện số ý con). Kéo nền để di chuyển, cuộn chuột để phóng
+  to, nút Vừa khung, Mở hết, Thu gọn. Bàn phím: Enter để nghe giải thích, mũi tên phải / trái để mở / thu, lên / xuống để
+  sang ý bên cạnh.
+- Chỉ khi nội dung cần mũi tên nối các bước có rẽ nhánh và gộp nhánh, tương tác giữa hệ thống theo thời gian (API,
+  webhook), lược đồ dữ liệu, lịch Gantt (hoặc người dùng nói rõ flowchart / sequence / ERD / Gantt) thì AI mới vẽ Mermaid
+  như trước. Sơ đồ cũ (Mermaid) vẫn mở được.
+
+### Bấm vào một ý để trợ lý giải thích
+- Bấm vào một ý (trên màn hình trình chiếu hoặc khung Sơ đồ bên phải): khung giải thích mở bên cạnh sơ đồ, ghi đường dẫn
+  từ gốc tới ý đó, ghi chú có sẵn, rồi trợ lý giải thích 2-4 câu theo nội dung cuộc họp (ai nói, con số, hạn chót, điều
+  còn chưa rõ) và đọc to. Ý đó cùng đường dẫn tới nó sáng lên. Nút Nghe lại, Hỏi thêm về ý này.
+- Nói cũng được: "Bông ơi, giải thích nhánh nạp voucher", "nói rõ hơn ý banner mobile" khi đang chiếu sơ đồ. Câu chung
+  chung ("giải thích vì sao doanh số giảm") mà không khớp ý nào trong sơ đồ thì trợ lý trả lời như câu hỏi thường.
+- Lời giải thích được nhớ theo từng ý của từng sơ đồ: bấm lại không gọi AI lần nữa. Không có AI thì trợ lý đọc ghi chú có
+  sẵn trong sơ đồ.
+- Sơ đồ Mermaid cũng bấm vào từng nút để nghe giải thích được.
+
+### Thuyết trình sơ đồ và dashboard
+- Nút Thuyết trình trên màn hình trình chiếu (hoặc nói "thuyết trình sơ đồ này", "trình bày dashboard giúp anh", "đi qua
+  biểu đồ"): lần đầu AI soạn lời thuyết trình theo cuộc họp (lưu thành bản mới, lần sau trình bày ngay), rồi trợ lý đi qua
+  từng phần và đọc to:
+  - Sơ đồ tư duy: giới thiệu tổng quan, rồi từng nhánh lớn; nhánh đang nói mở ra, các nhánh khác thu lại và mờ đi, khung
+    nhìn tự đưa nhánh đó vào giữa.
+  - Dashboard: các chỉ số, từng biểu đồ, rồi điểm kết luận; phần đang nói sáng viền vàng, biểu đồ vẽ lại từ đầu cho người
+    xem dõi theo, phần khác mờ đi.
+  - Sơ đồ Mermaid: làm sáng từng nút đang nói tới.
+- "Vẽ sơ đồ quy trình rồi thuyết trình luôn", "làm dashboard doanh số rồi trình bày luôn": trợ lý tạo xong rồi trình bày
+  ngay. Đang chiếu slide mà nói "thuyết trình sơ đồ" thì trợ lý mở sơ đồ mới nhất rồi trình bày.
+- Không có AI thì trợ lý đọc theo cấu trúc (tên nhánh, ghi chú, giá trị cao nhất của từng biểu đồ, điểm kết luận).
+- Chạy thử ngày 04/10/2026 với Claude Sonnet 5.5 trên một cuộc họp mẫu 7 câu: vẽ sơ đồ (19 ý, 4 nhánh) mất khoảng 19 giây,
+  giải thích một ý khoảng 3 giây, soạn lời thuyết trình 6 bước khoảng 5 giây; 4 lượt gọi AI tốn 0,062 USD.
+
+## 2. Bản 3.11: cài trên máy mới bằng 3 lệnh, nhập khóa và kết nối gói ngay trên giao diện
 
 ### Cài trên máy mới
 Cần sẵn: Node.js 20 trở lên, pnpm (`corepack enable pnpm` hoặc https://pnpm.io), Python 3.10 trở lên (khuyên 3.12) và git.
@@ -59,7 +97,7 @@ Mở Cài đặt (biểu tượng bánh răng), rồi:
 - Ứng dụng biết đăng nhập xong khi tệp đăng nhập của công cụ được ghi mới, hoặc công cụ báo thành công; tối đa 6 phút.
 - Claude Code, Codex, Gemini CLI cài riêng trong `node_modules` của dự án được tìm tự động, không cần cài toàn cục.
 
-## 2. Bản 3.10: quay lại nội dung đã trình bày, màu UrBox, linh vật linh động
+## 3. Bản 3.10: quay lại nội dung đã trình bày, màu UrBox, linh vật linh động
 
 ### Quay lại nội dung đã trình bày
 Nguyên nhân (xem lại cuộc họp #41, #42): câu "quay lại cái bộ slide mà em vừa trình bày trước đó" không khớp lệnh nào nên
@@ -101,7 +139,7 @@ phóng" còn bị hiểu thành slide số 2.
   theo âm lượng, hai tay luân phiên nhấn ý. Có kết quả: nhảy ăn mừng và tung hoa giấy tím vàng hồng.
 - Áp dụng cho cả linh vật UrBox, hộp quà và khuôn mặt tròn; máy bật giảm chuyển động thì chỉ giữ chớp mắt và miệng.
 
-## 3. Bản 3.9: mở tài liệu, kịch bản, gói đăng ký, chọn model
+## 4. Bản 3.9: mở tài liệu, kịch bản, gói đăng ký, chọn model
 
 ### Mở tài liệu trên máy để trình bày
 - Nói "<tên gọi> ơi, mở file kế hoạch Q4 trong Downloads", "mở cái PowerPoint mega sale", "chiếu file pdf báo cáo tháng 9"
@@ -188,7 +226,7 @@ bản) đi qua nguồn đã chọn:
     mô hình nếu chưa tắt trong cài đặt quyền riêng tư của gói. Nội dung cuộc họp nội bộ nên đi qua gói doanh nghiệp
     (Claude Team / Enterprise, ChatGPT Business / Enterprise, Google Workspace) hoặc API key.
 
-## 4. Bản 3.8: tối ưu chi phí, linh vật UrBox
+## 5. Bản 3.8: tối ưu chi phí, linh vật UrBox
 
 ### Tối ưu chi phí gọi AI
 Phạm vi: mọi chỗ gọi Claude của ứng dụng, chạy trên Claude API của Anthropic, model `claude-opus-4-7`. Dữ liệu: nhật ký
@@ -242,7 +280,7 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
   nói, nơ lắc, vẫy tay khi nghe.
 - Đổi qua lại giữa linh vật UrBox, hộp quà và khuôn mặt tròn: Cài đặt > Hình đại diện trợ lý.
 
-## 5. Bản 3.7: lưu trên máy khi mất Atlas, tra cứu bằng Playwright
+## 6. Bản 3.7: lưu trên máy khi mất Atlas, tra cứu bằng Playwright
 
 ### Không còn mất lịch sử cuộc họp khi Atlas lỗi
 - Nguyên nhân mất lịch sử: máy hiện không kết nối được MongoDB Atlas (Atlas từ chối bắt tay TLS, thường do IP của máy chưa
@@ -277,11 +315,11 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
 - Chạy `run.cmd` khi server cũ vẫn còn ở cửa sổ khác: hỏi dừng server cũ (Y) hay giữ server cũ và chỉ mở trình duyệt
   (N, mặc định sau 20 giây), thay vì báo lỗi trùng cổng 8080.
 
-## 6. Bản 3.6: cổng gọi AI, xuất dữ liệu
+## 7. Bản 3.6: cổng gọi AI, xuất dữ liệu
 
 ### Tra cứu trên mạng
 - "UrBox ơi, em search giúp anh coi giá vàng đang bao nhiêu": trợ lý tìm trên web (bản 3.6 dùng công cụ web_search của
-  Claude, tối đa 5 lượt tìm; từ bản 3.7 mặc định dùng trình duyệt, xem mục 5), viết báo cáo "Tra cứu: ..." gồm kết luận, chi tiết, liên hệ với cuộc họp và danh sách nguồn, chiếu lên
+  Claude, tối đa 5 lượt tìm; từ bản 3.7 mặc định dùng trình duyệt, xem mục 6), viết báo cáo "Tra cứu: ..." gồm kết luận, chi tiết, liên hệ với cuộc họp và danh sách nguồn, chiếu lên
   màn hình, đọc kết luận. Yêu cầu và thời điểm tra cứu được ghi ở cuối báo cáo. Cần `ANTHROPIC_API_KEY`.
 - Một lần tra cứu tốn khoảng 25.000-30.000 token vào (kết quả web tính vào input), tức khoảng 0,15-0,20 USD với Opus 4.7.
 
@@ -296,7 +334,7 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
   hồ sơ người nói, sản phẩm AI, nhật ký gọi AI. Dùng khi server đang chạy DB tạm (in-memory) để không mất dữ liệu, hoặc để
   gửi cho người phân tích lỗi nhận diện người nói.
 
-## 7. Bản 3.4: trợ lý thuyết trình, nội dung bám sát, MCP data server
+## 8. Bản 3.4: trợ lý thuyết trình, nội dung bám sát, MCP data server
 
 ### Trợ lý tự thuyết trình
 - "Thanh ơi, thuyết trình giúp anh" / "present slide" / "tự chuyển slide và nói nội dung bên trong": trợ lý đọc nội dung
@@ -336,7 +374,7 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
   thành người nói mới ngay, không bị gộp vào người đang nói; câu ngắn theo người vừa được nhận ra bằng giọng.
 - Model trợ lý mặc định đổi sang `claude-opus-4-7` (`CLAUDE_MODEL` trong `.env`); muốn nhanh và rẻ hơn dùng `claude-sonnet-5-5`.
 
-## 8. Bản 3.3: slide theo lời trình bày, ghép lệnh bị cắt
+## 9. Bản 3.3: slide theo lời trình bày, ghép lệnh bị cắt
 
 ### Slide tự chuyển theo lời trình bày
 
@@ -365,7 +403,7 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
 - Đo trên 5 cuộc họp thật có nhãn đúng gần đúng: 87,0% -> 89,2% câu (#37: 91% -> 100%, #36: 83% -> 86%), các
   cuộc họp khác không đổi.
 
-## 9. Bản 3.2: kết quả luôn hiện ra, dashboard, giọng đọc chạy trên máy
+## 10. Bản 3.2: kết quả luôn hiện ra, dashboard, giọng đọc chạy trên máy
 
 ### Trợ lý trả lời có nội dung thật và luôn hiện kết quả
 
@@ -412,7 +450,7 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
   Mô phỏng trên #31: bấm một lần ở câu đầu của khách mời thì đúng 95% câu.
 - Giới hạn: giọng phát qua loa máy tính bị kênh âm thanh làm giống nhau; họp trực tiếp với người thật tách tốt hơn.
 
-## 10. Bản 3.1: khuôn mặt, màn hình trình chiếu, tên gọi
+## 11. Bản 3.1: khuôn mặt, màn hình trình chiếu, tên gọi
 
 ### Trợ lý có khuôn mặt, giọng nói và màn hình trình chiếu
 
@@ -420,7 +458,7 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
   trình chiếu: bên trái là khuôn mặt trợ lý, bên phải là nội dung đang trình bày (slide, biên bản, sơ đồ, giao diện).
 - Khuôn mặt đổi theo trạng thái: **chờ**, **lắng nghe** (vòng sáng co giãn theo âm lượng mic), **suy nghĩ**
   (vòng nét đứt xoay, mắt nhìn lên), **nói** (miệng mấp máy theo lời). Nét mặt vui hoặc lo lắng theo nội dung.
-- Giọng nói: từ bản 3.2 dùng giọng Piper chạy trên máy chủ (xem mục 9); giọng của trình duyệt chỉ là dự phòng.
+- Giọng nói: từ bản 3.2 dùng giọng Piper chạy trên máy chủ (xem mục 10); giọng của trình duyệt chỉ là dự phòng.
   Giọng trực tuyến "Online (Natural)" của Microsoft Edge chỉ được dùng khi người dùng bấm cho phép (xem mục Lưu ý
   dữ liệu). Nút "Giọng nói" hoặc phím V để bật/tắt; bấm vào khuôn mặt để trợ lý dừng nói.
 - Khi trợ lý đang nói, mic gửi khoảng lặng thay cho âm thanh để giọng trợ lý không lọt vào transcript
@@ -468,7 +506,7 @@ chờ câu yêu cầu tiếp theo trong 8 giây. Câu chỉ nhắc tới tên (v
 - Menu "..." của cuộc họp -> **Phân tích lại người nói**: chạy lại bộ phân vai trên toàn bộ câu đã lưu.
   Tên đã đặt được giữ cho người nói xuất hiện sớm nhất trong nhóm.
 
-## 11. Bản 3.0: sửa lỗi phân biệt người nói
+## 12. Bản 3.0: sửa lỗi phân biệt người nói
 
 | Vấn đề ở bản 2.5 | Nguyên nhân gốc | Cách sửa |
 |---|---|---|
@@ -486,7 +524,7 @@ Khác:
 - Nội dung do AI sinh ra được làm sạch (DOMPurify) và chạy trong iframe sandbox cô lập.
 - Kết thúc cuộc họp trả về ngay, biên bản lập ở chế độ nền.
 
-## 12. Cách phân biệt người nói
+## 13. Cách phân biệt người nói
 
 ```
 Soniox (nhãn người nói theo phiên)  ─┐
@@ -506,7 +544,7 @@ CAM++ (vector giọng 192D mỗi câu)  ──┘          │               │
 
 Ngưỡng được đo trên dữ liệu thật của model CAM++: cùng người câu ngắn 0.3-0.6, câu dài 0.6-0.87; khác người 0.0-0.4.
 
-## 13. Cấu trúc thư mục
+## 14. Cấu trúc thư mục
 
 ```
 meeting-assistant/
@@ -546,9 +584,9 @@ meeting-assistant/
 └── static/
 ```
 
-## 14. Chạy
+## 15. Chạy
 
-Máy mới: `pnpm mst-urbox install`, `pnpm mst-urbox build`, `pnpm mst-urbox web` (xem mục 1).
+Máy mới: `pnpm mst-urbox install`, `pnpm mst-urbox build`, `pnpm mst-urbox web` (xem mục 2).
 Máy đã cài: bấm đúp **`run.cmd`** (hoặc gõ `run` trong terminal) -> server chạy ở http://127.0.0.1:8080 và tự mở
 trình duyệt; lần đầu tự tải giọng đọc tiếng Việt nếu chưa có. `run.cmd demo` chạy bản demo dữ liệu giả lập ở cổng 8090.
 Chạy tay:
@@ -582,7 +620,7 @@ màu riêng -> bấm **Đặt tên** (hoặc xác nhận gợi ý của AI, tick
 Trình bày: nhờ trợ lý soạn slide (hoặc chọn tab **Slide**) -> bấm biểu tượng toàn màn hình ở khung AI ->
 nói "<tên gọi> ơi, chuyển slide", "nhắc bài"... Cần giọng Tiếng Việt cài trên Windows để trợ lý nói thành tiếng.
 
-## 15. Cấu hình
+## 16. Cấu hình
 
 Xem `.env.example`. Các biến quan trọng:
 
@@ -616,7 +654,7 @@ Xem `.env.example`. Các biến quan trọng:
 | `DECK_ASSETS_DIR` | `data/deck_assets` | Nơi lưu ảnh từng trang đã dựng |
 | `MCP_SERVER_CMD` / `MCP_SERVER_URL` | | Trỏ trợ lý tới MCP server thật (stdio hoặc http); không đặt thì dùng dữ liệu tại chỗ |
 
-## 16. API chính
+## 17. API chính
 
 | Method | Đường dẫn | Mô tả |
 |---|---|---|
@@ -643,6 +681,8 @@ Xem `.env.example`. Các biến quan trọng:
 | GET | `/api/library?q=` | Tệp PDF / PowerPoint / Word / Markdown trong các thư mục tài liệu |
 | GET/PUT | `/api/settings/library` | Thư mục tài liệu (`{"dirs": [...]}`), có LibreOffice hay không |
 | POST | `/api/meetings/{id}/open-file` | Mở một tệp trong thư mục tài liệu lên màn hình trình chiếu, rồi hỏi cách trình bày |
+| POST | `/api/meetings/{id}/explain` | Giải thích một ý của sơ đồ (`artifact_id`, `node` hoặc `label`), đọc to và hiện bên cạnh sơ đồ |
+| POST | `/api/meetings/{id}/present` | Thuyết trình sơ đồ / dashboard đang chiếu: soạn lời nếu chưa có rồi trình bày từng phần |
 | POST | `/api/meetings/{id}/present-mode` | Trả lời cách trình bày: `{"mode": "auto" \| "human" \| "script", "source": "notes" \| "file" \| "text", "path", "text"}` |
 | GET | `/api/deck-assets/{key}/{name}` | Ảnh từng trang của tài liệu đã mở |
 | GET | `/api/llm/providers` | Các nguồn AI: đã cài / đã đăng nhập / model |
@@ -656,14 +696,14 @@ Xem `.env.example`. Các biến quan trọng:
 | WS | `/ws/meeting/{id}/audio` | PCM16 16kHz mono từ mic (một thiết bị ghi mỗi cuộc họp) |
 | WS | `/ws/meeting/{id}/events` | Sự kiện: `segment`, `segments_relabeled`, `speakers`, `speakers_split`, `interim`, `identity_suggestion`, `ai_progress`, `ai_say`, `ai_insights`, `stage_state`, `stage_command`, `stage_prompt`... |
 
-## 17. Lưu ý dữ liệu
+## 18. Lưu ý dữ liệu
 
 - `data/local_db/` (lưu trên máy khi mất kết nối Atlas) chứa nội dung cuộc họp và vector giọng nói: không chia sẻ, không đưa
   lên git (đã có trong `.gitignore`). Xóa thư mục này khi chưa đồng bộ sẽ mất các cuộc họp trong đó.
 - Mở tài liệu: chỉ quét tên tệp trong các thư mục tài liệu; nội dung tệp chỉ được đọc khi người dùng mở, và được gửi cho
   nguồn AI đang chọn khi nhờ trợ lý tự viết lời hoặc ghép kịch bản. Ảnh trang lưu ở `data/deck_assets/` trên máy.
 - Gói đăng ký (Claude.ai, ChatGPT, Gemini): nội dung cuộc họp đi theo điều khoản của gói đó, không phải điều khoản API.
-  Xem lưu ý ở mục 3 trước khi dùng cho cuộc họp có nội dung nhạy cảm.
+  Xem lưu ý ở mục 4 trước khi dùng cho cuộc họp có nội dung nhạy cảm.
 - Tra cứu trên mạng gửi từ khóa tìm kiếm tới Bing và mở các trang kết quả; không đưa nội dung cuộc họp vào từ khóa.
   Nội dung trang đã đọc (cùng tối đa 2.000 ký tự cuối của cuộc họp để liên hệ) được gửi cho AI để tóm tắt.
 

@@ -526,6 +526,7 @@ class MeetingSession:
         self._matchers: Dict[int, Any] = {}          # artifact_id -> (slides, SlideMatcher)
         self._follow_texts: Deque[str] = deque(maxlen=2)
         self._art_cache: Dict[int, Dict[str, Any]] = {}
+        self._explain_cache: Dict[Tuple[int, str], str] = {}     # (sơ đồ, ý) -> lời giải thích: bấm lại không gọi AI
         self._queue: asyncio.Queue = asyncio.Queue()
         self._db_queue: asyncio.Queue = asyncio.Queue()
         self._workers: List[asyncio.Task] = []
@@ -1097,6 +1098,14 @@ class MeetingSession:
             await self.stage_action("show", artifact_id=aid, slide=slide or 0)
         elif res.get("artifact"):
             await self.stage_action("show", artifact_id=res["artifact"]["id"])
+        if res.get("present"):                        # "vẽ sơ đồ rồi thuyết trình luôn"
+            art = await self._get_artifact(self.stage["artifact_id"])
+            if art and art.get("kind") in ("diagram", "dashboard"):
+                await self.present_artifact(art)
+            elif self._slides_of(art):
+                await self.emit({"type": "stage_command", "action": "open"})
+                await self._ensure_scripts(art)
+                await self.emit({"type": "stage_present", "action": "start", "slide": self.stage["slide"]})
 
     # ------------------------------------------------- màn hình trình bày ---
     STAGE_ACTIONS = ("show", "next", "prev", "goto", "topic", "back", "follow")
@@ -1401,6 +1410,16 @@ class MeetingSession:
             return True
         if action == "web_search":
             return await self._web_research(intent.get("query", ""))
+        if action == "explain":                       # "giải thích nhánh nạp voucher" khi đang chiếu sơ đồ
+            art = await self._get_artifact(self.stage["artifact_id"])
+            if not art or art.get("kind") != "diagram":
+                return False                          # không có sơ đồ trên màn hình: để trợ lý hiểu câu này
+            found = self._find_node(artifacts.load_diagram(art.get("content", "")), intent.get("query", ""))
+            if found is None or found[1] < (0.6 if intent.get("loose") else 0.34):
+                return False
+            await self.emit({"type": "stage_command", "action": "open"})
+            await self.explain_node(art["id"], node=found[0]["key"], label=found[0]["label"])
+            return True
         if action == "back" and (intent.get("kind") or intent.get("query") or intent.get("first") or intent.get("past")):
             return await self._recall(intent)
         if action == "back" and not self.stage["history"] and await self._recall({"action": "back", "past": True}):
@@ -1416,11 +1435,18 @@ class MeetingSession:
                 if not cur or cur.get("kind") != rc.get("kind"):   # đang chiếu đúng loại đó thì trình bày luôn cái đang chiếu
                     await self._recall(rc, announce=False)
             art = await self._get_artifact(self.stage["artifact_id"])
-            if not self._slides_of(art):
-                if art and art.get("kind") == "dashboard":          # thuyết trình dashboard: đọc KPI và điểm chính
-                    await self.emit({"type": "stage_command", "action": "open"})
-                    await self.emit({"type": "stage_present", "action": "start", "slide": 0})
+            want = intent.get("kind")
+            if want in ("diagram", "dashboard") and (not art or art.get("kind") != want):
+                same = [a for a in await asyncio.to_thread(db.get_artifacts, self.id) if a.get("kind") == want]
+                if not same:          # "thuyết trình sơ đồ" mà chưa có sơ đồ nào
+                    await self._say(f"Chưa có {llm.KIND_NAMES.get(want, want)} nào để em thuyết trình. Anh chị nhờ em "
+                                    f"{'vẽ sơ đồ' if want == 'diagram' else 'dựng dashboard'} trước nhé.", "concerned")
                     return True
+                art = max(same, key=lambda a: (a.get("created_at") or 0, a.get("id") or 0))
+            if art and art.get("kind") in ("diagram", "dashboard"):   # sơ đồ, dashboard: đi qua từng phần, phần đó sáng lên
+                await self.present_artifact(art)
+                return True
+            if not self._slides_of(art):
                 decks = [a for a in await asyncio.to_thread(db.get_artifacts, self.id) if a.get("kind") == "slides"]
                 if not decks:
                     await self._say("Chưa có bộ slide nào để em thuyết trình. Anh chị nhờ em soạn slide trước nhé.", "concerned")
@@ -1505,6 +1531,88 @@ class MeetingSession:
         self._art_cache[aid] = new_art
         await self.emit({"type": "artifact_updated", "artifact": new_art})
         await self.stage_action("show", artifact_id=aid, slide=self.stage["slide"])
+
+    # ------------------------------------------------------- thuyết trình sơ đồ, dashboard ---
+    async def present_artifact(self, art: Dict[str, Any]):
+        """Đưa sơ đồ / dashboard lên màn hình, soạn lời thuyết trình nếu chưa có, rồi trình bày từng phần."""
+        await self.emit({"type": "stage_command", "action": "open"})
+        if self.stage["artifact_id"] != art["id"]:
+            await self.stage_action("show", artifact_id=art["id"])
+        art = await self._ensure_walkthrough(art)
+        await self.emit({"type": "stage_present", "action": "start", "slide": 0, "artifact_id": art["id"]})
+
+    async def _ensure_walkthrough(self, art: Dict[str, Any]) -> Dict[str, Any]:
+        """Sơ đồ / dashboard chưa có lời thuyết trình: nhờ AI soạn theo cuộc họp rồi lưu thành bản mới.
+        Không có AI thì trang tự đọc theo cấu trúc (nhánh, biểu đồ, điểm chính)."""
+        if artifacts.has_walkthrough(art) or not artifacts.llm_available():
+            return art
+        name = "sơ đồ" if art.get("kind") == "diagram" else "dashboard"
+        await self._progress(f"Dạ, em soạn lời trình bày cho {name} này trước, chờ em chút ạ.", "status")
+        artifacts.set_meeting(self.id, "lời thuyết trình")
+        try:
+            obj = await artifacts.generate_walkthrough(art, llm._context_lines(self.segments))
+        except Exception as e:
+            log.warning("meeting.live: soạn lời thuyết trình %s lỗi: %s", name, e)
+            return art
+        aid = await asyncio.to_thread(db.save_artifact, self.id, art["kind"], art["title"],
+                                      artifacts.dump_content(art["kind"], obj), "lời thuyết trình", art["id"])
+        new_art = await asyncio.to_thread(db.get_artifact, aid)
+        self._art_cache[aid] = new_art
+        await self.emit({"type": "artifact_updated", "artifact": new_art})
+        await self.stage_action("show", artifact_id=aid)
+        return new_art
+
+    # ------------------------------------------------------- giải thích một ý trong sơ đồ ---
+    @staticmethod
+    def _find_node(dg: Dict[str, Any], query: str) -> Optional[Tuple[Dict[str, Any], float]]:
+        """Ý của sơ đồ khớp nhất với câu nói ("nhánh nạp voucher") và mức khớp 0-1."""
+        if dg.get("type") == "mindmap":
+            cands = [(e["node"].get("id"), e["node"]["label"], e["node"].get("detail", ""))
+                     for e in artifacts.mindmap_index(dg).values()]
+        else:
+            cands = [("", lab, "") for lab in artifacts.mermaid_labels(dg.get("code", ""))]
+        best, best_key = None, (0.0, 0)
+        for nid, label, detail in cands:
+            s1, h1 = llm.topic_score(query, label)
+            s2, h2 = llm.topic_score(query, f"{label} {detail}")
+            key = (max(s1, s2 * 0.8), max(h1, h2))
+            if key > best_key:
+                best, best_key = (nid, label), key
+        if best is None or best_key[1] == 0:
+            return None
+        picked = artifacts.diagram_node(dg, node=best[0] or "", label=best[1])
+        return (picked, best_key[0]) if picked else None
+
+    async def explain_node(self, aid: int, node: str = "", label: str = "", req: str = "") -> Dict[str, Any]:
+        """Người dùng bấm vào một ý của sơ đồ (hoặc nói "giải thích nhánh X"): trợ lý giải thích bằng giọng nói,
+        bám nội dung cuộc họp. Lời giải thích nhớ theo (sơ đồ, ý) để bấm lại không gọi AI."""
+        art = await self._get_artifact(aid)
+        if not art or art.get("kind") != "diagram":
+            raise KeyError(f"Không tìm thấy sơ đồ {aid}")
+        dg = artifacts.load_diagram(art.get("content", ""))
+        picked = artifacts.diagram_node(dg, node=node, label=label)
+        if picked is None:
+            raise KeyError("Không tìm thấy ý này trong sơ đồ")
+        base = {"artifact_id": aid, "node": picked["key"], "label": picked["label"], "path": picked["path"], "req": req}
+        await self.emit({"type": "node_explaining", **base})
+        ck = (aid, picked["key"])
+        text, cached = self._explain_cache.get(ck), True
+        if text is None:
+            cached = False
+            if artifacts.llm_available():
+                artifacts.set_meeting(self.id, "giải thích sơ đồ")
+                try:
+                    text = await artifacts.explain_node(dg, picked, llm._context_lines(self.segments, max_chars=12000))
+                except Exception as e:
+                    log.warning("meeting.live: giải thích ý '%s' lỗi: %s", picked["label"], e)
+            if not text:     # không có AI hoặc AI lỗi: đọc ghi chú có sẵn trong sơ đồ
+                text = picked.get("detail") or (f"{picked['label']}. Ý này gồm: {', '.join(picked['children'])}."
+                                                 if picked.get("children") else f"{picked['label']}.")
+            else:
+                self._explain_cache[ck] = text
+        out = {**base, "text": text, "cached": cached}
+        await self.emit({"type": "node_explained", **out})
+        return out
 
     async def _web_research(self, query: str) -> bool:
         """"Search giúp anh giá vàng hôm nay": tìm trên web, lưu thành báo cáo có nguồn, chiếu lên màn hình và đọc kết luận."""
