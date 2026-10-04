@@ -241,6 +241,21 @@ class PresentDialogTests(TempLibrary, unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.events("ai_ask_done"))
         self.assertIsNone(self.s._ask)
 
+    async def test_present_this_page_asks_how_then_presents_only_that_page(self):
+        await self.open_pdf()
+        await self.s.stage_action("goto", slide=1)
+        await self.s._handle_ai_activation("thuyết trình trang này", "Bông ơi, thuyết trình trang này", "Bông")
+        self.assertTrue(self.events("ai_ask"))                  # tệp mở từ máy: vẫn hỏi cách trình bày
+
+        async def fake(system, prompt, max_tokens=4000):
+            return json.dumps({"scripts": [("lời trình bày trang " * 10).strip()] * 2}, ensure_ascii=False)
+        with mock.patch.object(artifacts, "_call_llm", fake), mock.patch.object(artifacts, "llm_available", lambda: True):
+            await self.s._handle_ai_activation("em tự trình bày đi", "Bông ơi, em tự trình bày đi", "Bông")
+        start = [e for e in self.events("stage_present") if e["action"] == "start"]
+        self.assertEqual((start[-1]["slide"], start[-1].get("only")), (1, True))
+        self.assertEqual(self.s.stage["slide"], 1)
+        self.assertIsNone(self.s._present_scope)
+
     async def test_answer_window_ignores_other_talk(self):
         await self.open_pdf()
         calls = []

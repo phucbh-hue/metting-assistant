@@ -64,6 +64,23 @@ class StageIntentTests(unittest.TestCase):
         self.assertTrue(llm.is_edit_command("sửa slide này thêm số liệu doanh thu"))
         self.assertFalse(llm.is_edit_command("slide này đẹp quá"))
 
+    def test_present_one_slide_or_to_the_end(self):
+        """"Quay lại slide 9" rồi "thuyết trình trong slide này": chỉ trình bày slide đó, không chạy tới cuối bộ."""
+        cases = {
+            "hãy thuyết trình trong slide này": {"action": "present", "scope": "one"},
+            "đọc lại slide hiện tại giúp anh": {"action": "present", "scope": "one"},
+            "chỉ thuyết trình slide này thôi": {"action": "present", "scope": "one"},
+            "trình bày lại slide 9": {"action": "present", "slide": 8, "scope": "one"},
+            "thuyết trình slide số chín": {"action": "present", "slide": 8, "scope": "one"},
+            "thuyết trình từ slide 9": {"action": "present", "slide": 8},
+            "thuyết trình từ đây đến hết": {"action": "present"},
+            "thuyết trình cả bộ slide": {"action": "present"},
+            "thuyết trình slide hai cách hiểu về khai phóng": {"action": "present"},
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(llm.stage_intent(text), expected)
+
 
 class StageSessionTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -138,6 +155,24 @@ class StageSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((start[0]["action"], start[0]["slide"]), ("start", 0))
         await self.s._handle_ai_activation("dừng thuyết trình", "Bông ơi, dừng thuyết trình", "Bông")
         self.assertEqual([e["action"] for e in self.events("stage_present")], ["stop"])
+
+    async def test_present_only_the_slide_on_screen(self):
+        await self.s.stage_action("show", artifact_id=self.aid)
+        await self.s._handle_ai_activation("quay lại slide 3", "Bông ơi, quay lại slide 3", "Bông")
+        self.assertEqual(self.s.stage["slide"], 2)
+        self.events()
+
+        async def starts(cmd):
+            await self.s._handle_ai_activation(cmd, f"Bông ơi, {cmd}", "Bông")
+            return [e for e in self.events("stage_present") if e["action"] == "start"]
+        st = await starts("hãy thuyết trình trong slide này")
+        self.assertEqual((st[0]["slide"], st[0].get("only")), (2, True))
+        st = await starts("trình bày lại slide 2")
+        self.assertEqual((self.s.stage["slide"], st[0]["slide"], st[0].get("only")), (1, 1, True))
+        st = await starts("thuyết trình từ slide 3")
+        self.assertEqual((self.s.stage["slide"], st[0]["slide"], st[0].get("only")), (2, 2, None))
+        st = await starts("thuyết trình giúp anh")
+        self.assertEqual((st[0]["slide"], st[0].get("only")), (2, None))
 
     async def test_present_without_any_deck(self):
         db._get_db()["ai_artifacts"].delete_many({})

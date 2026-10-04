@@ -1,6 +1,6 @@
 {
   "name": "urbox-meeting-copilot",
-  "version": "3.12.0",
+  "version": "3.12.1",
   "private": true,
   "description": "UrBox Meeting Copilot: trợ lý cuộc họp nội bộ (bóc băng, nhận người nói, trình chiếu, trợ lý AI)",
   "type": "module",

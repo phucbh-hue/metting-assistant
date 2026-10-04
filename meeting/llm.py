@@ -174,6 +174,12 @@ _PRESENT_KIND = re.compile(r"(trình bày|giải thích|thuyết minh|đi qua|đ
                            r"(anh|chị|em|mình|tôi|cả nhà)?\s*(về\s*)?(cái\s*|bộ\s*)?(nội dung\s*)?((của|trong|trên)\s*)?(cái\s*)?"
                            r"(sơ đồ|mind\s*map|dashboard|biểu đồ|bảng số liệu)", re.I)
 _KIND_IN_TEXT = re.compile(r"(sơ đồ|mind\s*map|dashboard|biểu đồ|bảng số liệu|slide)", re.I)
+# "thuyết trình trong slide này", "trình bày lại trang hiện tại", "chỉ slide này thôi": chỉ trình bày một slide
+_ONE_SLIDE = re.compile(rf"{_SLIDE}\s*(?:này|hiện\s*tại|hiện\s*giờ|đang\s*(?:chiếu|mở|xem|trình\s*chiếu)|đó)(?!\w)|"
+                        rf"(?:chỉ|riêng|mỗi)\s*(?:một\s*)?(?:cái\s*)?{_SLIDE}(?!\w)|(?:một|1)\s*(?:cái\s*)?{_SLIDE}\s*(?:này|thôi)", re.I)
+# "thuyết trình từ slide 5", "trình bày tiếp đến hết", "cả bộ slide": từ đó tới cuối bộ
+_TO_END = re.compile(rf"\btừ\s*(?:đây|{_SLIDE}|phần|chỗ này|đầu)|(?:đến|tới)\s*(?:hết|cuối)|hết\s*(?:bộ|các|cả|tất cả)|cả\s*bộ|"
+                     rf"toàn\s*bộ|tiếp\s*tục|(?:các|mấy|những|bộ)\s*{_SLIDE}", re.I)
 _PRESENT_KINDS = {"sơ đồ": "diagram", "mind map": "diagram", "mindmap": "diagram", "dashboard": "dashboard",
                   "biểu đồ": "dashboard", "bảng số liệu": "dashboard", "slide": "slides"}
 # "giải thích nhánh nạp voucher", "nói rõ hơn ý banner mobile": giải thích một ý của sơ đồ đang chiếu
@@ -352,6 +358,20 @@ def recall_like(text: str) -> bool:
     return bool(_RECALL_VERB.search((text or "").lower()))
 
 
+def _present_scope(c: str) -> Dict[str, Any]:
+    """Thuyết trình bộ slide: một slide ("slide này", "slide 9") hay từ một slide tới hết ("từ slide 9", "cả bộ")."""
+    out: Dict[str, Any] = {"action": "present"}
+    to_end = bool(_TO_END.search(c))
+    nm = re.search(rf"{_SLIDE}\s*(?:số\s*)?(\d{{1,2}}|{'|'.join(_NUM_WORDS)})(?!\w)", c)
+    if nm and not nm.group(1).isdigit() and topic_words(c[nm.end():]):
+        nm = None                      # "slide hai cách hiểu về khai phóng" là tên slide, không phải số
+    if nm:
+        out["slide"] = max(0, (int(nm.group(1)) if nm.group(1).isdigit() else _NUM_WORDS[nm.group(1)]) - 1)
+    if not to_end and (nm or _ONE_SLIDE.search(c)):
+        out["scope"] = "one"
+    return out
+
+
 def stage_intent(command: str) -> Optional[Dict[str, Any]]:
     """Nhận lệnh điều khiển màn hình trình bày từ câu nói (không cần gọi LLM)."""
     c = re.sub(r"\s+", " ", (command or "").lower()).strip(" .!?,")
@@ -392,7 +412,9 @@ def stage_intent(command: str) -> Optional[Dict[str, Any]]:
             if action == "present":
                 km = _KIND_IN_TEXT.search(c)
                 kind = _PRESENT_KINDS.get(re.sub(r"\s+", " ", km.group(1).lower())) if km else None
-                return {"action": "present", "kind": kind} if kind in ("diagram", "dashboard") else {"action": "present"}
+                if kind in ("diagram", "dashboard"):
+                    return {"action": "present", "kind": kind}
+                return _present_scope(c)
             return {"action": action}
     m = _EXPLAIN.match(c)
     if m and (m.group(2) or m.group(1).lower() != "phân tích"):     # "phân tích X" chung chung để trợ lý xử lý

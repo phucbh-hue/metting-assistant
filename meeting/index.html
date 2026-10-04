@@ -2606,7 +2606,7 @@ function avatarEvent(R, ev) {
     case 'ai_error': avSet('idle', 'concerned'); say('Em chưa làm được yêu cầu này.', { mood: 'concerned', caption: ev.text }); break;
     case 'stage_state': applyStage(ev.stage, ev.auto); break;
     case 'stage_command': avSet('idle', 'happy'); if (ev.action === 'open') openStage(true); else closeStage(); break;
-    case 'stage_present': if (ev.action === 'start') { hideAsk(); startPresent(ev.slide); } else stopPresent('Dạ, em dừng thuyết trình.'); break;
+    case 'stage_present': if (ev.action === 'start') { hideAsk(); startPresent(ev.slide, !!ev.only); } else stopPresent('Dạ, em dừng thuyết trình.'); break;
     case 'node_explaining':
       if (!ev.req || !XPL.applied.has(ev.req)) { avSet('thinking', 'neutral'); mmEach(ev.artifact_id, v => v.showExplain({ node: ev.node, label: ev.label, path: ev.path, loading: true })); }
       break;
@@ -3507,7 +3507,8 @@ async function presentOnServer(art) {
   } catch (e) { toast(e.message, 'err'); if (!PRESENT.on) startPresent(); }
   finally { if (!PRESENT.on) renderStageFrame(false, true); }
 }
-async function startPresent(fromSlide) {
+/** only: chỉ trình bày một slide (fromSlide) rồi dừng, không chuyển tiếp. */
+async function startPresent(fromSlide, only) {
   const R = S.room; const art = stageArtifact();
   if (!R || !art || !['slides', 'dashboard', 'diagram'].includes(art.kind)) { say('Chưa có bộ slide, sơ đồ hay dashboard nào trên màn hình để em thuyết trình.', { mood: 'concerned' }); return; }
   if (!STAGE.open) openStage(true);
@@ -3533,10 +3534,13 @@ async function startPresent(fromSlide) {
     }
     say(slideNarration(deck, i), { mood: 'happy', bubble: `Slide ${i + 1}/${deck.slides.length}: ${deck.slides[i].title}` });
     await voiceIdle();
-    if (!PRESENT.on || PRESENT.token !== token) break;
+    if (!PRESENT.on || PRESENT.token !== token || only) break;   // "thuyết trình slide này": chỉ một slide
     await new Promise(r => setTimeout(r, 900));          // ngắt nghỉ giữa hai slide, người nghe kịp xem
   }
-  if (PRESENT.on && PRESENT.token === token) { PRESENT.on = false; renderStageFrame(false); say('Em đã trình bày hết bộ slide. Anh chị cần em quay lại slide nào không ạ?', { mood: 'happy' }); }
+  if (PRESENT.on && PRESENT.token === token) {
+    PRESENT.on = false; renderStageFrame(false);
+    if (!only) say('Em đã trình bày hết bộ slide. Anh chị cần em quay lại slide nào không ạ?', { mood: 'happy' });
+  }
 }
 function stopPresent(message) {
   if (!PRESENT.on) return;

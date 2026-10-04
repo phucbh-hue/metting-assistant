@@ -7,7 +7,7 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng tiếng Việt chạy ngay trên máy (miễn phí), vừa làm
 vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.12 - cập nhật 04/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.12.1 - cập nhật 04/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
@@ -47,6 +47,11 @@ vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng 
 - "Vẽ sơ đồ quy trình rồi thuyết trình luôn", "làm dashboard doanh số rồi trình bày luôn": trợ lý tạo xong rồi trình bày
   ngay. Đang chiếu slide mà nói "thuyết trình sơ đồ" thì trợ lý mở sơ đồ mới nhất rồi trình bày.
 - Không có AI thì trợ lý đọc theo cấu trúc (tên nhánh, ghi chú, giá trị cao nhất của từng biểu đồ, điểm kết luận).
+- Bộ slide (bản 3.12.1): câu nhắc tới một slide thì trợ lý chỉ trình bày đúng slide đó rồi dừng, không chạy tới cuối bộ:
+  "thuyết trình trong slide này", "đọc lại slide hiện tại", "trình bày lại slide 9" (chuyển tới slide 9 rồi trình bày).
+  Muốn đi tiếp tới hết thì nói "thuyết trình từ slide 9", "thuyết trình từ đây đến hết", "thuyết trình cả bộ slide";
+  "thuyết trình giúp anh" vẫn trình bày từ slide đang chiếu tới hết như trước. Tệp mở từ máy chưa chọn cách trình bày thì
+  trợ lý vẫn hỏi trước, trả lời xong vẫn chỉ trình bày slide đã chọn.
 - Chạy thử ngày 04/10/2026 với Claude Sonnet 5.5 trên một cuộc họp mẫu 7 câu: vẽ sơ đồ (19 ý, 4 nhánh) mất khoảng 19 giây,
   giải thích một ý khoảng 3 giây, soạn lời thuyết trình 6 bước khoảng 5 giây; 4 lượt gọi AI tốn 0,062 USD.
 

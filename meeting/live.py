@@ -527,6 +527,7 @@ class MeetingSession:
         self._follow_texts: Deque[str] = deque(maxlen=2)
         self._art_cache: Dict[int, Dict[str, Any]] = {}
         self._explain_cache: Dict[Tuple[int, str], str] = {}     # (sơ đồ, ý) -> lời giải thích: bấm lại không gọi AI
+        self._present_scope: Optional[Dict[str, Any]] = None     # "thuyết trình slide này": nhớ qua câu hỏi cách trình bày
         self._queue: asyncio.Queue = asyncio.Queue()
         self._db_queue: asyncio.Queue = asyncio.Queue()
         self._workers: List[asyncio.Task] = []
@@ -1454,19 +1455,29 @@ class MeetingSession:
                 await self.stage_action("show", artifact_id=decks[0]["id"])
                 art = await self._get_artifact(self.stage["artifact_id"])
             await self.emit({"type": "stage_command", "action": "open"})
+            if intent.get("slide") is not None:       # "thuyết trình slide 9", "từ slide 9": tới đúng slide đó trước
+                n = len(self._slides_of(art))
+                want_slide = max(0, min(int(intent["slide"]), n - 1))
+                if self.stage["slide"] != want_slide:
+                    await self.stage_action("goto", slide=want_slide)
+            only = intent.get("scope") == "one"      # "thuyết trình slide này": chỉ trình bày một slide rồi dừng
+            scope = {"slide": self.stage["slide"], "only": only} if only or intent.get("slide") is not None else None
             deck = artifacts.load_deck(art.get("content", "")) or {}
             ans = llm.present_answer(intent.get("text", ""), explicit=True)
             if ans and ans.get("mode") == "auto" and (not artifacts.deck_is_file(deck) or deck.get("script_mode") == "auto"):
                 ans = None                            # "tự trình bày" bộ đã có lời / do AI soạn: trình bày như cũ, không soạn lại
             if ans:                                   # "trình bày theo kịch bản trong ghi chú": nói luôn cách trình bày
                 self._ask = {"kind": "present_mode", "artifact_id": art["id"], "until": time.monotonic() + ASK_S}
+                self._present_scope = scope
                 await self.answer_present(ans)
                 return True
             if artifacts.deck_is_file(deck) and not deck.get("script_mode"):
+                self._present_scope = scope
                 await self._ask_present_mode(art)     # tài liệu mở từ máy: hỏi tự trình bày hay theo kịch bản
                 return True
             await self._ensure_scripts(art)
-            await self.emit({"type": "stage_present", "action": "start", "slide": self.stage["slide"]})
+            await self.emit({"type": "stage_present", "action": "start", "slide": self.stage["slide"],
+                             **({"only": True} if only else {})})
             return True
         if action in ("follow_on", "follow_off"):
             await self.stage_action("follow", follow=action == "follow_on")
@@ -1716,6 +1727,7 @@ class MeetingSession:
         unit = "trang" if p.suffix.lower() in (".pdf", ".docx") else "slide"
         await self._say(f"Dạ, em mở \"{p.name}\" trong thư mục {p.parent.name or p.anchor}, gồm {n} {unit}.", quiet=True)
         ans = llm.present_answer(command, explicit=True) if command else None
+        self._present_scope = None                    # tệp vừa mở: trình bày từ trang đầu
         if ans:
             self._ask = {"kind": "present_mode", "artifact_id": art["id"], "until": time.monotonic() + ASK_S}
             await self.answer_present(ans)
@@ -1755,6 +1767,7 @@ class MeetingSession:
             return {"ok": False}
         n = len(deck["slides"])
         if ans.get("mode") == "human":                # người trong phòng tự trình bày: em chỉ chuyển slide theo lời
+            self._present_scope = None
             await self._ask_done()
             await self.stage_action("follow", follow=True)
             await self._say("Dạ, anh chị trình bày nhé. Em sẽ tự chuyển slide theo nội dung anh chị đang nói.", quiet=True)
@@ -1845,9 +1858,13 @@ class MeetingSession:
         self._art_cache[aid] = new_art
         await self.emit({"type": "artifact_updated", "artifact": new_art})
         await self.emit({"type": "stage_command", "action": "open"})
-        await self.stage_action("show", artifact_id=aid, slide=0)
+        scope, self._present_scope = self._present_scope, None      # "thuyết trình slide này" trước khi được hỏi
+        n = max(1, len(new_deck.get("slides") or []))
+        start = min(max(int(scope["slide"]), 0), n - 1) if scope else 0
+        await self.stage_action("show", artifact_id=aid, slide=start)
         await self._say(message, quiet=True)
-        await self.emit({"type": "stage_present", "action": "start", "slide": 0})
+        await self.emit({"type": "stage_present", "action": "start", "slide": start,
+                         **({"only": True} if scope and scope.get("only") else {})})
         return {"ok": True, "artifact_id": aid}
 
     async def _edit_on_stage(self, command: str):
