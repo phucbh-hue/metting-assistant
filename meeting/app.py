@@ -24,7 +24,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 import numpy as np  # noqa: E402
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
-from fastapi.responses import FileResponse, Response  # noqa: E402
+from fastapi.responses import FileResponse, Response, StreamingResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
@@ -112,6 +112,11 @@ class StageReq(BaseModel):
 class AssistantSettings(BaseModel):
     name: str
     aliases: List[str] = Field(default_factory=list)
+
+
+class TtsSettings(BaseModel):
+    engine: str = "auto"
+    voice: str = "Linh"
 
 
 class LibraryDirs(BaseModel):
@@ -816,8 +821,39 @@ async def export_meeting(mid: int):
 
 @app.get("/api/tts/status")
 async def tts_status():
-    """Giọng đọc tiếng Việt chạy trên máy (Piper) đã sẵn sàng chưa."""
+    """Giọng đọc đang dùng (Soniox hoặc Piper trên máy) và đã sẵn sàng chưa."""
     return tts.status()
+
+
+@app.get("/api/settings/tts")
+def get_tts_settings():
+    return {**tts.settings(), "active": tts.engine(), "voices": tts.SONIOX_VOICES,
+            "soniox_ready": tts.soniox_ready(), "piper_ready": tts.model_present()}
+
+
+@app.put("/api/settings/tts")
+def put_tts_settings(req: TtsSettings):
+    """Chọn nguồn giọng đọc: auto (Soniox nếu có khóa), soniox, piper (trên máy) và giọng Soniox."""
+    try:
+        tts.save_settings(req.engine, req.voice)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return get_tts_settings()
+
+
+@app.post("/api/tts/stream")
+async def tts_stream(req: TtsReq):
+    """Đọc văn bản, trả PCM 16-bit mono từng mảnh ngay khi có (header X-Sample-Rate) để trình duyệt phát ngay.
+
+    Soniox: gửi câu tới Soniox để đọc; lỗi hoặc không có khóa thì đọc bằng Piper trên máy."""
+    try:
+        rate, engine, chunks = await tts.open_stream(req.text, req.speed)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    return StreamingResponse(chunks, media_type="application/octet-stream",
+                             headers={"X-Sample-Rate": str(rate), "X-Tts-Engine": engine, "Cache-Control": "no-store"})
 
 
 @app.post("/api/tts")

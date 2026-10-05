@@ -2379,7 +2379,7 @@ function avBean(f, { st, speaking, open }) {
 }
 
 const VOICE = { enabled: true, supported: 'speechSynthesis' in window, voice: null, queue: [], current: null, audible: false, gateUntil: 0,
-  allowOnline: false, onlineAvailable: false, server: false, ctx: null, analyser: null, src: null, buf: null };
+  allowOnline: false, onlineAvailable: false, server: false, engine: '', ctx: null, analyser: null, srcs: [], buf: null };
 try { VOICE.enabled = localStorage.getItem('mc_voice') !== 'off'; VOICE.allowOnline = localStorage.getItem('mc_voice_online') === 'on'; } catch (e) { /* bỏ qua */ }
 /** Giọng dự phòng của trình duyệt: ưu tiên giọng cài trên máy; giọng trực tuyến chỉ dùng khi người dùng cho phép. */
 function pickVoice() {
@@ -2392,9 +2392,10 @@ function pickVoice() {
   updateVoiceUi();
 }
 if (VOICE.supported) { pickVoice(); speechSynthesis.addEventListener('voiceschanged', pickVoice); }
-/** Giọng chính: Piper tiếng Việt chạy ngay trên máy chủ (miễn phí, không gửi nội dung ra ngoài). */
+/** Giọng chính do máy chủ đọc: Soniox (tự nhiên, đọc rõ tiếng Anh) hoặc Piper chạy ngay trên máy. */
 async function loadTtsStatus() {
-  try { VOICE.server = !!(await GET('/api/tts/status')).available; } catch (e) { VOICE.server = false; }
+  try { const st = await GET('/api/tts/status'); VOICE.server = !!st.available; VOICE.engine = st.engine || ''; }
+  catch (e) { VOICE.server = false; }
   updateVoiceUi();
 }
 function audioCtx() {
@@ -2413,17 +2414,54 @@ function audioCtx() {
 ['pointerdown', 'keydown'].forEach(t => document.addEventListener(t, () => { if (VOICE.enabled && VOICE.server) audioCtx(); }, { passive: true }));
 /** Âm lượng tức thời của giọng đang phát (để miệng cử động theo đúng lời nói). */
 function voiceLevel() {
-  if (!VOICE.src || !VOICE.audible || !VOICE.analyser) return null;
+  if (!VOICE.srcs.length || !VOICE.audible || !VOICE.analyser) return null;
   const a = VOICE.analyser, buf = VOICE.buf || (VOICE.buf = new Uint8Array(a.fftSize));
   a.getByteTimeDomainData(buf);
   let sum = 0;
   for (let i = 0; i < buf.length; i++) { const x = (buf[i] - 128) / 128; sum += x * x; }
   return Math.sqrt(sum / buf.length);
 }
+/** Tải giọng đọc dạng luồng (PCM 16-bit, header X-Sample-Rate): phát được ngay khi mảnh âm thanh đầu tiên về,
+ *  không chờ đọc xong cả câu. st.first báo có âm thanh hay không; st.onchunk gọi mỗi khi có thêm mảnh / tải xong. */
 function fetchTts(text) {
-  return fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })
-    .then(r => (r.ok ? r.arrayBuffer() : null)).catch(() => null);
+  const st = { chunks: [], rate: 24000, done: false, onchunk: null, ctrl: new AbortController() };
+  let gotFirst;
+  st.first = new Promise(res => { gotFirst = res; });
+  const finish = () => { st.done = true; gotFirst(st.chunks.length > 0); if (st.onchunk) st.onchunk(); };
+  (async () => {
+    try {
+      const r = await fetch('/api/tts/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }), signal: st.ctrl.signal });
+      if (!r.ok || !r.body) return finish();
+      st.rate = parseInt(r.headers.get('X-Sample-Rate'), 10) || 24000;
+      const reader = r.body.getReader();
+      let carry = new Uint8Array(0);
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        let bytes = value;
+        if (carry.length) { bytes = new Uint8Array(carry.length + value.length); bytes.set(carry); bytes.set(value, carry.length); }
+        const even = bytes.length - (bytes.length % 2);
+        carry = bytes.slice(even);
+        if (!even) continue;
+        const dv = new DataView(bytes.buffer, bytes.byteOffset, even);
+        const f32 = new Float32Array(even / 2);
+        for (let i = 0; i < f32.length; i++) f32[i] = dv.getInt16(i * 2, true) / 32768;
+        st.chunks.push(f32);
+        gotFirst(true);
+        if (st.onchunk) st.onchunk();
+      }
+    } catch (e) { /* bị dừng giữa chừng hoặc lỗi mạng */ }
+    finish();
+  })();
+  return st;
 }
+/** Chỉ tải trước câu đang đọc và câu kế tiếp (không mở hàng chục luồng đọc cùng lúc). */
+function prefetchVoice() {
+  if (!VOICE.enabled || !VOICE.server) return;
+  [VOICE.current, VOICE.queue[0]].forEach(it => { if (it && !it.audio) it.audio = fetchTts(it.spoken); });
+}
+function dropAudio(it) { if (it && it.audio && !it.audio.done) it.audio.ctrl.abort(); }
 function updateVoiceUi() {
   $$('[data-voice-btn]').forEach(b => { b.textContent = VOICE.enabled ? 'Giọng nói: bật' : 'Giọng nói: tắt'; b.setAttribute('aria-pressed', VOICE.enabled ? 'true' : 'false'); });
   const hint = $('#voice-hint');
@@ -2466,14 +2504,15 @@ function showBubble(text, caption) {
 function say(text, opts = {}) {
   const spoken = speakable(text); if (!spoken) return;
   chunks(spoken).forEach((part, k) => VOICE.queue.push({ spoken: part, bubble: opts.bubble || spoken, caption: opts.caption, first: k === 0,
-    mood: opts.mood || 'neutral', insightId: opts.insightId, stale: !!opts.stale,
-    audio: VOICE.enabled && VOICE.server ? fetchTts(part) : null }));
-  if (VOICE.queue.length > 24) VOICE.queue.splice(0, VOICE.queue.length - 24);
+    mood: opts.mood || 'neutral', insightId: opts.insightId, stale: !!opts.stale, audio: null }));
+  if (VOICE.queue.length > 24) VOICE.queue.splice(0, VOICE.queue.length - 24).forEach(dropAudio);
   pumpVoice();
+  prefetchVoice();
 }
 function pumpVoice() {
   if (VOICE.current || !VOICE.queue.length) return;
   const item = VOICE.current = VOICE.queue.shift();
+  prefetchVoice();
   AV.mood = item.mood; AV.moodAt = performance.now();
   if (item.first) showBubble(item.bubble, item.caption);
   markInsight(item.insightId, true);
@@ -2481,7 +2520,9 @@ function pumpVoice() {
   const done = () => {
     if (finished) return; finished = true;
     clearTimeout(item.timer);
-    if (VOICE.src) { try { VOICE.src.onended = null; VOICE.src.stop(); } catch (e) { /* đã dừng */ } VOICE.src = null; }
+    VOICE.srcs.forEach(src => { try { src.stop(); } catch (e) { /* đã dừng */ } });
+    VOICE.srcs = [];
+    dropAudio(item);
     if (!VOICE.queue.length || VOICE.queue[0].insightId !== item.insightId) markInsight(item.insightId, false);
     if (VOICE.audible) VOICE.gateUntil = performance.now() + 300;   // chờ tiếng vọng tắt hẳn
     VOICE.current = null; VOICE.audible = false;
@@ -2504,25 +2545,42 @@ function playBrowser(item, done) {
   item.timer = setTimeout(done, 3000 + item.spoken.length * 110);
 }
 async function playServer(item, done) {
-  const data = await item.audio;
+  const st = item.audio;
+  const ok = await st.first;                                // chờ mảnh âm thanh đầu tiên (Soniox khoảng 0,6 giây)
   if (VOICE.current !== item) return;                       // đã bị dừng trong lúc tải
   const ctx = audioCtx();
-  let buffer = null;
-  if (data && ctx) { try { buffer = await ctx.decodeAudioData(data); } catch (e) { buffer = null; } }
-  if (VOICE.current !== item) return;
-  if (!buffer || ctx.state !== 'running') {                 // lỗi tải/giải mã, hoặc chưa có thao tác nào để mở âm thanh
+  if (!ok || !ctx || ctx.state !== 'running') {             // lỗi tải, hoặc chưa có thao tác nào để mở âm thanh
+    dropAudio(item);
     if (VOICE.supported && VOICE.voice) return playBrowser(item, done);
     return captionOnly(item, done);
   }
-  const src = ctx.createBufferSource();
-  src.buffer = buffer;
-  src.connect(VOICE.analyser);
-  src.onended = done;
-  VOICE.src = src; VOICE.audible = true;
-  src.start();
-  item.timer = setTimeout(done, buffer.duration * 1000 + 1500);
+  // Xếp các mảnh nối tiếp nhau trên dòng thời gian của AudioContext; đệm 0,12 giây cho mạng chập chờn
+  let at = ctx.currentTime + 0.12, idx = 0;
+  VOICE.audible = true;
+  const schedule = () => {
+    if (VOICE.current !== item) return;
+    while (idx < st.chunks.length) {
+      const f32 = st.chunks[idx++];
+      const buf = ctx.createBuffer(1, f32.length, st.rate);
+      buf.copyToChannel(f32, 0);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(VOICE.analyser);
+      at = Math.max(at, ctx.currentTime + 0.03);
+      src.start(at);
+      at += buf.duration;
+      VOICE.srcs.push(src);
+    }
+    clearTimeout(item.timer);
+    const left = Math.max(0, at - ctx.currentTime) * 1000;
+    // Tải xong: kết thúc khi mảnh cuối phát xong. Còn đang tải mà mạng treo quá 15 giây thì bỏ câu này.
+    item.timer = setTimeout(done, left + (st.done ? 80 : 15000));
+  };
+  st.onchunk = schedule;
+  schedule();
 }
 function stopVoice() {
+  VOICE.queue.forEach(dropAudio);
   VOICE.queue = [];
   if (VOICE.supported) speechSynthesis.cancel();
   if (VOICE.current && VOICE.current.finish) VOICE.current.finish();
@@ -3829,6 +3887,10 @@ function openSettings() {
       <p class="text-[12px] text-muted mt-1">Linh vật UrBox: nói thì miệng mở theo giọng, nghe thì nghiêng người và đưa tay lên tai, nghĩ thì gãi đầu kèm bong bóng suy nghĩ. Hộp quà: nắp bật theo giọng nói.</p>
     </div>
     <div class="mt-5 pt-4 border-t divider">
+      <h4 class="font-semibold mb-2">Giọng đọc của trợ lý</h4>
+      <div id="tts-box" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang tải...</div></div>
+    </div>
+    <div class="mt-5 pt-4 border-t divider">
       <div class="flex items-center justify-between gap-2 mb-1"><h4 class="font-semibold">Kết nối dịch vụ</h4><span class="text-[12px] text-muted">lưu trong .env của máy này</span></div>
       <p class="text-[12px] text-muted mb-2">Máy mới chỉ cần chạy ứng dụng rồi điền ở đây. Khóa không lưu lên MongoDB và không hiện lại sau khi lưu.</p>
       <div id="svc-box" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang tải...</div></div>
@@ -3857,6 +3919,7 @@ function openSettings() {
       renderLlm($('#llm-box', m));
       renderServices($('#svc-box', m));
       renderLibrarySettings($('#lib-box', m));
+      renderTts($('#tts-box', m));
       const preview = () => { const n = $('#as-name', m).value.trim() || 'Bông'; $('#as-preview', m).textContent = `"${n} ơi, tóm tắt giúp anh các quyết định" hoặc "${n}, tra cứu ticket của Tuấn"`; };
       $('#as-name', m).addEventListener('input', preview); preview();
       $('#as-form', m).addEventListener('submit', async e => {
@@ -3873,6 +3936,45 @@ function openSettings() {
       });
     }
   });
+}
+const TTS_SAMPLE = 'Dạ, em đã tạo xong dashboard doanh số Q3 trên Power BI. Deadline sprint review là thứ Sáu, anh check giúp em pull request trên GitHub nhé.';
+/** Cài đặt giọng đọc: Soniox (tự nhiên, đọc đúng tiếng Anh, cần mạng) hoặc Piper chạy trên máy (miễn phí, offline). */
+async function renderTts(box) {
+  if (!box) return;
+  let r;
+  try { r = await GET('/api/settings/tts'); } catch (e) { box.innerHTML = `<p class="text-muted">${esc(e.message)}</p>`; return; }
+  let eng = r.active === 'soniox' ? 'soniox' : 'piper';
+  const note = () => eng === 'soniox'
+    ? 'Giọng người Việt tự nhiên, đọc đúng từ tiếng Anh xen trong câu, số tiền, ngày tháng, mã ticket. Câu trợ lý nói được gửi tới Soniox (dịch vụ đang nhận dạng giọng nói cuộc họp) để đọc, khoảng 0,70 USD mỗi giờ giọng đọc. Mất mạng thì tự đọc bằng giọng trên máy.'
+    : 'Chạy ngay trên máy: miễn phí, không cần mạng, không gửi nội dung ra ngoài. Tiếng Anh chỉ đọc theo phiên âm nên khó nghe.';
+  box.innerHTML = `
+    <div class="seg" role="radiogroup" aria-label="Nguồn giọng đọc">
+      <button type="button" role="radio" data-tts-engine="soniox" aria-checked="${eng === 'soniox'}" ${r.soniox_ready ? '' : 'disabled'}>Soniox (tự nhiên)</button>
+      <button type="button" role="radio" data-tts-engine="piper" aria-checked="${eng === 'piper'}" ${r.piper_ready ? '' : 'disabled'}>Trên máy (Piper)</button>
+    </div>
+    <p class="text-[12px] text-muted mt-1" data-tts-note></p>
+    ${r.soniox_ready ? '' : '<p class="text-[12px] mt-1" style="color:#FFC145">Cần khóa Soniox (mục Kết nối dịch vụ) để dùng giọng Soniox.</p>'}
+    <div class="flex items-end gap-2 mt-3" data-tts-voice-row>
+      <div class="flex-1"><label class="field" for="tts-voice">Giọng Soniox</label>
+        <select id="tts-voice" class="input">${(r.voices || []).map(v => `<option value="${esc(v.id)}" ${v.id === r.voice ? 'selected' : ''}>${esc(v.id)} - ${esc(v.description)}</option>`).join('')}</select></div>
+      <button type="button" class="btn btn-ghost" data-tts-try>Nghe thử</button>
+    </div>`;
+  const paint = () => {
+    $$('[data-tts-engine]', box).forEach(b => b.setAttribute('aria-checked', b.dataset.ttsEngine === eng ? 'true' : 'false'));
+    $('[data-tts-note]', box).textContent = note();
+    $('#tts-voice', box).disabled = eng !== 'soniox';
+  };
+  const save = async () => {
+    try { await PUT('/api/settings/tts', { engine: eng, voice: $('#tts-voice', box).value }); await loadTtsStatus(); }
+    catch (e) { toast(e.message, 'err'); }
+  };
+  $$('[data-tts-engine]', box).forEach(b => b.addEventListener('click', async () => { eng = b.dataset.ttsEngine; paint(); await save(); }));
+  $('#tts-voice', box).addEventListener('change', save);
+  $('[data-tts-try]', box).addEventListener('click', () => {
+    if (!VOICE.enabled) return toast('Giọng nói đang tắt. Bật "Giọng nói" trong phòng họp để nghe.', 'info');
+    stopVoice(); audioCtx(); say(TTS_SAMPLE);
+  });
+  paint();
 }
 const PROVIDER_NAMES = { claude: 'Claude API', gemini: 'Gemini API', 'claude-cli': 'Claude.ai (gói đăng ký)', 'codex-cli': 'ChatGPT (gói đăng ký)', 'gemini-cli': 'Gemini (gói đăng ký)' };
 const MODEL_SOURCE = { api: 'Danh sách lấy trực tiếp từ tài khoản API', cli: 'Danh sách lấy từ công cụ của gói đã cài', builtin: 'Danh sách có sẵn' };

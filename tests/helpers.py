@@ -46,6 +46,8 @@ def reset_db():
     llm._assistant_cache.update({"value": None, "at": 0.0})
     from meeting import artifacts
     artifacts._provider_cache.clear()          # nguồn AI đã chọn ở test trước không được dính sang test sau
+    from meeting import tts
+    tts._settings_cache["value"] = None        # nguồn giọng đọc đã chọn ở test trước cũng vậy
     for s in list(live.SESSIONS.values()):
         s.dispose()
     live.SESSIONS.clear()

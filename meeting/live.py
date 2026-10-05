@@ -25,7 +25,7 @@ from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple
 import numpy as np
 import websockets
 
-from meeting import artifacts, db, follow, identity, llm, voice
+from meeting import artifacts, db, follow, identity, llm, tts, voice
 
 log = logging.getLogger("meeting.live")
 
@@ -597,6 +597,8 @@ class MeetingSession:
         self.subscribers.discard(q)
 
     async def emit(self, event: Dict[str, Any]):
+        if event.get("type") in ("ai_listening", "ai_thinking"):
+            tts.warm()                    # sắp có câu trả lời: mở sẵn kết nối giọng đọc
         for q in list(self.subscribers):
             try:
                 q.put_nowait(event)
