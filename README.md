@@ -7,7 +7,7 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng người Việt tự nhiên của Soniox, đọc rõ cả từ tiếng
 Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy, miễn phí), vừa làm vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.14.0 - cập nhật 07/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.14.1 - cập nhật 07/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
@@ -33,6 +33,21 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
     Thu lại sẽ thay hẳn vector cũ, không trộn 2 model.
 - Hệ thống không lưu âm thanh, nên cuộc họp cũ không tính lại vector bằng model mới được.
 - Muốn quay lại CAM++: đặt `VOICE_MODEL=campplus` trong `.env` rồi khởi động lại.
+
+### Hai giọng dưới cùng một nhãn Soniox (bản 3.14.1)
+- Lỗi thật #58: cả buổi Soniox chỉ có 1 nhãn; một bài giảng phát qua loa và anh Phúc ra lệnh bị gộp làm một người. Hai
+  giọng khác hẳn nhau (2 cụm chỉ giống 0,53), nhưng có 2 điểm chặn:
+  - Luật tách đòi cả hai cụm phải "chặt". Câu lệnh ngắn của người nói trực tiếp nhiễu (0,61-0,65) nên không đạt.
+  - Sau khi tách, nhãn Soniox duy nhất trỏ về bài giảng. Câu ngắn của anh Phúc (giống anh ~0,55, giống bài giảng ~0,35)
+    không đủ 0,66 để ghi đè nhãn.
+- Bây giờ:
+  - Khi 2 cụm khác hẳn nhau, chỉ cụm chặt hơn cần chặt hơn mức giữa 2 cụm 0,12. Cụm lỏng hơn chỉ cần 0,05 và đa số câu gần
+    cụm mình hơn.
+  - Nhãn Soniox đã dùng chung cho 2 người được tách khỏi nhau thì câu có giọng xếp theo giọng: về người gần hơn từ 0,06.
+- Chạy lại:
+  - #58: bài giảng 9/9 câu đúng, câu của anh Phúc 6/8. Hai câu sai là 1 câu giống cả hai và 1 câu 1,3 giây rất nhiễu.
+  - #48: 95% lên 97% câu đúng.
+  - #57: giữ 98%.
 
 ### Sửa thêm
 - "Phân tích lại người nói" không còn đưa tên lấy từ mẫu giọng cho người nói câu đầu tiên của hồ sơ cũ. Lỗi thật #57:

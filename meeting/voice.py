@@ -369,7 +369,10 @@ class MeetingSpeakers:
     SPLIT_CROSS_T = 0.65       # Centroid 2 cụm con giống nhau dưới mức này -> 2 người khác nhau
     SPLIT_MIN_SEGS = 3         # Mỗi cụm con cần >= 3 câu có vector
     SPLIT_MIN_W = 6.0          # ... và >= 6 giây tiếng nói
-    SPLIT_COHESION_GAP = 0.12  # Mỗi cụm con phải "chặt" hơn độ giống giữa 2 cụm ít nhất ngần này
+    SPLIT_COHESION_GAP = 0.12  # Cụm con chặt hơn phải "chặt" hơn độ giống giữa 2 cụm ít nhất ngần này
+    SPLIT_LOOSE_GAP = 0.05     # ... cụm con lỏng hơn (câu ngắn, nhiễu) chỉ cần ngần này
+    SHARED_MARGIN = 0.06       # Nhãn Soniox dùng chung cho 2 người đã tách: theo giọng nếu gần một người hơn ngần này
+    SHARED_MIN_W = 4.0         # ... mỗi người phải đã có ngần này giây tiếng nói dưới nhãn đó
     SPLIT_WINDOW = 40          # Xét tối đa 40 câu có vector gần nhất của hồ sơ
     SPLIT_SAME_T = 0.86        # Tâm 2 cụm con giống từ mức này -> chắc chắn cùng một người, không tách
     SPLIT_MEMBER_GAP = 0.10    # Tách theo từng câu: câu gần cụm mình hơn cụm kia trung bình ngần này
@@ -484,6 +487,13 @@ class MeetingSpeakers:
             return None
         return max(votes.items(), key=lambda kv: kv[1])[0]
 
+    def _label_people(self, rk: Optional[Tuple[str, int, str]]) -> List[int]:
+        """Những hồ sơ đã nhận đáng kể câu (có giọng) của nhãn Soniox này và từng bị tách khỏi nhau (cùng nhãn, 2 người)."""
+        if rk is None or rk not in self.raw_votes:
+            return []
+        people = {self.profile(s).sid for s, w in self.raw_votes[rk].items() if w >= self.SHARED_MIN_W and self.profile(s)}
+        return [s for s in people if any(o in people for o in self.profile(s).apart)]
+
     def _blocked_sids(self, rk: Optional[Tuple[str, int, str]]) -> Set[int]:
         """Các hồ sơ mà Soniox đang gắn cho nhãn KHÁC trong cùng phiên stream (=> người khác)."""
         if rk is None:
@@ -578,6 +588,14 @@ class MeetingSpeakers:
             best_sid, best = ranked[0]
             if best_sid != mapped and best >= max(self.OVERRIDE_MIN, s_m + self.OVERRIDE_GAP):
                 return best_sid, "voice_override"
+            # Nhãn Soniox đang dùng chung cho nhiều người (đã tách người từ nhãn này): nhãn không còn phân biệt được ai,
+            # chọn theo giọng trong số những người dùng chung nhãn. Lỗi thật #58: cả buổi 1 nhãn, sau khi tách bài giảng
+            # khỏi anh Phúc, mọi câu lệnh ngắn của anh (giống anh ~0.55, giống bài giảng ~0.35) vẫn theo nhãn về bài giảng.
+            shared = [(sims[s], s) for s in self._label_people(rk) if s in sims]
+            if len(shared) >= 2:
+                shared.sort(reverse=True)
+                if shared[0][1] != mapped and shared[0][0] - shared[1][0] >= self.SHARED_MARGIN:
+                    return shared[0][1], "voice_shared"
             p_m = self.profiles[mapped]
             if (w >= self.SPLIT_MIN_W and s_m < self._split_limit(p_m, w) and p_m.weight >= self.RELIABLE_W
                     and best < self._t_join(w)):
@@ -876,9 +894,16 @@ class MeetingSpeakers:
             return None
         # (a) Hai cụm khác hẳn nhau ở mức tâm cụm
         if cross < self.SPLIT_CROSS_T:
-            coh = min(float(np.mean([V[j] @ unit(sums[c] - V[j] * W[j]) for j in idx[c]])) for c in (0, 1))
-            if coh >= cross + self.SPLIT_COHESION_GAP:
-                return cross, coh
+            # Cụm chặt hơn phải chặt hơn độ giống giữa 2 cụm SPLIT_COHESION_GAP; cụm lỏng hơn (người nói trực tiếp toàn câu
+            # lệnh ngắn: vector nhiễu) chỉ cần SPLIT_LOOSE_GAP và đa số câu gần cụm mình hơn cụm kia. Lỗi thật #58: bài
+            # giảng phát qua loa chặt 0.86, anh Phúc 0.61-0.65, 2 cụm chỉ giống 0.53 mà vẫn bị gộp làm một người.
+            cohs = [float(np.mean([V[j] @ unit(sums[c] - V[j] * W[j]) for j in idx[c]])) for c in (0, 1)]
+            loose = int(np.argmin(cohs))
+            own = np.array([V[j] @ unit(sums[loose] - V[j] * W[j]) for j in idx[loose]])
+            agree = float(np.average(own > V[idx[loose]] @ cents[1 - loose], weights=W[idx[loose]]))
+            if (max(cohs) >= cross + self.SPLIT_COHESION_GAP and min(cohs) >= cross + self.SPLIT_LOOSE_GAP
+                    and agree >= self.SPLIT_MEMBER_AGREE):
+                return cross, min(cohs)
         if not close_ok:
             return None
         # (b) Hai giọng gần nhau (tâm cụm vẫn giống ~0.7-0.8, ví dụ cùng phát qua loa) nhưng TỪNG CÂU vẫn gần

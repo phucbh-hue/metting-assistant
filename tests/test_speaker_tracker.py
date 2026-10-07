@@ -137,6 +137,27 @@ class SonioxErrorRecoveryTests(unittest.TestCase):
         self.assertEqual(set(labels_of(sp, newcomer)), {"Người nói 2"})
         self.assertEqual(set(labels_of(sp, early + late)), {"Người nói 1"})
 
+    def test_live_voice_and_video_under_the_only_label_are_separated(self):
+        """Lỗi thật #58: Soniox chỉ có 1 nhãn cho cả buổi; bài giảng phát qua loa (câu dài, giọng chặt) và người dùng ra
+        lệnh (câu ngắn, vector nhiễu) khác hẳn nhau. Cụm câu ngắn "lỏng" nên không được tách; tách rồi thì câu ngắn của
+        người dùng vẫn theo nhãn về bài giảng. Vector sinh theo số đo thật: bài giảng chặt, câu lệnh nhiễu."""
+        order = [0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0]           # 0: người dùng, 1: bài giảng
+        for seed in (3, 7, 8, 11, 28):
+            with self.subTest(seed=seed):
+                rng = np.random.default_rng(seed)
+                channel = voice.unit(rng.standard_normal(voice.DIM))
+                base = [voice.unit(rng.standard_normal(voice.DIM)) for _ in range(2)]
+                sp, t = voice.MeetingSpeakers(), 0.0
+                for i, k in enumerate(order):
+                    w = 2.0 if k == 0 else 6.0
+                    v = voice.unit(0.7 * channel + base[k] + (1.2 if k == 0 else 0.5) * voice.unit(rng.standard_normal(voice.DIM)))
+                    sp.add(key=i, v=v, raw_label="1", t=t, voiced=w, dur=w * 1.2)
+                    t += w * 1.3
+                user = {sp.sid_of(i) for i, k in enumerate(order) if k == 0}
+                video = {sp.sid_of(i) for i, k in enumerate(order) if k == 1}
+                self.assertEqual((len(user), len(video)), (1, 1))
+                self.assertNotEqual(user, video)
+
     def test_nearly_identical_voices_are_not_split(self):
         bank = self._similar_bank(0.9)
         sp = voice.MeetingSpeakers()
