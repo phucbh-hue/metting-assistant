@@ -962,7 +962,10 @@ class MeetingSession:
                     fresh.add(key=s["key"], v=s["v"], raw_label=s["raw"], t=s["t"], voiced=s["w"],
                               text=s["text"], epoch=rk[1] if rk else 0, dur=s["dur"], stream=rk[0] if rk else "mic")
             # Tên thuộc về người dùng hồ sơ cũ TRƯỚC TIÊN (người mới chen vào sau dưới cùng nhãn thì tách ra)
-            for op in sorted((p for p in old.active_profiles() if p.name), key=lambda p: p.first_t):
+            # Tên đến từ mẫu giọng thì không mang theo: mẫu giọng tự xét lại trên hồ sơ mới (lỗi thật #57: tên của
+            # anh Phúc rơi vào hồ sơ anh Duy vì anh Duy nói câu đầu tiên của hồ sơ cũ bị gộp chung)
+            for op in sorted((p for p in old.active_profiles() if p.name and p.origin != "voiceprint"),
+                             key=lambda p: p.first_t):
                 order = [fresh.sid_of(k) for k in old.keys_of(op.sid)]
                 for sid in dict.fromkeys(x for x in order if x is not None):
                     np_ = fresh.profile(sid)

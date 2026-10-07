@@ -427,6 +427,37 @@ class ReanalyzeTests(SessionTestCase):
         self.assertEqual(sorted(p["sid"] for p in db.list_speakers(mid)), [1, 2, 3])
 
 
+    async def test_reanalyze_does_not_carry_a_voiceprint_name(self):
+        """Lỗi thật #57: hồ sơ cũ mang tên từ mẫu giọng nhưng gộp 2 người; phân tích lại đưa tên đó cho người nói câu
+        đầu tiên (anh Duy). Tên từ mẫu giọng không mang theo, mẫu giọng tự xét lại."""
+        bank = VoiceBank(seed=17, n=2, channel=0.8)
+        mid = db.create_meeting("Họp 2 người")
+        t = 0.0
+        for i, (k, raw) in enumerate([(0, "1"), (1, "2")] * 5, 1):
+            db.add_segment(mid, t, t + 5.0, "Bùi Hồng Phúc", f"câu {i}", raw_embedding=bank.vec(k, 4.0).tolist(), seq=i,
+                           speaker_key=1, raw_speaker=raw, epoch=0, voiced=4.0)
+            t += 6.0
+        db.upsert_speakers(mid, [{"sid": 1, "name": "Bùi Hồng Phúc", "label": "Bùi Hồng Phúc", "origin": "voiceprint",
+                                  "voice_id": 26, "n_segments": 10}])
+        s = await live.get_session(mid)
+        res = await s.reanalyze()
+        self.assertEqual(sorted(p["label"] for p in res["speakers"]), ["Người nói 1", "Người nói 2"])
+
+    def test_rename_drops_a_wrong_voiceprint_link(self):
+        """Đặt tay tên khác tên mẫu giọng đang gắn: bỏ liên kết mẫu giọng (và vai trò của mẫu) khỏi hồ sơ đó."""
+        from meeting import voice
+        sp = voice.MeetingSpeakers(anchors={26: {"name": "Bùi Hồng Phúc", "vector": self.bank.enrollment(0),
+                                                 "role": "Ai Builder"}})
+        sp.add(key=1, v=self.bank.vec(0, 5.0), raw_label="1", t=0, voiced=5.0)
+        p = sp.profile(1)
+        self.assertEqual((p.name, p.voice_id), ("Bùi Hồng Phúc", 26))
+        sp.rename(1, "Duy")
+        self.assertEqual((p.name, p.voice_id, p.role), ("Duy", None, ""))
+        sp.rename(1, "Bùi Hồng Phúc", voice_id=26)
+        sp.rename(1, "bùi hồng phúc")                       # cùng tên (khác hoa thường): giữ liên kết
+        self.assertEqual(p.voice_id, 26)
+
+
 class LifecycleTests(SessionTestCase):
     async def test_finish_marks_ended_and_generates_minutes_in_background(self):
         mid = db.create_meeting("Họp chốt sprint")

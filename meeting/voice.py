@@ -937,6 +937,13 @@ class MeetingSpeakers:
         p.name = name
         if voice_id is not None:
             p.voice_id = voice_id
+        elif p.voice_id is not None:
+            # Đặt tên khác tên của mẫu giọng đang gắn (mẫu giọng gắn nhầm, lỗi thật #57): bỏ liên kết cùng vai trò của mẫu
+            a = self.anchors.get(p.voice_id)
+            if a is None or a.get("name", "").casefold() != name.casefold():
+                if a is not None and p.role == (a.get("role") or ""):
+                    p.role = ""
+                p.voice_id = None
         if role:
             p.role = role
         p.origin = origin
