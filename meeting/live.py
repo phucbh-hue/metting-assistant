@@ -25,7 +25,7 @@ from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple
 import numpy as np
 import websockets
 
-from meeting import artifacts, db, follow, identity, llm, tts, voice
+from meeting import artifacts, db, follow, identity, llm, recording, tts, voice
 
 log = logging.getLogger("meeting.live")
 
@@ -105,6 +105,7 @@ class MeetingStream:
         self._last_interim = None
         self._open_lock = asyncio.Lock()
         self._fatal = ""              # Lỗi không thể tự khắc phục (sai API key, hết hạn mức...)
+        self._rec: Optional[recording.Run] = None   # lượt ghi âm đang mở (chỉ khi cuộc họp bật ghi âm)
         self._reconnects: List[float] = []
         self._hold_task: Optional[asyncio.Task] = None
 
@@ -275,6 +276,7 @@ class MeetingStream:
         self.last_audio = time.monotonic()
         self.audio += pcm
         self.fed += len(pcm)
+        self._record(pcm)
         keep = int(AUDIO_KEEP_S * BPS)
         if len(self.audio) > keep + 10 * BPS:
             drop = len(self.audio) - keep
@@ -290,10 +292,29 @@ class MeetingStream:
         except Exception as e:
             self._lost(f"gửi audio lỗi ({type(e).__name__})")
 
+    def _record(self, pcm: bytes):
+        """Ghi âm (chỉ khi cuộc họp bật ghi âm và đã xác nhận mọi người đồng ý): mỗi lượt bật mic một tệp."""
+        if not self.session.recording_on():
+            self.stop_recording()
+            return
+        if self._rec is None:
+            try:
+                self._rec = recording.Run(self.session.id, self.name, self.session.clock() - len(pcm) / BPS)
+            except OSError as e:
+                log.warning("meeting.live: không ghi âm được: %s", e)
+                return
+        self._rec.write(pcm)
+
+    def stop_recording(self):
+        if self._rec is not None:
+            self._rec.close()
+            self._rec = None
+
     async def pause(self):
         """Mic tắt: chốt chữ còn treo, giữ kết nối thêm IDLE_CLOSE_S giây rồi đóng để không tốn phí."""
         if self.closed or self.paused:
             return
+        self.stop_recording()
         self.paused = True
         if self.is_open:
             try:
@@ -457,6 +478,7 @@ class MeetingStream:
             return
         if self._idle_task:
             self._idle_task.cancel()
+        self.stop_recording()
         await self._close_ws()
         self.closed = True
         self._set_state("closed")
@@ -568,6 +590,31 @@ class MeetingSession:
     def clock(self) -> float:
         return time.time() - self.started_at
 
+    def recording_on(self) -> bool:
+        rec = self.meeting.get("recording") or {}
+        return bool(rec.get("enabled") and rec.get("consent_at")) and self.is_live()
+
+    def recording_public(self) -> Dict[str, Any]:
+        rec = self.meeting.get("recording") or {}
+        return {**recording.info(self.id), "enabled": self.recording_on(), "consent_by": rec.get("consent_by", ""),
+                "consent_at": rec.get("consent_at")}
+
+    async def set_recording(self, enabled: bool, consent_by: str = "meeting_host") -> Dict[str, Any]:
+        """Bật / tắt ghi âm. Bật = chủ phòng xác nhận mọi người trong phòng đã đồng ý (lưu ai, lúc nào)."""
+        rec = dict(self.meeting.get("recording") or {})
+        if enabled:
+            rec.update({"enabled": True, "consent_by": consent_by, "consent_at": time.time(),
+                        "retention_days": recording.RETENTION_DAYS})
+        else:
+            rec["enabled"] = False
+            for st in self.streams.values():
+                st.stop_recording()
+        self.meeting["recording"] = rec
+        await asyncio.to_thread(db.update_meeting, self.id, {"recording": rec}, True)
+        pub = self.recording_public()
+        await self.emit({"type": "recording", "recording": pub})
+        return pub
+
     def next_epoch(self) -> int:
         e = self._epoch
         self._epoch += 1
@@ -625,6 +672,7 @@ class MeetingSession:
             "streams": {n: s.state for n, s in self.streams.items()},
             "mic_active": self.audio_owner is not None,
             "stage": self.stage_public(),
+            "recording": self.recording_public(),
         }
 
     # ----------------------------------------------------------- workers ---

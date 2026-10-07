@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse  # noqa:
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
-from meeting import artifacts, cli_llm, db, decks, envfile, live, llm, mcp, tts, voice, websearch  # noqa: E402
+from meeting import artifacts, cli_llm, db, decks, envfile, live, llm, mcp, recording, tts, voice, websearch  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("meeting.app")
@@ -45,6 +45,7 @@ async def lifespan(_app: FastAPI):
     await asyncio.to_thread(db.init)
     await asyncio.to_thread(mcp.seed_mock_data)
     voice.ensure_model_async()
+    await asyncio.to_thread(recording.purge_expired)     # bản ghi âm quá hạn lưu (RECORDING_RETENTION_DAYS)
     if tts.model_present():
         asyncio.get_running_loop().run_in_executor(None, tts.preload)   # nạp giọng đọc ở nền
     log.info("meeting.app: Server khởi động hoàn tất")
@@ -701,6 +702,8 @@ async def get_meeting_details(mid: int):
         "speakers": speakers,
         "suggestions": suggestions,
         "artifacts": await asyncio.to_thread(db.get_artifacts, mid),
+        "recording": {**await asyncio.to_thread(recording.info, mid),
+                      "enabled": bool((m.get("recording") or {}).get("enabled")) and m.get("status") != "ended"},
     }
 
 
@@ -721,7 +724,33 @@ async def delete_meeting_record(mid: int):
     s = live.SESSIONS.get(mid)
     if s is not None:
         await s.close()
+    await asyncio.to_thread(recording.delete, mid)
     return {"success": await asyncio.to_thread(db.delete_meeting, mid)}
+
+
+class RecordingReq(BaseModel):
+    enabled: bool
+    consent: bool = False      # bật: chủ phòng xác nhận mọi người trong phòng đã đồng ý ghi âm
+
+
+@app.post("/api/meetings/{mid}/recording")
+async def set_meeting_recording(mid: int, req: RecordingReq):
+    """Bật / tắt lưu âm thanh cuộc họp trên máy này (dữ liệu sinh trắc học: cần xác nhận mọi người đồng ý)."""
+    if req.enabled and not req.consent:
+        raise HTTPException(status_code=400, detail="Cần xác nhận mọi người trong phòng đã đồng ý ghi âm")
+    s = await _session_or_404(mid)
+    if req.enabled and not s.is_live():
+        raise HTTPException(status_code=400, detail="Cuộc họp đã kết thúc")
+    return await s.set_recording(req.enabled)
+
+
+@app.delete("/api/meetings/{mid}/recording")
+async def delete_meeting_recording(mid: int):
+    """Xóa toàn bộ âm thanh đã lưu của cuộc họp (và tắt ghi âm nếu đang bật)."""
+    s = live.SESSIONS.get(mid)
+    if s is not None and s.recording_on():
+        await s.set_recording(False)
+    return {"success": await asyncio.to_thread(recording.delete, mid)}
 
 
 @app.post("/api/meetings/{mid}/archive")

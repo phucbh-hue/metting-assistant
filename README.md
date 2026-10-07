@@ -7,7 +7,7 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng người Việt tự nhiên của Soniox, đọc rõ cả từ tiếng
 Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy, miễn phí), vừa làm vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.14.1 - cập nhật 07/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.14.2 - cập nhật 07/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
@@ -33,6 +33,26 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
     Thu lại sẽ thay hẳn vector cũ, không trộn 2 model.
 - Hệ thống không lưu âm thanh, nên cuộc họp cũ không tính lại vector bằng model mới được.
 - Muốn quay lại CAM++: đặt `VOICE_MODEL=campplus` trong `.env` rồi khởi động lại.
+
+### Ghi âm cuộc họp và thử Nemotron-3-Diarization (bản 3.14.2)
+- Nút **Ghi âm: tắt** trên thanh tiêu đề phòng họp.
+  - Mặc định tắt. Bật thì phải xác nhận MỌI NGƯỜI trong phòng đã đồng ý; hệ thống lưu người xác nhận và thời điểm (giọng
+    nói là dữ liệu sinh trắc học, Nghị định 13/2023/NĐ-CP).
+  - Âm thanh chỉ lưu trên máy chạy ứng dụng (`data/recordings/m{id}/`), không đưa lên Atlas. Mỗi lần bật mic là một tệp,
+    kèm mốc thời gian trong cuộc họp để khớp với từng câu.
+  - Tự xóa sau `RECORDING_RETENTION_DAYS` ngày (mặc định 30), kiểm tra mỗi lần khởi động server.
+  - Xóa cuộc họp thì xóa luôn bản ghi. Menu cuộc họp có mục **Xóa bản ghi âm**.
+- Thử Nemotron-3-Diarization (NVIDIA, 23/09/2026) bằng `scripts/nemotron_diar.py`:
+  - Model "ai nói lúc nào", tối đa 8 người, không cho vector giọng, nên chỉ có thể thay nhãn người nói của Soniox.
+    ERes2NetV2 vẫn giữ để nhận lại người quen.
+  - Dùng bản ONNX cộng đồng, lượng tử hóa, chạy trên CPU trong môi trường riêng `data/nemotron-venv`. Bản chính thức cần
+    GPU NVIDIA và Linux; máy hiện tại không có.
+  - Script chạy trên âm thanh đã ghi của một cuộc họp, so từng câu với hệ thống và với nhãn Soniox.
+  - Đo trên hội thoại YouTube: 70 giây âm thanh xử lý trong khoảng 1,4 giây CPU. Ranh giới người nói khớp Soniox.
+  - Kiểm tra trọn vòng (ghi âm qua mic, rồi chạy script): 13/13 câu được gán nhãn, khớp 100% với hệ thống.
+  - Chạy theo khúc ngắn (trực tiếp) với bộ nhớ đệm đơn giản thì nhãn người bị đảo giữa các khúc. Muốn dùng trong phòng
+    họp cần chuyển thuật toán bộ nhớ đệm người nói (AOSC) của NVIDIA.
+  - Bước tiếp theo: ghi âm 2-3 cuộc họp thật nhiều người, chạy script để quyết định có thay nhãn Soniox không.
 
 ### Hai giọng dưới cùng một nhãn Soniox (bản 3.14.1)
 - Lỗi thật #58: cả buổi Soniox chỉ có 1 nhãn; một bài giảng phát qua loa và anh Phúc ra lệnh bị gộp làm một người. Hai
@@ -780,6 +800,8 @@ Xem `.env.example`. Các biến quan trọng:
 | `IDENTITY_AUTO_APPLY_T` | `0.70` | AI đoán tên từ mức này thì tự đặt tên, thấp hơn thì chỉ gợi ý chờ xác nhận |
 | `IDENTITY_FALLBACK_SEGMENTS` | `40` | Không có tên người mới được nhắc thì cứ bấy nhiêu câu mới đoán lại tên một lần |
 | `VOICE_MODEL` | `eres2netv2` nếu đã tải, không thì `campplus` | Model trích vector giọng (`campplus`, `eres2netv2`) |
+| `RECORDING_RETENTION_DAYS` | `30` | Số ngày giữ âm thanh cuộc họp đã ghi (0 = không tự xóa) |
+| `RECORDING_DIR` | `data/recordings` | Nơi lưu âm thanh cuộc họp đã ghi |
 | `TTS_ENGINE` | `auto` | `auto` = Soniox nếu có `SONIOX_API_KEY`, `soniox`, `piper` (trên máy); đổi được trong Cài đặt |
 | `TTS_SONIOX_VOICE` | `Linh` | Giọng Soniox: `Linh`, `Mai`, `Huong` |
 | `SONIOX_TTS_MODEL` | `tts-rt-v2` | Model giọng đọc của Soniox |
@@ -818,6 +840,7 @@ Xem `.env.example`. Các biến quan trọng:
 | GET | `/api/meetings/{id}/export` | Xuất toàn bộ dữ liệu cuộc họp (kèm vector giọng) dạng JSON |
 | GET / POST | `/api/tts/status`, `/api/tts` | Trạng thái giọng đọc / đọc văn bản thành WAV (Piper trên máy) |
 | POST | `/api/tts/stream` | Đọc văn bản, trả PCM 16-bit từng mảnh (header `X-Sample-Rate`, `X-Tts-Engine`) |
+| POST / DELETE | `/api/meetings/{id}/recording` | Bật / tắt ghi âm (`{enabled, consent}`) / xóa âm thanh đã ghi |
 | GET/PUT | `/api/settings/tts` | Nguồn giọng đọc (auto / soniox / piper) và giọng Soniox |
 | POST | `/api/meetings/{id}/command` | Câu lệnh cho trợ lý, xử lý như khi gọi bằng giọng nói; trả về danh sách sự kiện |
 | POST | `/api/meetings/{id}/stage` | Điều khiển màn hình trình chiếu: `show`, `next`, `prev`, `goto`, `topic`, `back`, `follow` (kèm `follow: true/false`) |

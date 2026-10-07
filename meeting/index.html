@@ -449,7 +449,12 @@
     .report-stage table { font-size: 15px; }
     .turn-find { display: flex; gap: 7px; font-size: 13px; line-height: 1.5; margin: 2px 0; color: rgb(var(--ink) / .9); }
     .turn-find::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 99px; margin-top: 7px; background: rgb(var(--accent)); }
-  </style>
+    .rec-on { color: #FF8A8A; border-color: rgba(255,138,138,.45); }
+  .rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #FF5A5A; margin-right: 6px;
+             animation: recPulse 1.4s ease-in-out infinite; }
+  @keyframes recPulse { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
+</style>
 </head>
 <body class="flex flex-col-reverse sm:flex-row overflow-hidden">
 
@@ -850,6 +855,8 @@ function renderTopbar() {
                  : `<span class="truncate">Đã kết thúc ${esc(fmt.date(m.ended_at))}<span class="hidden sm:inline">, dài ${esc(fmt.dur((m.ended_at || 0) - (m.started_at || 0)))}</span></span>`}
         </div>
       </div>
+      ${live ? `<button class="btn btn-ghost btn-sm shrink-0 ml-1 ${S.room.recording && S.room.recording.enabled ? 'rec-on' : ''}" data-act="rec-toggle"
+          title="${S.room.recording && S.room.recording.enabled ? 'Đang lưu âm thanh cuộc họp trên máy này. Bấm để dừng.' : 'Lưu âm thanh cuộc họp trên máy này (cần mọi người đồng ý)'}">${S.room.recording && S.room.recording.enabled ? '<span class="rec-dot"></span>Đang ghi âm' : 'Ghi âm: tắt'}</button>` : ''}
       ${live ? `<button class="btn btn-ghost btn-sm shrink-0 ml-1" data-act="end-meeting"><span class="sm:hidden">Kết thúc</span><span class="hidden sm:inline">Kết thúc cuộc họp</span></button>` : ''}
       <button class="icon-btn shrink-0" data-act="room-menu" aria-label="Tùy chọn cuộc họp" title="Tùy chọn cuộc họp">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
@@ -1067,6 +1074,7 @@ function applySnapshot(d) {
   R.suggestions = new Map((d.suggestions || []).map(s => [s.inference_id, s]));
   R.artifacts = (d.artifacts || []).slice().sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
   if (d.stage) R.stage = d.stage;
+  R.recording = d.recording || { enabled: false, runs: 0, seconds: 0 };
 }
 function renderRoomSkeleton() {
   $('#t-list').innerHTML = '<div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang tải cuộc họp...</div>';
@@ -1140,6 +1148,7 @@ function onEvent(R, ev) {
       break;
     case 'suggestion_resolved': R.suggestions.delete(ev.inference_id); renderSuggestions(); break;
     case 'stream_status': onStreamStatus(ev); break;
+    case 'recording': R.recording = ev.recording; renderTopbar(); break;
     case 'ai_listening': {
       const t = newTurn('', 'voice'); t.listening = true; switchTab('jarvis'); renderJarvis(); break;
     }
@@ -4265,6 +4274,32 @@ async function exportMeetingData(mid) {
     toast('Đã xuất dữ liệu phân tích (kèm vector giọng).');
   } catch (e) { toast(e.message, 'err'); }
 }
+/** Ghi âm cuộc họp (dữ liệu sinh trắc học): chỉ bật khi chủ phòng xác nhận mọi người trong phòng đã đồng ý. */
+async function toggleRecording() {
+  const R = S.room; if (!R) return;
+  const on = R.recording && R.recording.enabled;
+  if (!on) {
+    const days = (R.recording && R.recording.retention_days) || 30;
+    const ok = await confirmDialog({ title: 'Bật ghi âm cuộc họp?', ok: 'Mọi người đã đồng ý, bật ghi âm',
+      body: `Âm thanh từ lúc này được lưu trên máy chạy ứng dụng (thư mục data/recordings), không đưa lên Atlas, tự xóa sau ${days} ngày, xóa được bất cứ lúc nào trong menu cuộc họp. Giọng nói là dữ liệu sinh trắc học (Nghị định 13/2023/NĐ-CP): chỉ bật khi MỌI NGƯỜI trong phòng đã đồng ý. Dùng để chạy lại và so sánh các cách phân biệt người nói.` });
+    if (!ok) return;
+  }
+  try {
+    R.recording = await POST(`/api/meetings/${R.id}/recording`, { enabled: !on, consent: !on });
+    renderTopbar();
+    toast(on ? 'Đã dừng ghi âm.' : 'Đang ghi âm cuộc họp trên máy này.', 'info');
+  } catch (e) { toast(e.message, 'err'); }
+}
+async function deleteRecording() {
+  const R = S.room; if (!R) return;
+  const ok = await confirmDialog({ title: 'Xóa bản ghi âm?', body: 'Toàn bộ âm thanh đã lưu của cuộc họp này bị xóa vĩnh viễn. Bản chép lời và người nói vẫn giữ nguyên.', ok: 'Xóa bản ghi âm', danger: true });
+  if (!ok) return;
+  try {
+    await fetch(`/api/meetings/${R.id}/recording`, { method: 'DELETE' });
+    R.recording = { ...(R.recording || {}), enabled: false, runs: 0, seconds: 0 };
+    renderTopbar(); toast('Đã xóa bản ghi âm.');
+  } catch (e) { toast(e.message, 'err'); }
+}
 async function reanalyzeMeeting() {
   const R = S.room; if (!R) return;
   const ok = await confirmDialog({ title: 'Phân tích lại người nói?', body: 'Hệ thống chạy lại nhận diện người nói cho toàn bộ cuộc họp bằng thuật toán hiện tại. Tên đã đặt được giữ cho người tương ứng; nên kiểm tra lại sau khi chạy xong.', ok: 'Phân tích lại' });
@@ -4342,8 +4377,11 @@ document.addEventListener('click', async e => {
     }
     case 'room-menu': {
       const R = S.room; if (!R) return;
-      const c = await openMenu(el, [{ id: 'reanalyze', text: 'Phân tích lại người nói' }, { id: 'export', text: 'Xuất Markdown' }, { id: 'export-data', text: 'Xuất dữ liệu phân tích (JSON)' },
-                                    { id: 'delete', text: 'Xóa cuộc họp', danger: true }]);
+      const items = [{ id: 'reanalyze', text: 'Phân tích lại người nói' }, { id: 'export', text: 'Xuất Markdown' }, { id: 'export-data', text: 'Xuất dữ liệu phân tích (JSON)' }];
+      if (R.recording && R.recording.runs) items.push({ id: 'rec-delete', text: `Xóa bản ghi âm (${fmt.dur(R.recording.seconds || 0)})`, danger: true });
+      items.push({ id: 'delete', text: 'Xóa cuộc họp', danger: true });
+      const c = await openMenu(el, items);
+      if (c === 'rec-delete') deleteRecording();
       if (c === 'reanalyze') reanalyzeMeeting();
       if (c === 'export-data') exportMeetingData(S.room.id);
       if (c === 'export') exportMarkdown(R.id);
@@ -4356,6 +4394,7 @@ document.addEventListener('click', async e => {
       return renderHub();
     case 'mic-toggle': if (!S.room) return; return (MIC.on && MIC.mid === S.room.id) ? stopMic() : startMic(S.room.id);
     case 'end-meeting': return endMeeting();
+    case 'rec-toggle': return toggleRecording();
     case 'rename': if (sid) return openRename(sid); return;
     case 'spk-menu': return speakerMenu(el, sid);
     case 'line-menu': return lineMenu(el, parseInt(el.dataset.seq, 10));

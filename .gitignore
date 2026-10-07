@@ -60,3 +60,6 @@ data/
 
 # Node (Claude Code / Codex / Gemini CLI cài riêng cho dự án bằng pnpm mst-urbox install)
 node_modules/
+
+# Nemotron-3-Diarization (thử nghiệm, tải bằng scripts/nemotron_diar.py --download)
+models/nemotron-diar/
