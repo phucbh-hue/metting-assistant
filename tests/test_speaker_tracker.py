@@ -283,6 +283,31 @@ class AnchorTests(unittest.TestCase):
         names = [p.name for p in sp.visible_profiles() if p.voice_id == 101]
         self.assertEqual(names, ["Bùi Hồng Phúc"])
 
+    def test_vague_voiceprint_does_not_pull_everyone_into_one_person(self):
+        """Lỗi thật #57: mẫu giọng thu ở máy khác giống cả 2 người như nhau, cả buổi bị dồn vào hồ sơ có mẫu giọng."""
+        bank = VoiceBank(seed=23, n=2, channel=0.9)
+        vague = voice.unit(bank.enrollment(0) + bank.enrollment(1))
+        sp = voice.MeetingSpeakers(anchors={26: {"name": "Bùi Hồng Phúc", "vector": vague}})
+        keys = script_add(sp, bank, [(i % 2, str(i % 2 + 1), 4.0) for i in range(12)])
+        self.assertEqual(len(sp.visible_profiles()), 2)
+        self.assertEqual(sp.pop_merges(), [])
+        self.assertEqual(len({label(sp, k) for k in keys[0::2]}), 1)
+        self.assertEqual(len({label(sp, k) for k in keys[1::2]}), 1)
+        self.assertNotEqual(label(sp, keys[0]), label(sp, keys[1]))
+
+    def test_voiceprint_profile_does_not_swallow_other_people(self):
+        """Lỗi thật #48: cùng phòng, cùng mic nên ai cũng hơi giống mẫu giọng; hồ sơ mang mẫu giọng gộp mọi hồ sơ
+        mới giống nó từ 0.45, bỏ qua nhãn Soniox -> 4 người còn 2."""
+        bank = VoiceBank(seed=24, n=3, channel=1.4)
+        sp = voice.MeetingSpeakers(anchors={26: {"name": "Bùi Hồng Phúc", "vector": bank.enrollment(0)}})
+        script = [(k, str(k + 1), 4.0) for _ in range(5) for k in range(3)]
+        keys = script_add(sp, bank, script)
+        self.assertEqual(len(sp.visible_profiles()), 3)
+        for who in range(3):
+            got = {label(sp, k) for i, k in enumerate(keys) if script[i][0] == who}
+            self.assertEqual(len(got), 1, f"người {who}: {got}")
+        self.assertEqual(label(sp, keys[0]), "Bùi Hồng Phúc")
+
     def test_update_anchors_names_existing_profile(self):
         """Lưu mẫu giọng giữa buổi họp -> hồ sơ đang có được gắn tên ngay."""
         bank = VoiceBank(seed=22)

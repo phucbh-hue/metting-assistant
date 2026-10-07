@@ -320,6 +320,8 @@ class MeetingSpeakers:
     ANCHOR_T_WEAK = 0.58       # ... khi hồ sơ mới có ít dữ liệu (>= ANCHOR_MIN_W)
     ANCHOR_MARGIN = 0.06
     ANCHOR_MIN_W = 1.0
+    ANCHOR_PROFILE_MARGIN = 0.06   # Mẫu giọng phải giống hồ sơ được gắn hơn mọi hồ sơ khác trong buổi họp ngần này
+    ANCHOR_T_SOLO = 0.65           # ... chưa có hồ sơ nào khác đủ dữ liệu để so: phải khớp rất rõ
     # Tách hồ sơ: Soniox đôi khi dùng lại nhãn của một người cho người mới (ví dụ khách mời vừa xem video,
     # rồi người trong phòng nói). Từng câu lẻ không đủ để phân biệt (cùng phòng, cùng mic nên vẫn giống ~0.5),
     # nhưng các câu của người mới rất giống NHAU -> tách được khi đã đủ dữ liệu.
@@ -668,11 +670,18 @@ class MeetingSpeakers:
         if best < thr or (best - second) < self.ANCHOR_MARGIN:
             return
         if vid in bound:
-            # Mẫu giọng đã gắn với hồ sơ khác: có thể là cùng một người bị tách đôi -> gộp nếu giọng gần nhau
-            q = bound[vid]
-            qc = q.centroid()
-            if qc is not None and cosine_sim(c, qc) >= 0.45 and not (p.name and q.name and p.name != q.name):
-                self.merge(p.sid, q.sid, auto=True)
+            # Mẫu giọng đã thuộc về hồ sơ khác: không gộp ở đây. Lỗi thật #48 / #57: gộp ngay khi 2 hồ sơ giống 0.45,
+            # bỏ qua "không gộp lại" và nhãn Soniox, nên mỗi người mới tách ra lại bị gộp về hồ sơ có mẫu giọng
+            # (#48: 4 người còn 2, tách-gộp 115 lần; #57: 2 người còn 1). Hai hồ sơ thật sự là một người thì
+            # _maybe_merge gộp theo luật chung.
+            return
+        # Mẫu giọng thu ở máy / phòng khác giống mọi người trong phòng ~0.5 (#57: anh Phúc 0.50, anh Duy 0.50):
+        # chỉ gắn khi mẫu giọng giống hồ sơ này hơn hẳn mọi hồ sơ khác; chưa có ai khác để so thì phải khớp rất rõ.
+        others = [cosine_sim(q.centroid(), self.anchors[vid]["vector"]) for q in self.active_profiles()
+                  if q.sid != p.sid and q.weight >= self.RELIABLE_W and q.centroid() is not None]
+        if others and best - max(others) < self.ANCHOR_PROFILE_MARGIN:
+            return
+        if not others and best < self.ANCHOR_T_SOLO:
             return
         if p.name and p.origin in ("manual", "ai") and p.name.casefold() != self.anchors[vid]["name"].casefold():
             return

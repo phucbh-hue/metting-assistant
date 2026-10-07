@@ -7,7 +7,7 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng người Việt tự nhiên của Soniox, đọc rõ cả từ tiếng
 Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy, miễn phí), vừa làm vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.13.0 - cập nhật 05/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.13.1 - cập nhật 07/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
@@ -39,6 +39,24 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 - Câu trợ lý nói được gửi tới Soniox để đọc. Muốn không gửi ra ngoài, chọn **Trên máy (Piper)** trong Cài đặt, hoặc đặt
   `TTS_ENGINE=piper`.
 - Không có khóa Soniox, mất mạng hoặc Soniox lỗi trước khi có tiếng: tự đọc bằng Piper trên máy như cũ.
+
+### Phân biệt người nói khi đã lưu mẫu giọng (bản 3.13.1)
+- Lỗi thật:
+  - #48: phòng 4 người nhưng chỉ ra 2 người, hồ sơ "Bùi Hồng Phúc" tự tách rồi tự gộp lại 115 lần.
+  - #57: 2 người (anh Phúc, anh Duy) nhưng cả 81 câu dồn vào "Bùi Hồng Phúc".
+- Nguyên nhân: mẫu giọng thu ở điều kiện khác (máy, mic, khoảng cách) giống mọi người trong phòng khoảng 0,5. Ở #57, mẫu
+  giọng giống anh Phúc 0,50 và anh Duy cũng 0,50.
+  - Kho chỉ có một mẫu giọng nên phép so "giống mẫu này hơn hẳn mẫu khác" luôn qua.
+  - Hồ sơ mang mẫu giọng gộp mọi hồ sơ mới giống nó từ 0,45, bỏ qua "không gộp lại" và nhãn Soniox.
+- Bây giờ:
+  - Mẫu giọng chỉ gắn vào hồ sơ giống nó hơn hẳn mọi hồ sơ khác trong buổi họp (chênh ít nhất 0,06). Chưa có ai khác để
+    so thì phải khớp rất rõ (từ 0,65).
+  - Mẫu giọng không còn tự gộp hồ sơ. Hai hồ sơ thật sự là một người thì gộp theo luật chung.
+- Chạy lại, có mẫu giọng: #48 ra đúng 4 người (95% câu đúng), #57 ra đúng 2 người (98%, trước là 54%).
+- Bộ ngưỡng chỉnh tay chưa commit (05/10/2026) được trả về bản 3.13.0: trên #48 bộ đó chỉ ra 3 người (79%). Ngưỡng tách
+  2 giọng gần nhau tăng lên 0,30 nên không tách được 2 giọng nữ.
+- Cuộc họp cũ muốn áp dụng: khởi động lại `run.cmd`, mở cuộc họp, nút Tùy chọn cuộc họp > Phân tích lại người nói. Nên thu
+  lại mẫu giọng trong phòng họp, bằng đúng mic hay dùng, để mẫu giọng nhận ra đúng người.
 
 ## 2. Bản 3.12: sơ đồ tư duy kiểu NotebookLM, bấm vào ý để nghe giải thích, thuyết trình sơ đồ và dashboard
 
