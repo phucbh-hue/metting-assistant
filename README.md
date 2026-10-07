@@ -7,12 +7,39 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng người Việt tự nhiên của Soniox, đọc rõ cả từ tiếng
 Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy, miễn phí), vừa làm vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.13.3 - cập nhật 07/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.14.0 - cập nhật 07/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
 
-## 1. Có gì mới ở bản 3.13: giọng đọc tự nhiên, đọc rõ tiếng Anh
+## 1. Có gì mới ở bản 3.14: nhận diện giọng bằng ERes2NetV2
+
+### Đổi model trích vector giọng từ CAM++ sang ERes2NetV2
+- Model mới: ERes2NetV2 (3D-Speaker, huấn luyện trên khoảng 200 nghìn người nói, 192 chiều, 71 MB, chạy qua sherpa-onnx như
+  CAM++). `pnpm mst-urbox build` tải cả hai model, có kiểm tra kích thước và SHA-256.
+- Đo ngày 07/10/2026 trên 2 đoạn hội thoại YouTube (3 giọng: người dẫn, Nam, Hương; 30 đoạn, đáp án gán theo nội dung):
+  - CAM++: nhận nhầm (EER) khoảng 13%.
+  - ERes2NetV2: khoảng 8%.
+  - Tốc độ: ERes2NetV2 mất khoảng 0,11 giây xử lý cho 1 giây âm thanh trên CPU (CAM++ khoảng 0,013), vẫn đủ nhanh theo
+    thời gian thực.
+  - Bộ đo nhỏ. Cần xác nhận thêm trên cuộc họp thật nhiều người.
+- ERes2NetV2 cho điểm độ giống cao hơn CAM++ khoảng 0,05-0,08 ở vùng 0,2-0,7, gần như bằng nhau trên 0,8 (tương quan 0,91).
+  Các ngưỡng độ giống của bộ tách người nói được quy đổi theo đó. Ví dụ: ngưỡng nhận vào hồ sơ 0,46 thành 0,54, ngưỡng gộp
+  0,68 thành 0,72. Các khoảng chênh giữ nguyên.
+- Vector của 2 model không so được với nhau:
+  - Mỗi câu và mỗi mẫu giọng lưu kèm tên model (`emb_model`; dữ liệu cũ chưa có là CAM++).
+  - Cuộc họp cũ "Phân tích lại người nói" vẫn dùng vector CAM++ của chính nó.
+  - Mẫu giọng thu bằng CAM++ không dùng được với ERes2NetV2: cần thu lại mẫu giọng (trang Hồ sơ giọng nói > Thu mẫu giọng).
+    Thu lại sẽ thay hẳn vector cũ, không trộn 2 model.
+- Hệ thống không lưu âm thanh, nên cuộc họp cũ không tính lại vector bằng model mới được.
+- Muốn quay lại CAM++: đặt `VOICE_MODEL=campplus` trong `.env` rồi khởi động lại.
+
+### Sửa thêm
+- "Phân tích lại người nói" không còn đưa tên lấy từ mẫu giọng cho người nói câu đầu tiên của hồ sơ cũ. Lỗi thật #57:
+  tên "Bùi Hồng Phúc" rơi vào hồ sơ anh Duy.
+- Đặt tay một tên khác tên của mẫu giọng đang gắn thì bỏ liên kết mẫu giọng đó.
+
+## 2. Bản 3.13: giọng đọc tự nhiên, đọc rõ tiếng Anh
 
 ### Giọng Soniox thay cho Piper
 - Lỗi cũ: giọng Piper (vais1000) chỉ đọc được tiếng Việt; từ tiếng Anh trong câu trả lời đọc theo bảng phiên âm nên rất khó
@@ -71,7 +98,7 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
   (40% đơn năm ngoái rơi vào khung này), 1 lượt gọi, 0,015 USD.
 - Sơ đồ đã soạn lời thuyết trình kiểu cũ (chỉ tới nhánh cấp 1) được soạn lại ở lần bấm Thuyết trình tiếp theo.
 
-## 2. Bản 3.12: sơ đồ tư duy kiểu NotebookLM, bấm vào ý để nghe giải thích, thuyết trình sơ đồ và dashboard
+## 3. Bản 3.12: sơ đồ tư duy kiểu NotebookLM, bấm vào ý để nghe giải thích, thuyết trình sơ đồ và dashboard
 
 ### Sơ đồ tư duy kiểu NotebookLM
 - "Bông ơi, vẽ sơ đồ..." mặc định ra sơ đồ tư duy: chủ đề ở gốc bên trái, các nhánh tỏa sang phải, mỗi nhánh một màu, ý
@@ -147,7 +174,7 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 - Không có manh mối tên trong lời nói thì AI không đoán được (ví dụ chỉ ra lệnh cho trợ lý). Muốn trợ lý luôn nhận ra
   một người, hãy thu mẫu giọng của người đó (trang Hồ sơ giọng nói > Thu mẫu giọng, khi người đó đồng ý).
 
-## 3. Bản 3.11: cài trên máy mới bằng 3 lệnh, nhập khóa và kết nối gói ngay trên giao diện
+## 4. Bản 3.11: cài trên máy mới bằng 3 lệnh, nhập khóa và kết nối gói ngay trên giao diện
 
 ### Cài trên máy mới
 Cần sẵn: Node.js 20 trở lên, pnpm (`corepack enable pnpm` hoặc https://pnpm.io), Python 3.10 trở lên (khuyên 3.12) và git.
@@ -194,7 +221,7 @@ Mở Cài đặt (biểu tượng bánh răng), rồi:
 - Ứng dụng biết đăng nhập xong khi tệp đăng nhập của công cụ được ghi mới, hoặc công cụ báo thành công; tối đa 6 phút.
 - Claude Code, Codex, Gemini CLI cài riêng trong `node_modules` của dự án được tìm tự động, không cần cài toàn cục.
 
-## 4. Bản 3.10: quay lại nội dung đã trình bày, màu UrBox, linh vật linh động
+## 5. Bản 3.10: quay lại nội dung đã trình bày, màu UrBox, linh vật linh động
 
 ### Quay lại nội dung đã trình bày
 Nguyên nhân (xem lại cuộc họp #41, #42): câu "quay lại cái bộ slide mà em vừa trình bày trước đó" không khớp lệnh nào nên
@@ -236,7 +263,7 @@ phóng" còn bị hiểu thành slide số 2.
   theo âm lượng, hai tay luân phiên nhấn ý. Có kết quả: nhảy ăn mừng và tung hoa giấy tím vàng hồng.
 - Áp dụng cho cả linh vật UrBox, hộp quà và khuôn mặt tròn; máy bật giảm chuyển động thì chỉ giữ chớp mắt và miệng.
 
-## 5. Bản 3.9: mở tài liệu, kịch bản, gói đăng ký, chọn model
+## 6. Bản 3.9: mở tài liệu, kịch bản, gói đăng ký, chọn model
 
 ### Mở tài liệu trên máy để trình bày
 - Nói "<tên gọi> ơi, mở file kế hoạch Q4 trong Downloads", "mở cái PowerPoint mega sale", "chiếu file pdf báo cáo tháng 9"
@@ -323,7 +350,7 @@ bản) đi qua nguồn đã chọn:
     mô hình nếu chưa tắt trong cài đặt quyền riêng tư của gói. Nội dung cuộc họp nội bộ nên đi qua gói doanh nghiệp
     (Claude Team / Enterprise, ChatGPT Business / Enterprise, Google Workspace) hoặc API key.
 
-## 6. Bản 3.8: tối ưu chi phí, linh vật UrBox
+## 7. Bản 3.8: tối ưu chi phí, linh vật UrBox
 
 ### Tối ưu chi phí gọi AI
 Phạm vi: mọi chỗ gọi Claude của ứng dụng, chạy trên Claude API của Anthropic, model `claude-opus-4-7`. Dữ liệu: nhật ký
@@ -377,7 +404,7 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
   nói, nơ lắc, vẫy tay khi nghe.
 - Đổi qua lại giữa linh vật UrBox, hộp quà và khuôn mặt tròn: Cài đặt > Hình đại diện trợ lý.
 
-## 7. Bản 3.7: lưu trên máy khi mất Atlas, tra cứu bằng Playwright
+## 8. Bản 3.7: lưu trên máy khi mất Atlas, tra cứu bằng Playwright
 
 ### Không còn mất lịch sử cuộc họp khi Atlas lỗi
 - Nguyên nhân mất lịch sử: máy hiện không kết nối được MongoDB Atlas (Atlas từ chối bắt tay TLS, thường do IP của máy chưa
@@ -412,11 +439,11 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
 - Chạy `run.cmd` khi server cũ vẫn còn ở cửa sổ khác: hỏi dừng server cũ (Y) hay giữ server cũ và chỉ mở trình duyệt
   (N, mặc định sau 20 giây), thay vì báo lỗi trùng cổng 8080.
 
-## 8. Bản 3.6: cổng gọi AI, xuất dữ liệu
+## 9. Bản 3.6: cổng gọi AI, xuất dữ liệu
 
 ### Tra cứu trên mạng
 - "UrBox ơi, em search giúp anh coi giá vàng đang bao nhiêu": trợ lý tìm trên web (bản 3.6 dùng công cụ web_search của
-  Claude, tối đa 5 lượt tìm; từ bản 3.7 mặc định dùng trình duyệt, xem mục 7), viết báo cáo "Tra cứu: ..." gồm kết luận, chi tiết, liên hệ với cuộc họp và danh sách nguồn, chiếu lên
+  Claude, tối đa 5 lượt tìm; từ bản 3.7 mặc định dùng trình duyệt, xem mục 8), viết báo cáo "Tra cứu: ..." gồm kết luận, chi tiết, liên hệ với cuộc họp và danh sách nguồn, chiếu lên
   màn hình, đọc kết luận. Yêu cầu và thời điểm tra cứu được ghi ở cuối báo cáo. Cần `ANTHROPIC_API_KEY`.
 - Một lần tra cứu tốn khoảng 25.000-30.000 token vào (kết quả web tính vào input), tức khoảng 0,15-0,20 USD với Opus 4.7.
 
@@ -431,7 +458,7 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
   hồ sơ người nói, sản phẩm AI, nhật ký gọi AI. Dùng khi server đang chạy DB tạm (in-memory) để không mất dữ liệu, hoặc để
   gửi cho người phân tích lỗi nhận diện người nói.
 
-## 9. Bản 3.4: trợ lý thuyết trình, nội dung bám sát, MCP data server
+## 10. Bản 3.4: trợ lý thuyết trình, nội dung bám sát, MCP data server
 
 ### Trợ lý tự thuyết trình
 - "Thanh ơi, thuyết trình giúp anh" / "present slide" / "tự chuyển slide và nói nội dung bên trong": trợ lý đọc nội dung
@@ -471,7 +498,7 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
   thành người nói mới ngay, không bị gộp vào người đang nói; câu ngắn theo người vừa được nhận ra bằng giọng.
 - Model trợ lý mặc định đổi sang `claude-opus-4-7` (`CLAUDE_MODEL` trong `.env`); muốn nhanh và rẻ hơn dùng `claude-sonnet-5-5`.
 
-## 10. Bản 3.3: slide theo lời trình bày, ghép lệnh bị cắt
+## 11. Bản 3.3: slide theo lời trình bày, ghép lệnh bị cắt
 
 ### Slide tự chuyển theo lời trình bày
 
@@ -500,7 +527,7 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
 - Đo trên 5 cuộc họp thật có nhãn đúng gần đúng: 87,0% -> 89,2% câu (#37: 91% -> 100%, #36: 83% -> 86%), các
   cuộc họp khác không đổi.
 
-## 11. Bản 3.2: kết quả luôn hiện ra, dashboard, giọng đọc chạy trên máy
+## 12. Bản 3.2: kết quả luôn hiện ra, dashboard, giọng đọc chạy trên máy
 
 ### Trợ lý trả lời có nội dung thật và luôn hiện kết quả
 
@@ -547,7 +574,7 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
   Mô phỏng trên #31: bấm một lần ở câu đầu của khách mời thì đúng 95% câu.
 - Giới hạn: giọng phát qua loa máy tính bị kênh âm thanh làm giống nhau; họp trực tiếp với người thật tách tốt hơn.
 
-## 12. Bản 3.1: khuôn mặt, màn hình trình chiếu, tên gọi
+## 13. Bản 3.1: khuôn mặt, màn hình trình chiếu, tên gọi
 
 ### Trợ lý có khuôn mặt, giọng nói và màn hình trình chiếu
 
@@ -555,7 +582,7 @@ sau khi chạy thật. Gộp lại, một buổi như #40 ước tính tốn kho
   trình chiếu: bên trái là khuôn mặt trợ lý, bên phải là nội dung đang trình bày (slide, biên bản, sơ đồ, giao diện).
 - Khuôn mặt đổi theo trạng thái: **chờ**, **lắng nghe** (vòng sáng co giãn theo âm lượng mic), **suy nghĩ**
   (vòng nét đứt xoay, mắt nhìn lên), **nói** (miệng mấp máy theo lời). Nét mặt vui hoặc lo lắng theo nội dung.
-- Giọng nói: từ bản 3.2 dùng giọng Piper chạy trên máy chủ (xem mục 11); giọng của trình duyệt chỉ là dự phòng.
+- Giọng nói: từ bản 3.2 dùng giọng Piper chạy trên máy chủ (xem mục 12); giọng của trình duyệt chỉ là dự phòng.
   Giọng trực tuyến "Online (Natural)" của Microsoft Edge chỉ được dùng khi người dùng bấm cho phép (xem mục Lưu ý
   dữ liệu). Nút "Giọng nói" hoặc phím V để bật/tắt; bấm vào khuôn mặt để trợ lý dừng nói.
 - Khi trợ lý đang nói, mic gửi khoảng lặng thay cho âm thanh để giọng trợ lý không lọt vào transcript
@@ -603,7 +630,7 @@ chờ câu yêu cầu tiếp theo trong 8 giây. Câu chỉ nhắc tới tên (v
 - Menu "..." của cuộc họp -> **Phân tích lại người nói**: chạy lại bộ phân vai trên toàn bộ câu đã lưu.
   Tên đã đặt được giữ cho người nói xuất hiện sớm nhất trong nhóm.
 
-## 13. Bản 3.0: sửa lỗi phân biệt người nói
+## 14. Bản 3.0: sửa lỗi phân biệt người nói
 
 | Vấn đề ở bản 2.5 | Nguyên nhân gốc | Cách sửa |
 |---|---|---|
@@ -621,7 +648,7 @@ Khác:
 - Nội dung do AI sinh ra được làm sạch (DOMPurify) và chạy trong iframe sandbox cô lập.
 - Kết thúc cuộc họp trả về ngay, biên bản lập ở chế độ nền.
 
-## 14. Cách phân biệt người nói
+## 15. Cách phân biệt người nói
 
 ```
 Soniox (nhãn người nói theo phiên)  ─┐
@@ -641,7 +668,7 @@ CAM++ (vector giọng 192D mỗi câu)  ──┘          │               │
 
 Ngưỡng được đo trên dữ liệu thật của model CAM++: cùng người câu ngắn 0.3-0.6, câu dài 0.6-0.87; khác người 0.0-0.4.
 
-## 15. Cấu trúc thư mục
+## 16. Cấu trúc thư mục
 
 ```
 meeting-assistant/
@@ -681,9 +708,9 @@ meeting-assistant/
 └── static/
 ```
 
-## 16. Chạy
+## 17. Chạy
 
-Máy mới: `pnpm mst-urbox install`, `pnpm mst-urbox build`, `pnpm mst-urbox web` (xem mục 3).
+Máy mới: `pnpm mst-urbox install`, `pnpm mst-urbox build`, `pnpm mst-urbox web` (xem mục 4).
 Máy đã cài: bấm đúp **`run.cmd`** (hoặc gõ `run` trong terminal) -> server chạy ở http://127.0.0.1:8080 và tự mở
 trình duyệt; lần đầu tự tải giọng đọc tiếng Việt nếu chưa có. `run.cmd demo` chạy bản demo dữ liệu giả lập ở cổng 8090.
 Chạy tay:
@@ -717,7 +744,7 @@ màu riêng -> bấm **Đặt tên** (hoặc xác nhận gợi ý của AI, tick
 Trình bày: nhờ trợ lý soạn slide (hoặc chọn tab **Slide**) -> bấm biểu tượng toàn màn hình ở khung AI ->
 nói "<tên gọi> ơi, chuyển slide", "nhắc bài"... Cần giọng Tiếng Việt cài trên Windows để trợ lý nói thành tiếng.
 
-## 17. Cấu hình
+## 18. Cấu hình
 
 Xem `.env.example`. Các biến quan trọng:
 
@@ -737,6 +764,7 @@ Xem `.env.example`. Các biến quan trọng:
 | `IDENTITY_MIN_INTERVAL_S` | `20` | Khoảng cách tối thiểu giữa 2 lần AI đoán tên |
 | `IDENTITY_AUTO_APPLY_T` | `0.70` | AI đoán tên từ mức này thì tự đặt tên, thấp hơn thì chỉ gợi ý chờ xác nhận |
 | `IDENTITY_FALLBACK_SEGMENTS` | `40` | Không có tên người mới được nhắc thì cứ bấy nhiêu câu mới đoán lại tên một lần |
+| `VOICE_MODEL` | `eres2netv2` nếu đã tải, không thì `campplus` | Model trích vector giọng (`campplus`, `eres2netv2`) |
 | `TTS_ENGINE` | `auto` | `auto` = Soniox nếu có `SONIOX_API_KEY`, `soniox`, `piper` (trên máy); đổi được trong Cài đặt |
 | `TTS_SONIOX_VOICE` | `Linh` | Giọng Soniox: `Linh`, `Mai`, `Huong` |
 | `SONIOX_TTS_MODEL` | `tts-rt-v2` | Model giọng đọc của Soniox |
@@ -755,7 +783,7 @@ Xem `.env.example`. Các biến quan trọng:
 | `DECK_ASSETS_DIR` | `data/deck_assets` | Nơi lưu ảnh từng trang đã dựng |
 | `MCP_SERVER_CMD` / `MCP_SERVER_URL` | | Trỏ trợ lý tới MCP server thật (stdio hoặc http); không đặt thì dùng dữ liệu tại chỗ |
 
-## 18. API chính
+## 19. API chính
 
 | Method | Đường dẫn | Mô tả |
 |---|---|---|
@@ -799,14 +827,14 @@ Xem `.env.example`. Các biến quan trọng:
 | WS | `/ws/meeting/{id}/audio` | PCM16 16kHz mono từ mic (một thiết bị ghi mỗi cuộc họp) |
 | WS | `/ws/meeting/{id}/events` | Sự kiện: `segment`, `segments_relabeled`, `speakers`, `speakers_split`, `interim`, `identity_suggestion`, `ai_progress`, `ai_say`, `ai_insights`, `stage_state`, `stage_command`, `stage_prompt`... |
 
-## 19. Lưu ý dữ liệu
+## 20. Lưu ý dữ liệu
 
 - `data/local_db/` (lưu trên máy khi mất kết nối Atlas) chứa nội dung cuộc họp và vector giọng nói: không chia sẻ, không đưa
   lên git (đã có trong `.gitignore`). Xóa thư mục này khi chưa đồng bộ sẽ mất các cuộc họp trong đó.
 - Mở tài liệu: chỉ quét tên tệp trong các thư mục tài liệu; nội dung tệp chỉ được đọc khi người dùng mở, và được gửi cho
   nguồn AI đang chọn khi nhờ trợ lý tự viết lời hoặc ghép kịch bản. Ảnh trang lưu ở `data/deck_assets/` trên máy.
 - Gói đăng ký (Claude.ai, ChatGPT, Gemini): nội dung cuộc họp đi theo điều khoản của gói đó, không phải điều khoản API.
-  Xem lưu ý ở mục 5 trước khi dùng cho cuộc họp có nội dung nhạy cảm.
+  Xem lưu ý ở mục 6 trước khi dùng cho cuộc họp có nội dung nhạy cảm.
 - Tra cứu trên mạng gửi từ khóa tìm kiếm tới Bing và mở các trang kết quả; không đưa nội dung cuộc họp vào từ khóa.
   Nội dung trang đã đọc (cùng tối đa 2.000 ký tự cuối của cuộc họp để liên hệ) được gửi cho AI để tóm tắt.
 

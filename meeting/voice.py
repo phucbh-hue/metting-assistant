@@ -25,9 +25,49 @@ import numpy as np
 log = logging.getLogger("meeting.voice")
 
 HERE = Path(__file__).resolve().parent
-MODEL_PATH = Path(os.getenv("VOICE_MODEL_PATH", str(HERE.parent / "models" / "speaker.onnx")))
+MODELS_DIR = HERE.parent / "models"
+# Model trích vector giọng (sherpa-onnx, 3D-Speaker). Vector của 2 model KHÔNG so được với nhau: mỗi vector lưu kèm
+# tên model (emb_model; dữ liệu cũ chưa có là CAM++), chỉ so các vector cùng model.
+# Đo 07/10/2026 trên 2 đoạn hội thoại YouTube (3 giọng, 30 đoạn): CAM++ nhận nhầm (EER) ~13%, ERes2NetV2 ~8%;
+# ERes2NetV2 chậm hơn (~0,11 giây xử lý cho 1 giây âm thanh trên CPU, CAM++ ~0,013) nhưng vẫn đủ nhanh theo thời gian thực.
+# ERes2NetV2 cho điểm độ giống cao hơn CAM++ (+0,05..0,08 ở vùng 0,2-0,7, gần như bằng nhau trên 0,8):
+# các ngưỡng độ giống của bộ tách người nói (đo trên CAM++) được quy đổi theo bảng sim_shift.
+MODELS = {
+    "campplus": {"file": "speaker.onnx", "name": "CAM++ (3D-Speaker)", "sim_shift": None},
+    "eres2netv2": {"file": "3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx", "name": "ERes2NetV2 (3D-Speaker)",
+                   "sim_shift": [(0.2, 0.05), (0.5, 0.08), (0.7, 0.04), (0.9, 0.01)]},
+}
+LEGACY_MODEL = "campplus"
+
+
+def _pick_model() -> str:
+    """VOICE_MODEL=campplus | eres2netv2; mặc định ERes2NetV2 nếu đã tải model, không thì CAM++."""
+    want = (os.getenv("VOICE_MODEL") or "").strip().lower()
+    if want in MODELS:
+        return want
+    return "eres2netv2" if (MODELS_DIR / MODELS["eres2netv2"]["file"]).exists() else LEGACY_MODEL
+
+
+MODEL_ID = _pick_model()
+MODEL_NAME = MODELS[MODEL_ID]["name"]
+MODEL_PATH = Path(os.getenv("VOICE_MODEL_PATH") or str(MODELS_DIR / MODELS[MODEL_ID]["file"]))
 RATE = 16000
 DIM = 192
+
+
+def model_of(doc: Optional[Dict[str, Any]]) -> str:
+    """Model đã tạo vector của một câu / mẫu giọng đã lưu (dữ liệu trước khi có trường này là CAM++)."""
+    return ((doc or {}).get("emb_model") or LEGACY_MODEL)
+
+
+def calibrate(t: float, model: str) -> float:
+    """Ngưỡng độ giống đo trên CAM++ -> ngưỡng tương đương của model khác (nội suy theo bảng sim_shift)."""
+    table = (MODELS.get(model) or {}).get("sim_shift")
+    if not table:
+        return t
+    xs = [x for x, _ in table]
+    ys = [y for _, y in table]
+    return round(float(t + np.interp(t, xs, ys)), 4)
 MIN_SEG_S = 1.0          # Câu có ít hơn ngần này giây tiếng nói thực: không tính vector
 MIN_ANCHOR_S = 3.0       # Mẫu lưu cần ít nhất ngần này giây tiếng nói thực
 VOICED_RMS = 300         # Khung 30ms to hơn ngần này (~ -40 dBFS) mới tính là tiếng nói
@@ -57,17 +97,18 @@ def status() -> str:
     if not available():
         return f"Chưa có file model tại {MODEL_PATH}"
     if _warm["running"]:
-        return "Đang nạp model CAM++ vào RAM"
+        return f"Đang nạp model {MODEL_NAME} vào RAM"
     if _warm["error"]:
         return f"Lỗi nạp model: {_warm['error']}"
     if _warm["done"]:
-        return "Sẵn sàng (192D CPU)"
+        return f"Sẵn sàng ({DIM}D CPU)"
     return "Chưa nạp"
 
 
 def get_diagnostics() -> Dict[str, Any]:
     return {
-        "model_name": "CAM++ (3D-Speaker)",
+        "model_name": MODEL_NAME,
+        "model_id": MODEL_ID,
         "dimension": DIM,
         "status": status(),
         "ready": ready(),
@@ -85,7 +126,7 @@ def _extractor():
                 raise RuntimeError(f"Chưa có file model nhận diện giọng: {MODEL_PATH}")
             cfg = sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(MODEL_PATH), num_threads=1)
             if not cfg.validate():
-                raise RuntimeError(f"Config model CAM++ không hợp lệ: {MODEL_PATH}")
+                raise RuntimeError(f"Config model {MODEL_NAME} không hợp lệ: {MODEL_PATH}")
             _ex = sherpa_onnx.SpeakerEmbeddingExtractor(cfg)
         return _ex
 
@@ -105,10 +146,10 @@ def warmup():
         if ex.is_ready(st):
             ex.compute(st)
         _warm["done"] = True
-        log.info("meeting.voice: model CAM++ sẵn sàng sau %.2fs", time.monotonic() - t0)
+        log.info("meeting.voice: model %s sẵn sàng sau %.2fs", MODEL_NAME, time.monotonic() - t0)
     except Exception as e:
         _warm["error"] = str(e)
-        log.error("meeting.voice: nạp model CAM++ thất bại: %s", e)
+        log.error("meeting.voice: nạp model %s thất bại: %s", MODEL_NAME, e)
     finally:
         _warm["running"] = False
 
@@ -345,9 +386,18 @@ class MeetingSpeakers:
     BACKFILL_S = 20.0          # Câu có vector vừa xác định người nói -> các câu ngắn cùng nhãn ngay trước đó theo luôn
     MAX_HISTORY = 2000         # Số câu tối đa giữ trong RAM
 
+    # Ngưỡng tính theo độ giống (đo trên CAM++): quy đổi khi chạy model khác. Các khoảng chênh (margin, gap) giữ nguyên.
+    SIM_ATTRS = ("T_JOIN_SHORT", "T_JOIN", "T_JOIN_LONG", "T_JOIN_BLOCKED", "OVERRIDE_MIN", "SPLIT_MAX", "SPLIT_MAX_LONG",
+                 "SPLIT_MAX_XLONG", "SPLIT_COHESION_MIN", "MERGE_T", "MERGE_T_WEAK", "MERGE_T_DISTINCT", "ANCHOR_T",
+                 "ANCHOR_T_WEAK", "ANCHOR_T_SOLO", "SPLIT_CROSS_T", "SPLIT_SAME_T")
+
     def __init__(self, anchors: Optional[Dict[int, Dict[str, Any]]] = None,
-                 expected_host_id: Optional[int] = None):
-        """anchors: {voice_id: {"name": str, "vector": np.ndarray, "role": str, "department": str}}"""
+                 expected_host_id: Optional[int] = None, model: str = LEGACY_MODEL):
+        """anchors: {voice_id: {"name", "vector", "role", "department", "model"}}; model: model của các vector sẽ đưa vào
+        (mẫu giọng của model khác bị bỏ qua)."""
+        self.model = model if model in MODELS else LEGACY_MODEL
+        for name in self.SIM_ATTRS:
+            setattr(self, name, calibrate(getattr(type(self), name), self.model))
         self.anchors: Dict[int, Dict[str, Any]] = {}
         self.update_anchors(anchors or {}, rebind=False)
         self.host_id = expected_host_id if expected_host_id in self.anchors else None
@@ -371,7 +421,7 @@ class MeetingSpeakers:
     def update_anchors(self, new_anchors: Dict[int, Dict[str, Any]], rebind: bool = True):
         for vid, info in new_anchors.items():
             vec = info.get("vector")
-            if vec is None or not is_valid_vector(vec):
+            if vec is None or not is_valid_vector(vec) or (info.get("model") or LEGACY_MODEL) != self.model:
                 continue
             self.anchors[vid] = {**info, "vector": unit(np.asarray(vec, dtype=np.float32))}
         if rebind:

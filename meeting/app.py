@@ -225,7 +225,7 @@ def _anchor_for(vid: int) -> Dict[int, Dict[str, Any]]:
     if not full or not full.get("embedding") or not voice.is_valid_vector(full["embedding"]):
         return {}
     return {vid: {"name": full["name"], "vector": np.asarray(full["embedding"], dtype=np.float32),
-                  "role": full.get("role", ""), "department": full.get("department", "")}}
+                  "role": full.get("role", ""), "department": full.get("department", ""), "model": voice.model_of(full)}}
 
 
 # ==============================================================================
@@ -599,7 +599,7 @@ async def enroll_voice_audio(name: str = Form(...), role: str = Form(""), depart
     if vec is None:
         raise HTTPException(status_code=400, detail="Không trích xuất được vector đặc trưng giọng nói")
     vid = await asyncio.to_thread(db.save_voice, name, vec.tolist(), role.strip() or "Thành viên",
-                                  department.strip(), email.strip(), "self_enrolled_mic", False, 1, "replace")
+                                  department.strip(), email.strip(), "self_enrolled_mic", False, 1, "replace", voice.MODEL_ID)
     anchor = await asyncio.to_thread(_anchor_for, vid)
     for s in list(live.SESSIONS.values()):
         s.speakers.update_anchors(anchor, rebind=True)
@@ -621,7 +621,7 @@ async def register_voice(name: str = Form(...), role: str = Form(""), department
         if vec is not None:
             embedding = vec.tolist()
     vid = await asyncio.to_thread(db.save_voice, name.strip(), embedding, role.strip(), department.strip(),
-                                  email.strip(), "admin", False, 1, "replace" if embedding else "merge")
+                                  email.strip(), "admin", False, 1, "replace" if embedding else "merge", voice.MODEL_ID)
     return {"success": True, "id": vid, "name": name.strip(), "has_embedding": embedding is not None}
 
 

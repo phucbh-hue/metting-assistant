@@ -13,6 +13,7 @@ if /i "%~1"=="demo" goto :demo
 
 if not exist ".env" goto :noenv
 if not exist "models\speaker.onnx" echo [CANH BAO] Thieu models\speaker.onnx: se khong nhan dien duoc nguoi noi bang giong.
+if not exist "models\3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx" echo [CANH BAO] Chua co model ERes2NetV2 (pnpm mst-urbox build): dang dung CAM++.
 if not exist "models\tts" call :gettts
 
 call :freeport

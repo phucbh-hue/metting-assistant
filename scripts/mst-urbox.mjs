@@ -27,6 +27,12 @@ export const SPEAKER = {
   size: 28281138, sha256: 'f682b514c05d947ee3fa91cd6ec6c5c7543479a128373fa29b1faedccd21fd11',
   path: join(ROOT, 'models', 'speaker.onnx'),
 };
+// Model mặc định từ bản 3.14 (ERes2NetV2, 3D-Speaker): phân biệt người rõ hơn CAM++; CAM++ vẫn giữ cho cuộc họp cũ
+export const SPEAKER_V2 = {
+  url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx',
+  size: 71441526, sha256: 'bf1a75b9930474cf3389ef415e6e5d38ca96fea4a3a00f7e301d080a58ee2239',
+  path: join(ROOT, 'models', '3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx'),
+};
 export const SECRET_KEYS = ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'SONIOX_API_KEY', 'MONGODB_URL', 'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET'];
 const PY_ENV = { PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1', PYTHONUNBUFFERED: '1' };
 
@@ -120,10 +126,12 @@ export async function download(url, dest, expectSize, expectSha256) {
   renameSync(part, dest);
 }
 async function ensureSpeakerModel() {
-  if (existsSync(SPEAKER.path) && statSync(SPEAKER.path).size === SPEAKER.size) { say('Model nhận diện giọng (CAM++) đã có.'); return; }
-  say('Tải model nhận diện giọng CAM++ (28 MB, sherpa-onnx)...');
-  try { await download(SPEAKER.url, SPEAKER.path, SPEAKER.size, SPEAKER.sha256); say('Đã tải models/speaker.onnx.'); }
-  catch (e) { fail(`Không tải được model nhận diện giọng: ${e.message}. Kiểm tra mạng rồi chạy lại pnpm mst-urbox build.`); }
+  for (const [m, label] of [[SPEAKER_V2, 'ERes2NetV2 (71 MB, model mặc định)'], [SPEAKER, 'CAM++ (28 MB, cho cuộc họp cũ)']]) {
+    if (existsSync(m.path) && statSync(m.path).size === m.size) { say(`Model nhận diện giọng ${label.split(' (')[0]} đã có.`); continue; }
+    say(`Tải model nhận diện giọng ${label}, sherpa-onnx...`);
+    try { await download(m.url, m.path, m.size, m.sha256); say(`Đã tải ${relative(ROOT, m.path)}.`); }
+    catch (e) { fail(`Không tải được model nhận diện giọng: ${e.message}. Kiểm tra mạng rồi chạy lại pnpm mst-urbox build.`); }
+  }
 }
 
 // ---------------------------------------------------------------- pnpm
@@ -239,8 +247,8 @@ function doctor() {
     const miss = capture(py, ['-c', 'import importlib.util as u; m=[x for x in ["fastapi","uvicorn","sherpa_onnx","numpy","pymongo","mongomock","anthropic","websockets","playwright","pypdfium2","docx","pptx"] if not u.find_spec(x)]; print(",".join(m))']);
     add(miss === '', 'Thư viện Python', miss === '' ? 'đủ' : `thiếu: ${miss || '?'} (pnpm mst-urbox install)`);
   }
-  const sm = existsSync(SPEAKER.path) && statSync(SPEAKER.path).size === SPEAKER.size;
-  add(sm, 'Model nhận diện giọng', sm ? 'models/speaker.onnx' : 'chưa có: pnpm mst-urbox build');
+  const sm = existsSync(SPEAKER_V2.path) && statSync(SPEAKER_V2.path).size === SPEAKER_V2.size;
+  add(sm, 'Model nhận diện giọng', sm ? 'ERes2NetV2 (models/)' : 'chưa có ERes2NetV2: pnpm mst-urbox build');
   add(existsSync(join(ROOT, 'models', 'tts')), 'Giọng đọc tiếng Việt', existsSync(join(ROOT, 'models', 'tts')) ? 'models/tts' : 'chưa có: pnpm mst-urbox build');
   const envPath = join(ROOT, '.env');
   if (existsSync(envPath)) {

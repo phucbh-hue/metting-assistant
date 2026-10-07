@@ -4,6 +4,8 @@ import json
 import unittest
 from unittest import mock
 
+import numpy as np
+
 from tests.helpers import VoiceBank, reset_db
 from meeting import artifacts, db, identity, live
 
@@ -442,6 +444,32 @@ class ReanalyzeTests(SessionTestCase):
         s = await live.get_session(mid)
         res = await s.reanalyze()
         self.assertEqual(sorted(p["label"] for p in res["speakers"]), ["Người nói 1", "Người nói 2"])
+
+    async def test_model_switch_keeps_vectors_apart(self):
+        """Đổi model giọng: cuộc họp cũ (vector CAM++) phân tích lại bằng chính CAM++; cuộc họp mới dùng model mới;
+        mẫu giọng thu bằng model cũ được thay, không trộn với vector model mới."""
+        from meeting import voice
+        bank = VoiceBank(seed=18, n=2, channel=0.8)
+        mid = db.create_meeting("Họp cũ")
+        t = 0.0
+        for i, (k, raw) in enumerate([(0, "1"), (1, "2")] * 4, 1):
+            db.add_segment(mid, t, t + 5.0, "Người nói 1", f"câu {i}", raw_embedding=bank.vec(k, 4.0).tolist(), seq=i,
+                           speaker_key=1, raw_speaker=raw, epoch=0, voiced=4.0)          # chưa có emb_model = CAM++
+            t += 6.0
+        db.upsert_speakers(mid, [{"sid": 1, "name": "", "label": "Người nói 1", "origin": "new", "n_segments": 8}])
+        with mock.patch.object(voice, "MODEL_ID", "eres2netv2"):
+            s = await live.get_session(mid)
+            self.assertEqual(s.speakers.model, "eres2netv2")
+            self.assertEqual(s.speakers.vectors_of(1), ([], []))       # vector CAM++ không nạp vào bộ theo dõi ERes2Net
+            res = await s.reanalyze()
+            self.assertEqual(s.speakers.model, "campplus")              # phân tích lại bằng vector của chính cuộc họp
+            self.assertEqual(len(res["speakers"]), 2)
+            vid = db.save_voice("Lan", bank.enrollment(0).tolist(), mode="merge", emb_model="campplus")
+            new_vec = bank.enrollment(1)
+            db.save_voice("Lan", new_vec.tolist(), mode="merge", emb_model="eres2netv2", n_samples=3)
+            v = db.get_voice(vid)
+            self.assertEqual((v["emb_model"], v["n_samples"]), ("eres2netv2", 3))   # thay hẳn, không trộn 2 model
+            self.assertAlmostEqual(float(np.dot(v["embedding"], voice.unit(new_vec))), 1.0, places=4)
 
     def test_rename_drops_a_wrong_voiceprint_link(self):
         """Đặt tay tên khác tên mẫu giọng đang gắn: bỏ liên kết mẫu giọng (và vai trò của mẫu) khỏi hồ sơ đó."""

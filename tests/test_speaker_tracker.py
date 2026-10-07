@@ -318,6 +318,28 @@ class AnchorTests(unittest.TestCase):
         self.assertEqual(label(sp, keys[0]), "Trần Thu Hằng")
 
 
+class ModelTests(unittest.TestCase):
+    """Đổi model trích vector giọng (CAM++ -> ERes2NetV2): vector 2 model không bao giờ so với nhau."""
+
+    def test_thresholds_follow_the_model_scale(self):
+        cam = voice.MeetingSpeakers()
+        eres = voice.MeetingSpeakers(model="eres2netv2")
+        self.assertEqual(cam.T_JOIN, voice.MeetingSpeakers.T_JOIN)
+        self.assertGreater(eres.T_JOIN, cam.T_JOIN)                       # ERes2NetV2 cho điểm cao hơn
+        self.assertAlmostEqual(eres.SPLIT_SAME_T - cam.SPLIT_SAME_T, 0.016, places=3)   # gần 0.9 hầu như không lệch
+        self.assertEqual(eres.JOIN_MARGIN, cam.JOIN_MARGIN)               # khoảng chênh giữ nguyên
+        self.assertEqual(voice.MeetingSpeakers(model="khong-co").model, "campplus")
+
+    def test_voiceprint_of_another_model_is_ignored(self):
+        bank = VoiceBank(seed=25)
+        anchors = {26: {"name": "Bùi Hồng Phúc", "vector": bank.enrollment(0)},                 # mẫu cũ: CAM++
+                   27: {"name": "Lan", "vector": bank.enrollment(1), "model": "eres2netv2"}}
+        self.assertEqual(set(voice.MeetingSpeakers(anchors=anchors).anchors), {26})
+        self.assertEqual(set(voice.MeetingSpeakers(anchors=anchors, model="eres2netv2").anchors), {27})
+        self.assertEqual(voice.model_of({}), "campplus")
+        self.assertEqual(voice.model_of({"emb_model": "eres2netv2"}), "eres2netv2")
+
+
 class PersistenceTests(unittest.TestCase):
     def test_export_and_load_state_roundtrip(self):
         bank = VoiceBank(seed=30)

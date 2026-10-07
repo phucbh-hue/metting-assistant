@@ -262,7 +262,7 @@ def _unit(v: Iterable[float]) -> List[float]:
 
 def save_voice(name: str, embedding: Optional[List[float]], role: str = "", department: str = "", email: str = "",
                consent_by: str = "", auto_learned: bool = False, n_samples: int = 1,
-               mode: str = "merge") -> int:
+               mode: str = "merge", emb_model: str = "campplus") -> int:
     """Lưu / cập nhật hồ sơ giọng nói theo tên (không phân biệt hoa thường).
 
     mode="replace": thay hẳn vector (thu mẫu lại trong Voice Studio).
@@ -278,9 +278,11 @@ def save_voice(name: str, embedding: Optional[List[float]], role: str = "", depa
         upd: Dict[str, Any] = {"updated_at": now}
         old = existing.get("embedding")
         old_ok = bool(old) and float(np.linalg.norm(np.asarray(old, dtype=np.float32))) > 1e-3
+        same_model = (existing.get("emb_model") or "campplus") == emb_model   # vector 2 model khác nhau không trộn được
         if emb is not None:
-            if mode == "replace" or not old_ok:
-                upd.update({"embedding": emb, "n_samples": int(n_samples), "auto_learned": bool(auto_learned)})
+            if mode == "replace" or not old_ok or not same_model:
+                upd.update({"embedding": emb, "n_samples": int(n_samples), "auto_learned": bool(auto_learned),
+                            "emb_model": emb_model})
                 if consent_by:
                     upd.update({"consent_by": consent_by, "consent_at": now})
             elif auto_learned and not existing.get("auto_learned", False):
@@ -308,6 +310,7 @@ def save_voice(name: str, embedding: Optional[List[float]], role: str = "", depa
         "role": (role or "").strip(),
         "department": (department or "").strip(),
         "embedding": emb,
+        "emb_model": emb_model,
         "n_samples": int(n_samples),
         "consent_by": consent_by,
         "consent_at": now,
@@ -467,7 +470,8 @@ def add_segment(meeting_id: int, t_start: float, t_end: float, speaker_label: st
                 speaker_id: Optional[int] = None, confidence: float = 1.0, is_inferred: bool = False,
                 raw_embedding: Optional[List[float]] = None, seq: Optional[int] = None,
                 speaker_key: Optional[int] = None, raw_speaker: Optional[str] = None,
-                epoch: Optional[int] = None, stream: str = "mic", voiced: Optional[float] = None) -> int:
+                epoch: Optional[int] = None, stream: str = "mic", voiced: Optional[float] = None,
+                emb_model: Optional[str] = None) -> int:
     db = _get_db()
     sid = _next_id("segments")
     db["meeting_segments"].insert_one({
@@ -486,7 +490,8 @@ def add_segment(meeting_id: int, t_start: float, t_end: float, speaker_label: st
         "epoch": epoch,
         "stream": stream,
         "voiced": voiced,
-        "raw_embedding": raw_embedding
+        "raw_embedding": raw_embedding,
+        "emb_model": emb_model if raw_embedding is not None else None,
     })
     return sid
 

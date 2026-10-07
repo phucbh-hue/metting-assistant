@@ -487,8 +487,10 @@ class MeetingSession:
         self.disposed = False
 
         segments = segments or []
-        self.speakers = voice.MeetingSpeakers(anchors=anchors or {}, expected_host_id=self.host_id)
-        self.speakers.load_state(profiles or [], segments)
+        self.speakers = voice.MeetingSpeakers(anchors=anchors or {}, expected_host_id=self.host_id, model=voice.MODEL_ID)
+        # Vector tạo bằng model khác (cuộc họp ghi trước khi đổi model) không so được với vector mới: bỏ khi nạp lại
+        self.speakers.load_state(profiles or [], [s if voice.model_of(s) == voice.MODEL_ID or not s.get("raw_embedding")
+                                                  else {**s, "raw_embedding": None} for s in segments])
         self.segments: List[Dict[str, Any]] = []
         self._by_seq: Dict[Any, Dict[str, Any]] = {}
         backfill = []
@@ -545,7 +547,7 @@ class MeetingSession:
         for v in db.list_voices(with_embedding=True):
             emb = v.get("embedding")
             if emb and voice.is_valid_vector(emb):
-                anchors[v["id"]] = {"name": v["name"], "vector": np.asarray(emb, dtype=np.float32),
+                anchors[v["id"]] = {"name": v["name"], "vector": np.asarray(emb, dtype=np.float32), "model": voice.model_of(v),
                                     "role": v.get("role", ""), "department": v.get("department", "")}
         profiles = db.list_speakers(mid, with_vector=False)
         db.backfill_segment_seq(mid)
@@ -700,6 +702,7 @@ class MeetingSession:
                  speaker_id=prof.voice_id, confidence=seg["confidence"], is_inferred=seg["is_inferred"],
                  raw_embedding=vector.tolist() if vector is not None else None, seq=seq,
                  speaker_key=prof.sid, raw_speaker=it["raw"], epoch=it["epoch"], stream=it["stream"],
+                 emb_model=voice.MODEL_ID if vector is not None else None,
                  voiced=round(float(voiced), 2))
         await self._apply_relabels([k for k in changes if k != seq])
         await self._sync_speakers()
@@ -886,12 +889,12 @@ class MeetingSession:
                     "reason": f"Đã có hồ sơ giọng '{known['name']}' nhưng giọng nói khác hẳn - có thể là người trùng tên. "
                               "Hãy đặt tên phân biệt (ví dụ thêm họ hoặc phòng ban) rồi lưu lại."}
         vid = await asyncio.to_thread(db.save_voice, p.name, centroid.tolist(), p.role, "", email,
-                                      consent_by, True, len(vs), "merge")
+                                      consent_by, True, len(vs), "merge", self.speakers.model)
         full = await asyncio.to_thread(db.get_voice, vid)
         p.voice_id = vid
         self.speakers.dirty.add(p.sid)
         anchor = {vid: {"name": p.name, "vector": np.asarray(full["embedding"], dtype=np.float32),
-                        "role": p.role, "department": ""}} if full and full.get("embedding") else {}
+                        "role": p.role, "department": "", "model": voice.model_of(full)}} if full and full.get("embedding") else {}
         for s in list(SESSIONS.values()):
             s.speakers.update_anchors(anchor, rebind=s is not self)
         await self._apply_relabels(self.speakers.keys_of(p.sid))
@@ -942,12 +945,23 @@ class MeetingSession:
         rows = await asyncio.to_thread(db.get_segments, self.id, True)
         async with self._lock:
             old = self.speakers
-            fresh = voice.MeetingSpeakers(anchors={vid: dict(a) for vid, a in old.anchors.items()},
-                                          expected_host_id=self.host_id)
+            # Dùng vector của model chiếm đa số trong cuộc họp (cuộc họp cũ: CAM++), bỏ vector của model khác
+            counts: Dict[str, int] = {}
+            for s in rows:
+                if s.get("raw_embedding"):
+                    counts[voice.model_of(s)] = counts.get(voice.model_of(s), 0) + 1
+            model = max(counts, key=counts.get) if counts else voice.MODEL_ID
+            anchors = {}
+            for v in await asyncio.to_thread(db.list_voices, True):
+                if v.get("embedding") and voice.is_valid_vector(v["embedding"]):
+                    anchors[v["id"]] = {"name": v["name"], "vector": np.asarray(v["embedding"], dtype=np.float32),
+                                        "role": v.get("role", ""), "department": v.get("department", ""),
+                                        "model": voice.model_of(v)}
+            fresh = voice.MeetingSpeakers(anchors=anchors, expected_host_id=self.host_id, model=model)
             known = set()
             for s in rows:
                 known.add(s["seq"])
-                emb = s.get("raw_embedding")
+                emb = s.get("raw_embedding") if voice.model_of(s) == model else None
                 v = np.asarray(emb, dtype=np.float32) if emb and voice.is_valid_vector(emb) else None
                 dur = max(0.0, float(s.get("t_end") or 0) - float(s.get("t_start") or 0))
                 voiced = s.get("voiced")
@@ -957,7 +971,7 @@ class MeetingSession:
                           voiced=float(voiced), text=s.get("text", ""), epoch=int(s.get("epoch") or 0), dur=dur,
                           stream=s.get("stream") or "mic")
             for s in old.segs:          # câu vừa xử lý nhưng chưa kịp có trong kết quả đọc DB
-                if s["key"] not in known:
+                if s["key"] not in known and old.model == model:
                     rk = s.get("rk")
                     fresh.add(key=s["key"], v=s["v"], raw_label=s["raw"], t=s["t"], voiced=s["w"],
                               text=s["text"], epoch=rk[1] if rk else 0, dur=s["dur"], stream=rk[0] if rk else "mic")
