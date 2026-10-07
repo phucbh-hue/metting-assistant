@@ -7,7 +7,7 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng người Việt tự nhiên của Soniox, đọc rõ cả từ tiếng
 Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy, miễn phí), vừa làm vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.14.2 - cập nhật 07/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.14.3 - cập nhật 07/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
@@ -33,6 +33,21 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
     Thu lại sẽ thay hẳn vector cũ, không trộn 2 model.
 - Hệ thống không lưu âm thanh, nên cuộc họp cũ không tính lại vector bằng model mới được.
 - Muốn quay lại CAM++: đặt `VOICE_MODEL=campplus` trong `.env` rồi khởi động lại.
+
+### Người thứ hai chỉ nói vài câu dài (bản 3.14.3)
+- Lỗi thật #60 (cuộc họp đầu tiên có ghi âm):
+  - Anh Phúc nói câu 1-2, người thứ hai nói liền câu 3-4 (câu 4 dài 13 giây) dưới cùng nhãn Soniox.
+  - Soniox, hệ thống và Nemotron đều gán câu 3-4 cho anh Phúc.
+- Đo lại trên âm thanh đã ghi, cắt từng đoạn 2 giây bằng ERes2NetV2:
+  - Các đoạn giọng anh Phúc giống nhau 0,6-0,89.
+  - Các đoạn câu 3-4 giống anh Phúc chỉ 0,3-0,59, nhưng giống nhau 0,66-0,88.
+  - Vậy câu 3 cũng là người thứ hai, và hai giọng khác nhau rõ.
+- Nguyên nhân: luật tách hồ sơ đòi mỗi cụm giọng có ít nhất 3 câu. Người thứ hai mới nói 2 câu nên không tách.
+- Sửa: cụm chỉ có 2 câu vẫn được tách, nếu mỗi cụm có từ 8 giây tiếng nói trở lên và hai giọng khác hẳn nhau (luật a).
+  Hai giọng gần nhau thì vẫn cần từ 3 câu trở lên.
+- Đo lại:
+  - #60 đúng 4/5 câu (trước đây 3/5). Câu 5 chỉ có tiếng "Ừm," 0,4 giây, không có vector nên vẫn sai.
+  - #48 (97%) và #57 (98%) không đổi.
 
 ### Ghi âm cuộc họp và thử Nemotron-3-Diarization (bản 3.14.2)
 - Nút **Ghi âm: tắt** trên thanh tiêu đề phòng họp.

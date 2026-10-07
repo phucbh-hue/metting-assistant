@@ -196,6 +196,34 @@ class SonioxErrorRecoveryTests(unittest.TestCase):
         self.assertEqual(set(labels_of(sp, a2)), {"Người nói 1"})
         self.assertEqual(len(sp.visible_profiles()), 2)
 
+    @staticmethod
+    def _vectors_with_sims(gram, seed=0):
+        """Vector 192 chiều có đúng ma trận độ giống `gram` (bộ theo dõi chỉ dùng tích vô hướng giữa các vector)."""
+        L = np.linalg.cholesky(np.asarray(gram, dtype=np.float64))
+        Q, _ = np.linalg.qr(np.random.default_rng(seed).standard_normal((voice.DIM, len(gram))))
+        return [voice.unit((Q @ L[i]).astype(np.float32)) for i in range(len(gram))]
+
+    def test_second_person_with_two_long_utterances_is_split(self):
+        """Lỗi thật #60 (ERes2NetV2, số đo thật): anh Phúc nói 2 câu, người thứ hai nói liền 2 câu (2.7 và 9.6 giây
+        tiếng nói) dưới cùng nhãn Soniox. Giọng anh Phúc với nhau 0.81, người thứ hai với nhau 0.77, giữa 2 người
+        0.39-0.62. Mỗi cụm chỉ có 2 câu nên trước đây không tách, cả 4 câu thành anh Phúc."""
+        gram = [[1, .81, .49, .62], [.81, 1, .39, .54], [.49, .39, 1, .77], [.62, .54, .77, 1]]
+        V = self._vectors_with_sims(gram)
+        sp = voice.MeetingSpeakers(model="eres2netv2")
+        for i, (v, w) in enumerate(zip(V, (5.1, 3.93, 2.73, 9.57))):
+            sp.add(key=i + 1, v=v, raw_label="1", t=10.0 * i, voiced=w, dur=w * 1.3)
+        self.assertEqual(sp.sid_of(1), sp.sid_of(2))
+        self.assertEqual(sp.sid_of(3), sp.sid_of(4))
+        self.assertNotEqual(sp.sid_of(1), sp.sid_of(3))
+        self.assertEqual(label(sp, 1), "Người nói 1")
+        # Một người mà giọng 2 cặp câu chỉ hơi lệch nhau (0.72-0.80) thì không tách
+        same = [[1, .82, .74, .72], [.82, 1, .73, .75], [.74, .73, 1, .80], [.72, .75, .80, 1]]
+        sp = voice.MeetingSpeakers(model="eres2netv2")
+        for i, (v, w) in enumerate(zip(self._vectors_with_sims(same, seed=1), (5.1, 3.93, 2.73, 9.57))):
+            sp.add(key=i + 1, v=v, raw_label="1", t=10.0 * i, voiced=w, dur=w * 1.3)
+        self.assertEqual(sp.pop_splits(), [])
+        self.assertEqual(len(sp.visible_profiles()), 1)
+
     def test_uneven_speaker_is_not_split_by_long_utterance(self):
         """Một người nói giọng không đều (hồ sơ không chặt) thì câu dài hơi lệch không được tách thành người mới."""
         bank = VoiceBank(seed=48, n=1, channel=0.7)

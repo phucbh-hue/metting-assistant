@@ -369,6 +369,12 @@ class MeetingSpeakers:
     SPLIT_CROSS_T = 0.65       # Centroid 2 cụm con giống nhau dưới mức này -> 2 người khác nhau
     SPLIT_MIN_SEGS = 3         # Mỗi cụm con cần >= 3 câu có vector
     SPLIT_MIN_W = 6.0          # ... và >= 6 giây tiếng nói
+    # Người mới nói ít lượt nhưng dài (2 câu, mỗi cụm >= 8 giây tiếng nói) vẫn đủ dữ liệu để tách, nhưng chỉ khi 2 giọng
+    # khác hẳn nhau (luật a). Lỗi thật #60: anh Phúc 2 câu, người thứ hai nói liền 2 câu dài 13 giây ngay sau đó dưới
+    # cùng nhãn Soniox; từng câu của người thứ hai chỉ giống anh Phúc 0.45-0.59 (giọng anh Phúc với nhau 0.81) mà không
+    # tách được vì mỗi cụm cần >= 3 câu.
+    SPLIT_PAIR_MIN_SEGS = 2
+    SPLIT_PAIR_MIN_W = 8.0
     SPLIT_COHESION_GAP = 0.12  # Cụm con chặt hơn phải "chặt" hơn độ giống giữa 2 cụm ít nhất ngần này
     SPLIT_LOOSE_GAP = 0.05     # ... cụm con lỏng hơn (câu ngắn, nhiễu) chỉ cần ngần này
     SHARED_MARGIN = 0.06       # Nhãn Soniox dùng chung cho 2 người đã tách: theo giọng nếu gần một người hơn ngần này
@@ -803,13 +809,13 @@ class MeetingSpeakers:
         members = [s for s in self.segs if s["v"] is not None and s["reason"] != "manual"
                    and self.profile(s["sid"]) is p][-self.SPLIT_WINDOW:]
         n = len(members)
-        if n < 2 * self.SPLIT_MIN_SEGS:
+        if n < 2 * self.SPLIT_PAIR_MIN_SEGS:
             return None
         V = np.stack([s["v"] for s in members]).astype(np.float64)
         W = np.array([s["w"] for s in members], dtype=np.float64)
         close_ok = not self._soniox_one_voice(members)
         best = None
-        for lab in _two_way_partitions(V, W, self.SPLIT_MIN_SEGS):
+        for lab in _two_way_partitions(V, W, self.SPLIT_PAIR_MIN_SEGS):
             res = self._eval_partition(V, W, lab, close_ok)
             if res is not None and (best is None or res[0] < best[0]):
                 best = (res[0], lab)
@@ -885,8 +891,13 @@ class MeetingSpeakers:
         """Trả về (độ giống giữa 2 cụm, độ chặt nhỏ nhất) nếu phân chia hợp lệ.
         close_ok=False: chỉ chấp nhận 2 giọng khác hẳn nhau (a), không tách 2 giọng gần nhau (b)."""
         idx = [np.where(lab == c)[0] for c in (0, 1)]
-        if min(len(i) for i in idx) < self.SPLIT_MIN_SEGS or min(W[i].sum() for i in idx) < self.SPLIT_MIN_W:
+        if min(W[i].sum() for i in idx) < self.SPLIT_MIN_W:
             return None
+        if min(len(i) for i in idx) < self.SPLIT_MIN_SEGS:
+            # Cụm ít câu: chỉ tách khi mỗi cụm có đủ câu dài và 2 giọng khác hẳn nhau
+            if min(len(i) for i in idx) < self.SPLIT_PAIR_MIN_SEGS or min(W[i].sum() for i in idx) < self.SPLIT_PAIR_MIN_W:
+                return None
+            close_ok = False
         sums = [(V[i] * W[i, None]).sum(axis=0) for i in idx]
         cents = [unit(s) for s in sums]
         cross = float(cents[0] @ cents[1])
