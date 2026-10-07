@@ -7,7 +7,7 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng người Việt tự nhiên của Soniox, đọc rõ cả từ tiếng
 Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy, miễn phí), vừa làm vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.13.1 - cập nhật 07/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.13.2 - cập nhật 07/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
@@ -57,6 +57,15 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
   2 giọng gần nhau tăng lên 0,30 nên không tách được 2 giọng nữ.
 - Cuộc họp cũ muốn áp dụng: khởi động lại `run.cmd`, mở cuộc họp, nút Tùy chọn cuộc họp > Phân tích lại người nói. Nên thu
   lại mẫu giọng trong phòng họp, bằng đúng mic hay dùng, để mẫu giọng nhận ra đúng người.
+
+### Thuyết trình sơ đồ tư duy đi tới cả các ý xa gốc (bản 3.13.2)
+- Lỗi cũ: trợ lý chỉ thuyết trình gốc và các nhánh cấp 1 ("nói gộp ý con"); các ý ở tầng 2, 3 không bao giờ được nói tới.
+- Bây giờ đi theo chiều sâu: gốc, nhánh 1, rồi lần lượt các ý con của nhánh 1 (ý con có ý con thì nói tiếp xuống), xong mới
+  sang nhánh 2. Ý có ý con hoặc có ghi chú là một bước riêng (sáng lên, mở nhánh, đưa vào giữa màn hình); ý lá chỉ có tên
+  được nhắc trong lời của ý cha. Sơ đồ quá lớn (trên 24 ý cần nói) thì bỏ bớt tầng sâu nhất.
+- AI bỏ sót ý nào trong danh sách thì trợ lý tự đọc ý đó theo cấu trúc (tên, ghi chú, các ý con) đúng vị trí. Không có AI
+  thì đọc theo cấu trúc như vậy cho cả sơ đồ.
+- Sơ đồ đã soạn lời thuyết trình kiểu cũ (chỉ tới nhánh cấp 1) được soạn lại ở lần bấm Thuyết trình tiếp theo.
 
 ## 2. Bản 3.12: sơ đồ tư duy kiểu NotebookLM, bấm vào ý để nghe giải thích, thuyết trình sơ đồ và dashboard
 

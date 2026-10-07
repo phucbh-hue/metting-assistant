@@ -3496,11 +3496,19 @@ function diagramSteps(dg) {
   const w = (dg.walkthrough || []).filter(s => s && s.text);
   if (w.length) return w;
   if (dg.type === 'mindmap') {
+    // Đi theo chiều sâu: gốc, nhánh 1 rồi các ý con của nhánh 1 (ý có ý con hoặc ghi chú là một bước riêng), nhánh 2...
     const r = dg.root;
     const steps = [{ target: r.id, text: `${endDot(dg.title || r.label)} ${r.detail ? endDot(r.detail) : ''}`.trim() }];
-    (r.children || []).forEach((c, k) => steps.push({ target: c.id, text: [`${k < ORDINALS.length ? ORDINALS[k] + ', ' : ''}${endDot(c.label)}`,
-      c.detail ? endDot(c.detail) : '', (c.children || []).length ? `Gồm: ${c.children.map(x => x.label).join(', ')}.` : ''].filter(Boolean).join(' ') }));
-    return steps;
+    const kidsText = n => (n.children || []).length ? `Gồm: ${n.children.map(x => x.label).join(', ')}.` : '';
+    const walk = (n, depth, k) => {
+      if (depth === 1 || (n.children || []).length || n.detail) {
+        const head = depth === 1 && k < ORDINALS.length ? `${ORDINALS[k]}, ${endDot(n.label)}` : endDot(n.label);
+        steps.push({ target: n.id, text: [head, n.detail ? endDot(n.detail) : '', kidsText(n)].filter(Boolean).join(' ') });
+      }
+      (n.children || []).forEach((c, i) => walk(c, depth + 1, i));
+    };
+    (r.children || []).forEach((c, k) => walk(c, 1, k));
+    return steps.slice(0, 28);
   }
   const labels = [...new Set($$('#stage-frame g.node, #stage-frame g.mindmap-node, #stage-frame text.actor').map(g => g.textContent.trim().replace(/\s+/g, ' ')).filter(Boolean))];
   const steps = [];

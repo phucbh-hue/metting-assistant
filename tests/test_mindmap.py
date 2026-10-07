@@ -135,7 +135,10 @@ class GenerateTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(artifacts, "_call_llm", fake):
             mm = await artifacts.generate_walkthrough(mm_art, SEGMENTS_TEXT)
             d = await artifacts.generate_walkthrough(dash_art, SEGMENTS_TEXT)
-        self.assertEqual([s["target"] for s in mm["walkthrough"]], ["n0", "n4"])
+        # Nhánh AI bỏ sót (n1, n7) được chèn lời đọc theo cấu trúc, đúng thứ tự trên sơ đồ
+        self.assertEqual([s["target"] for s in mm["walkthrough"]], ["n0", "n1", "n4", "n7"])
+        self.assertEqual(mm["walkthrough"][1]["text"],
+                         "1. Chốt đối tác. Lan đã chốt 120 thương hiệu. Gồm: 120 thương hiệu, Mục tiêu 2.500.000.000đ.")
         self.assertEqual([s["target"] for s in d["walkthrough"]], ["kpis", "chart:0"])
         self.assertTrue(artifacts.has_walkthrough({"kind": "diagram", "content": artifacts.dump_content("diagram", mm)}))
 
@@ -144,6 +147,43 @@ class GenerateTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(artifacts, "_call_llm", too_short):
             with self.assertRaises(RuntimeError):
                 await artifacts.generate_walkthrough(mm_art, "")
+
+    async def test_mindmap_walkthrough_goes_deep(self):
+        """Lỗi cũ: chỉ thuyết trình gốc và nhánh cấp 1, các ý xa gốc không được nói tới. Bây giờ đi theo chiều sâu: ý có
+        ý con hoặc ghi chú là một bước riêng; lời cũ chỉ tới cấp 1 thì soạn lại."""
+        deep = {"type": "mindmap", "title": "Ops",
+                "root": {"label": "Workflow Ops", "children": [
+                    {"label": "Kho voucher", "children": [
+                        {"label": "Voucher giấy", "detail": "In mệnh giá khi xuất kho.",
+                         "children": [{"label": "Phiếu vào chặt"}, {"label": "Hạn sử dụng"}]},
+                        {"label": "Đếm tồn"}]},
+                    {"label": "Kích hoạt đơn", "children": [
+                        {"label": "Đồng bộ lab", "children": [{"label": "API hai luồng", "detail": "Tech làm job."}]}]}]}}
+        mm = artifacts.normalize_mindmap(deep)
+        idx = artifacts.mindmap_index(mm)
+        labels = {nid: e["node"]["label"] for nid, e in idx.items()}
+        stops = [labels[n] for n in artifacts.mindmap_stops(mm)]
+        self.assertEqual(stops, ["Workflow Ops", "Kho voucher", "Voucher giấy", "Kích hoạt đơn", "Đồng bộ lab",
+                                 "API hai luồng"])
+        prompts = []
+
+        async def fake(system, prompt, max_tokens=4000):
+            prompts.append((system, prompt))
+            return json.dumps({"steps": [{"target": "n0", "text": "Tổng quan."}, {"target": "n1", "text": "Kho voucher."},
+                                         {"target": "n6", "text": "Kích hoạt đơn."},
+                                         {"target": "", "text": "Chốt lại."}]}, ensure_ascii=False)
+        with mock.patch.object(artifacts, "_call_llm", fake):
+            out = await artifacts.generate_walkthrough({"kind": "diagram", "title": "Ops",
+                                                        "content": json.dumps(mm, ensure_ascii=False)})
+        self.assertIn("Các ý cần trình bày (mỗi ý một bước, đúng thứ tự): n0, n1, n2, n6, n7, n8", prompts[0][1])
+        self.assertIn("6-7 bước", prompts[0][0])
+        self.assertEqual([labels.get(s["target"], "") for s in out["walkthrough"]],
+                         ["Workflow Ops", "Kho voucher", "Voucher giấy", "Kích hoạt đơn", "Đồng bộ lab", "API hai luồng", ""])
+        self.assertEqual(out["walkthrough"][2]["text"], "Voucher giấy. In mệnh giá khi xuất kho. Gồm: Phiếu vào chặt, Hạn sử dụng.")
+        # Lời thuyết trình kiểu cũ (chỉ gốc và nhánh cấp 1) -> coi như chưa có để soạn lại
+        old = dict(mm, walkthrough=[{"target": "n0", "text": "a"}, {"target": "n1", "text": "b"}, {"target": "n6", "text": "c"}])
+        self.assertFalse(artifacts.has_walkthrough({"kind": "diagram", "content": json.dumps(old, ensure_ascii=False)}))
+        self.assertTrue(artifacts.has_walkthrough({"kind": "diagram", "content": artifacts.dump_content("diagram", out)}))
 
     async def test_mermaid_walkthrough_is_saved_as_json_wrapper(self):
         code = 'flowchart LR\n  A["Nạp voucher"] --> B["Ra mắt"]'
@@ -268,7 +308,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(new_id, self.mm_id)
         new = db.get_artifact(new_id)
         self.assertEqual((new["parent_id"], new["kind"]), (self.mm_id, "diagram"))
-        self.assertEqual([s["target"] for s in json.loads(new["content"])["walkthrough"]], ["n0", "n1", "n7"])
+        self.assertEqual([s["target"] for s in json.loads(new["content"])["walkthrough"]], ["n0", "n1", "n4", "n7"])
         starts = [e for e in self.events("stage_present") if e["action"] == "start"]
         self.assertEqual([e["artifact_id"] for e in starts], [new_id, new_id])
 

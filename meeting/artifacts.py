@@ -882,6 +882,69 @@ def mindmap_index(mm: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+MINDMAP_MAX_STOPS = 24
+
+
+def mindmap_stops(mm: Dict[str, Any], limit: int = MINDMAP_MAX_STOPS) -> List[str]:
+    """Các ý được trình bày thành một bước riêng, theo thứ tự duyệt sâu (gốc, nhánh 1, các ý con của nhánh 1, nhánh 2...):
+    gốc, mọi nhánh cấp 1, và mọi ý sâu hơn có ý con hoặc có ghi chú. Ý lá chỉ có nhãn được nhắc trong lời của ý cha.
+
+    Lỗi cũ: chỉ trình bày gốc và các nhánh cấp 1, các ý ở xa gốc không bao giờ được nói tới.
+    Sơ đồ quá lớn thì bỏ bớt các ý sâu nhất (giữ gốc và nhánh cấp 1)."""
+    idx = mindmap_index(mm)
+    stops = [nid for nid, e in idx.items()
+             if e["depth"] <= 1 or e["node"].get("children") or e["node"].get("detail")]
+    depth = max((idx[n]["depth"] for n in stops), default=0)
+    while len(stops) > limit and depth > 1:
+        stops = [n for n in stops if idx[n]["depth"] < depth]
+        depth -= 1
+    return stops[:limit]
+
+
+def mindmap_step_text(mm: Dict[str, Any], nid: str) -> str:
+    """Lời đọc theo cấu trúc cho một ý (khi AI bỏ sót ý đó hoặc không có AI)."""
+    e = mindmap_index(mm).get(nid)
+    if not e:
+        return ""
+    n = e["node"]
+    parts = [n["label"].rstrip(". ") + "."]
+    if n.get("detail"):
+        parts.append(n["detail"].rstrip(". ") + ".")
+    kids = [c["label"] for c in n.get("children") or []]
+    if kids:
+        parts.append("Gồm: " + ", ".join(kids) + ".")
+    return " ".join(parts)
+
+
+def mindmap_shallow(mm: Dict[str, Any], steps: List[Dict[str, str]]) -> bool:
+    """Lời thuyết trình đã lưu chỉ đi tới nhánh cấp 1 trong khi sơ đồ còn ý sâu hơn cần trình bày (soạn theo bản cũ)."""
+    idx = mindmap_index(mm)
+    deep = [n for n in mindmap_stops(mm) if idx[n]["depth"] >= 2]
+    said = {s.get("target") for s in steps or []}
+    return bool(deep) and not any(n in said for n in deep)
+
+
+def fill_mindmap_steps(mm: Dict[str, Any], steps: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """Xếp lời AI theo thứ tự duyệt sâu của sơ đồ; ý cần trình bày mà AI bỏ sót thì chèn lời đọc theo cấu trúc."""
+    order = {nid: i for i, nid in enumerate(mindmap_index(mm))}
+    first = [s for s in steps[:1] if not s.get("target")]            # lời mở đầu không gắn ý nào
+    rest = [s for s in steps[len(first):] if not s.get("target")]    # lời chốt
+    by_node: Dict[str, List[Dict[str, str]]] = {}
+    for s in steps:
+        if s.get("target") in order:
+            by_node.setdefault(s["target"], []).append(s)
+    nodes = sorted(set(by_node) | set(mindmap_stops(mm)), key=lambda n: order[n])
+    out = list(first)
+    for nid in nodes:
+        if nid in by_node:
+            out += by_node[nid]
+        else:
+            text = mindmap_step_text(mm, nid)
+            if text:
+                out.append({"target": nid, "text": text})
+    return out + rest
+
+
 def mindmap_outline(mm: Dict[str, Any], max_chars: int = 6000) -> str:
     """Sơ đồ dạng dàn ý có mã nút, để đưa vào prompt."""
     lines = []
@@ -1012,7 +1075,7 @@ def normalize_walkthrough(obj: Dict[str, Any], steps: Any) -> List[Dict[str, str
         if obj.get("highlights"):
             valid["highlights"] = "highlights"
     out = []
-    for s in steps[:14]:
+    for s in steps[:MINDMAP_MAX_STOPS + 4 if kind == "mindmap" else 14]:
         if not isinstance(s, dict):
             continue
         text = _clean_text(s.get("text") or s.get("script") or s.get("say"), 900)
@@ -1030,7 +1093,10 @@ def has_walkthrough(art: Optional[Dict[str, Any]]) -> bool:
     if not art:
         return False
     if art.get("kind") == "diagram":
-        return bool(load_diagram(art.get("content", "")).get("walkthrough"))
+        dg = load_diagram(art.get("content", ""))
+        if dg.get("type") == "mindmap" and dg.get("walkthrough") and mindmap_shallow(dg, dg["walkthrough"]):
+            return False
+        return bool(dg.get("walkthrough"))
     if art.get("kind") == "dashboard":
         d = normalize_dashboard(_json_from_text(art.get("content", "")))
         return bool(d and d.get("walkthrough"))
@@ -1051,7 +1117,7 @@ Trả về MỘT JSON, không kèm chữ nào khác: {"steps": [{"target": "..."
 {targets}
 
 Quy tắc:
-- 4-9 bước, mỗi bước 1-3 câu (25-70 từ), văn nói tự nhiên, xưng "em", gọi người nghe "anh chị".
+- {count}, văn nói tự nhiên, xưng "em", gọi người nghe "anh chị".
 - Bước đầu giới thiệu tổng quan; các bước sau đi theo thứ tự trên màn hình; bước cuối chốt điều cần nhớ hoặc việc cần làm.
 - Nói ra thông tin thật: tên người, con số, hạn chót, quyết định. Chỉ dùng nội dung trên màn hình và trong cuộc họp, không bịa.
 - Đừng chỉ đọc lại nhãn: giải thích ý nghĩa, so sánh, nêu kết luận.
@@ -1060,8 +1126,10 @@ Quy tắc:
   ngày dd/mm/yyyy."""
 
 _WALK_TARGETS = {
-    "mindmap": ('một sơ đồ tư duy', 'target là mã nút trong ngoặc vuông của sơ đồ (n0 là gốc). Bước đầu target "n0"; mỗi '
-                'nhánh cấp 1 một bước theo thứ tự (target là mã nhánh đó), nói gộp các ý con quan trọng của nhánh.'),
+    "mindmap": ('một sơ đồ tư duy', 'target là mã nút trong ngoặc vuông của sơ đồ (n0 là gốc). Đi theo chiều sâu: gốc, '
+                'nhánh cấp 1 thứ nhất, rồi lần lượt các ý con của nhánh đó (ý con có ý con thì nói tiếp xuống), xong mới '
+                'sang nhánh cấp 1 tiếp theo. Mỗi ý trong danh sách "Các ý cần trình bày" là MỘT bước riêng, đúng thứ tự đó, '
+                'không bỏ ý nào. Ý lá không có trong danh sách thì nhắc trong bước của ý cha.'),
     "mermaid": ("một sơ đồ luồng", "target là nhãn của nút đang nói tới, viết đúng như trong danh sách nhãn; đi theo "
                 "luồng chính rồi tới các nhánh rẽ."),
     "dashboard": ("một dashboard số liệu", 'target là "kpis" (dãy chỉ số), "chart:0", "chart:1"... (biểu đồ theo thứ '
@@ -1096,19 +1164,25 @@ async def generate_walkthrough(art: Dict[str, Any], context_text: str = "") -> D
         raise ValueError("Chỉ soạn lời thuyết trình cho sơ đồ và dashboard")
     kind = _content_kind(obj)
     what, targets = _WALK_TARGETS[kind]
+    count = "4-9 bước, mỗi bước 1-3 câu (25-70 từ)"
     if kind == "mindmap":
-        screen = mindmap_outline(obj)
+        stops = mindmap_stops(obj)
+        screen = mindmap_outline(obj) + "\n\nCác ý cần trình bày (mỗi ý một bước, đúng thứ tự): " + ", ".join(stops)
+        count = (f"{len(stops)}-{len(stops) + 1} bước (mỗi ý cần trình bày một bước, thêm 1 bước chốt nếu cần); gốc và "
+                 "nhánh cấp 1 mỗi bước 2-3 câu, các ý sâu hơn 1-2 câu (15-45 từ)")
     elif kind == "mermaid":
         screen = f"{obj.get('code', '')[:4000]}\n\nDanh sách nhãn nút: {json.dumps(mermaid_labels(obj.get('code', '')), ensure_ascii=False)}"
     else:
         screen = _dash_brief(obj)
     prompt = (f"## {art.get('title', '')} - nội dung trên màn hình\n{screen}\n\n"
               f"## Nội dung cuộc họp\n{(context_text or '(chưa có)')[-8000:]}")
-    system = WALK_SYSTEM.replace("{what}", what).replace("{targets}", targets)
-    data = _json_from_text(await _call_llm(system, prompt, max_tokens=2500))
+    system = WALK_SYSTEM.replace("{what}", what).replace("{targets}", targets).replace("{count}", count)
+    data = _json_from_text(await _call_llm(system, prompt, max_tokens=6000 if kind == "mindmap" else 2500))
     steps = normalize_walkthrough(obj, data.get("steps") if isinstance(data, dict) else None)
     if len(steps) < 2:
         raise RuntimeError("AI chưa soạn được lời thuyết trình")
+    if kind == "mindmap":
+        steps = fill_mindmap_steps(obj, steps)
     out = dict(obj)
     out["walkthrough"] = steps
     return out
