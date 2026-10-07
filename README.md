@@ -7,7 +7,7 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng người Việt tự nhiên của Soniox, đọc rõ cả từ tiếng
 Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy, miễn phí), vừa làm vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.13.2 - cập nhật 07/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.13.3 - cập nhật 07/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
@@ -63,8 +63,12 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 - Bây giờ đi theo chiều sâu: gốc, nhánh 1, rồi lần lượt các ý con của nhánh 1 (ý con có ý con thì nói tiếp xuống), xong mới
   sang nhánh 2. Ý có ý con hoặc có ghi chú là một bước riêng (sáng lên, mở nhánh, đưa vào giữa màn hình); ý lá chỉ có tên
   được nhắc trong lời của ý cha. Sơ đồ quá lớn (trên 24 ý cần nói) thì bỏ bớt tầng sâu nhất.
-- AI bỏ sót ý nào trong danh sách thì trợ lý tự đọc ý đó theo cấu trúc (tên, ghi chú, các ý con) đúng vị trí. Không có AI
-  thì đọc theo cấu trúc như vậy cho cả sơ đồ.
+- Mỗi bước là lời GIẢI THÍCH theo cuộc họp (ý đó nghĩa là gì, vì sao quan trọng, ai nói, con số, hạn chót, điều còn chưa
+  rõ), không đọc lại nhãn trên màn hình.
+- Bản 3.13.3: AI bỏ sót ý nào thì trợ lý nhờ AI soạn riêng cho các ý đó ở lượt thứ hai. Chỉ khi AI lỗi hẳn (mất mạng, hết
+  hạn mức) mới đọc ý đó theo cấu trúc (tên, ghi chú, các ý con). Bước chốt AI gắn vào gốc luôn được đọc cuối cùng.
+- Chạy thật với Claude Sonnet 5.5 trên sơ đồ mẫu 5 nhánh: ý tầng 2 "Dồn quảng cáo 20-22 giờ" được giải thích kèm lý do
+  (40% đơn năm ngoái rơi vào khung này), 1 lượt gọi, 0,015 USD.
 - Sơ đồ đã soạn lời thuyết trình kiểu cũ (chỉ tới nhánh cấp 1) được soạn lại ở lần bấm Thuyết trình tiếp theo.
 
 ## 2. Bản 3.12: sơ đồ tư duy kiểu NotebookLM, bấm vào ý để nghe giải thích, thuyết trình sơ đồ và dashboard

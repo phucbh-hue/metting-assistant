@@ -185,6 +185,33 @@ class GenerateTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(artifacts.has_walkthrough({"kind": "diagram", "content": json.dumps(old, ensure_ascii=False)}))
         self.assertTrue(artifacts.has_walkthrough({"kind": "diagram", "content": artifacts.dump_content("diagram", out)}))
 
+    async def test_skipped_ideas_are_explained_by_a_second_ai_pass(self):
+        """Ý AI bỏ sót được nhờ AI soạn lời giải thích lần nữa, không đọc lại nhãn trên màn hình."""
+        prompts = []
+
+        async def fake(system, prompt, max_tokens=4000):
+            prompts.append(prompt)
+            if len(prompts) == 1:
+                return json.dumps({"steps": [{"target": "n0", "text": "Tổng quan kế hoạch."},
+                                             {"target": "n4", "text": "Minh nạp voucher trước 05/10."},
+                                             {"target": "n0", "text": "Chốt lại ba việc."}]}, ensure_ascii=False)
+            return json.dumps({"steps": [
+                {"target": "n1", "text": "Phần đối tác đã xong nên không còn là điểm nghẽn."},
+                {"target": "n7", "text": "Banner là rủi ro lớn nhất vì đang trễ 3 ngày mà chưa có người duyệt."}]},
+                ensure_ascii=False)
+        with mock.patch.object(artifacts, "_call_llm", fake):
+            mm = await artifacts.generate_walkthrough({"kind": "diagram", "title": "S",
+                                                       "content": json.dumps(MM, ensure_ascii=False)}, SEGMENTS_TEXT)
+        self.assertEqual(len(prompts), 2)
+        self.assertIn("[n1] Mega Sale 10.10 > 1. Chốt đối tác", prompts[1])
+        self.assertNotIn("[n4] Mega Sale 10.10", prompts[1].split("Chỉ soạn cho các ý sau")[1])
+        self.assertEqual([(s["target"], s["text"]) for s in mm["walkthrough"]], [
+            ("n0", "Tổng quan kế hoạch."),
+            ("n1", "Phần đối tác đã xong nên không còn là điểm nghẽn."),
+            ("n4", "Minh nạp voucher trước 05/10."),
+            ("n7", "Banner là rủi ro lớn nhất vì đang trễ 3 ngày mà chưa có người duyệt."),
+            ("", "Chốt lại ba việc.")])                         # bước chốt gắn vào gốc vẫn ở cuối
+
     async def test_mermaid_walkthrough_is_saved_as_json_wrapper(self):
         code = 'flowchart LR\n  A["Nạp voucher"] --> B["Ra mắt"]'
 
@@ -304,7 +331,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
             await self.s._handle_stage_intent({"action": "present", "kind": "diagram", "text": "thuyết trình sơ đồ này"})
             new_id = self.s.stage["artifact_id"]
             await self.s._handle_stage_intent({"action": "present", "text": "thuyết trình"})
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls), 2)          # lần 2 chỉ soạn cho nhánh AI bỏ sót; trình bày lại không gọi AI nữa
         self.assertNotEqual(new_id, self.mm_id)
         new = db.get_artifact(new_id)
         self.assertEqual((new["parent_id"], new["kind"]), (self.mm_id, "diagram"))

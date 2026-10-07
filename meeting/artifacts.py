@@ -927,6 +927,15 @@ def mindmap_shallow(mm: Dict[str, Any], steps: List[Dict[str, str]]) -> bool:
 def fill_mindmap_steps(mm: Dict[str, Any], steps: List[Dict[str, str]]) -> List[Dict[str, str]]:
     """Xếp lời AI theo thứ tự duyệt sâu của sơ đồ; ý cần trình bày mà AI bỏ sót thì chèn lời đọc theo cấu trúc."""
     order = {nid: i for i, nid in enumerate(mindmap_index(mm))}
+    root = mm["root"]["id"]
+    seen_root, fixed = False, []
+    for s in steps:                                                  # bước chốt AI gắn vào gốc: vẫn để cuối cùng
+        if s.get("target") == root:
+            if seen_root:
+                s = {"target": "", "text": s["text"]}
+            seen_root = True
+        fixed.append(s)
+    steps = fixed
     first = [s for s in steps[:1] if not s.get("target")]            # lời mở đầu không gắn ý nào
     rest = [s for s in steps[len(first):] if not s.get("target")]    # lời chốt
     by_node: Dict[str, List[Dict[str, str]]] = {}
@@ -1129,7 +1138,9 @@ _WALK_TARGETS = {
     "mindmap": ('một sơ đồ tư duy', 'target là mã nút trong ngoặc vuông của sơ đồ (n0 là gốc). Đi theo chiều sâu: gốc, '
                 'nhánh cấp 1 thứ nhất, rồi lần lượt các ý con của nhánh đó (ý con có ý con thì nói tiếp xuống), xong mới '
                 'sang nhánh cấp 1 tiếp theo. Mỗi ý trong danh sách "Các ý cần trình bày" là MỘT bước riêng, đúng thứ tự đó, '
-                'không bỏ ý nào. Ý lá không có trong danh sách thì nhắc trong bước của ý cha.'),
+                'không bỏ ý nào. Ý lá không có trong danh sách thì nhắc trong bước của ý cha. Mỗi bước phải GIẢI THÍCH ý đó '
+                '(nghĩa là gì, vì sao quan trọng, cuộc họp nói gì về nó: ai, con số, hạn chót, điều còn chưa rõ), không '
+                'đọc lại nhãn và liệt kê các ý con.'),
     "mermaid": ("một sơ đồ luồng", "target là nhãn của nút đang nói tới, viết đúng như trong danh sách nhãn; đi theo "
                 "luồng chính rồi tới các nhánh rẽ."),
     "dashboard": ("một dashboard số liệu", 'target là "kpis" (dãy chỉ số), "chart:0", "chart:1"... (biểu đồ theo thứ '
@@ -1182,6 +1193,20 @@ async def generate_walkthrough(art: Dict[str, Any], context_text: str = "") -> D
     if len(steps) < 2:
         raise RuntimeError("AI chưa soạn được lời thuyết trình")
     if kind == "mindmap":
+        missing = [n for n in mindmap_stops(obj) if n not in {x["target"] for x in steps}]
+        if missing:
+            # AI bỏ sót ý: nhờ AI soạn riêng cho các ý đó (đọc lại nhãn thì không phải thuyết trình);
+            # chỉ khi lần này cũng lỗi mới đọc theo cấu trúc
+            idx = mindmap_index(obj)
+            ask = "\n".join(f"- [{n}] {' > '.join(idx[n]['path'])}" for n in missing)
+            sys2 = system.replace(count, f"{len(missing)} bước, mỗi ý dưới đây một bước, 1-2 câu (15-45 từ)")
+            try:
+                more = _json_from_text(await _call_llm(
+                    sys2, f"{prompt}\n\n## Chỉ soạn cho các ý sau (đúng thứ tự)\n{ask}", max_tokens=3000))
+                steps += [x for x in normalize_walkthrough(obj, more.get("steps") if isinstance(more, dict) else None)
+                          if x["target"] in missing]
+            except Exception as e:
+                log.warning("meeting.artifacts: soạn lời cho các ý bị sót lỗi: %s", e)
         steps = fill_mindmap_steps(obj, steps)
     out = dict(obj)
     out["walkthrough"] = steps
