@@ -139,7 +139,12 @@ def run_meeting(mid: int, base: str):
     segs = sorted(data["segments"], key=lambda s: s["t_start"])
     runs = recording.runs(mid)
     if not runs:
-        raise SystemExit(f"Cuộc họp {mid} chưa có âm thanh đã ghi (bật nút Ghi âm trong phòng họp).")
+        have = sorted(int(d.name[1:]) for d in recording.ROOT.glob("m*") if d.name[1:].isdigit() and recording.runs(int(d.name[1:])))
+        raise SystemExit(
+            f"Cuộc họp {mid} chưa có âm thanh đã ghi. Hệ thống chỉ lưu âm thanh từ lúc bấm nút \"Ghi âm: tắt\" trên thanh "
+            "tiêu đề phòng họp (cạnh \"Kết thúc cuộc họp\") và xác nhận mọi người đã đồng ý; phần nói trước đó, hoặc cuộc "
+            "họp đã kết thúc, không ghi lại được.\n"
+            + (f"Các cuộc họp đã có âm thanh: {', '.join(map(str, have))}" if have else "Hiện chưa có cuộc họp nào được ghi âm."))
     rows, total_audio, total_cpu = [], 0.0, 0.0
     for r in runs:
         x = np.frombuffer(Path(r["path"]).read_bytes(), dtype="<i2").astype(np.float32) / 32768.0
