@@ -22,6 +22,8 @@ from dotenv import load_dotenv
 # MEETING_ENV_FILE: tệp khóa nằm chỗ khác (bản Docker: data/.env trên ổ lưu lâu dài, để khóa nhập trong Cài đặt còn sau
 # khi chạy lại). Biến môi trường do nền tảng chạy server đặt luôn được ưu tiên hơn tệp này.
 load_dotenv(os.getenv("MEETING_ENV_FILE") or (Path(__file__).resolve().parent.parent / ".env"))
+from meeting import envfile as _envfile  # noqa: E402
+_ENV_FIXED = _envfile.clean_environ()   # trước khi các module khác đọc biến môi trường
 
 import numpy as np  # noqa: E402
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect  # noqa: E402
@@ -36,6 +38,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("meeting.app")
 for _name in ("uvicorn.access", "uvicorn.error"):        # token đăng nhập (?token=) không vào log
     logging.getLogger(_name).addFilter(auth.RedactTokenFilter())
+if _ENV_FIXED:
+    log.warning("meeting.app: đã bỏ dấu nháy / tiền tố \"TÊN=\" thừa trong biến môi trường: %s (nên sửa lại trên nền tảng "
+                "chạy server)", ", ".join(_ENV_FIXED))
 
 HERE = Path(__file__).resolve().parent
 NO_LLM = ("Chưa có nguồn AI: đặt ANTHROPIC_API_KEY / GEMINI_API_KEY trong .env, hoặc chọn gói đăng ký "

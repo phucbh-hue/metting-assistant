@@ -31,11 +31,13 @@ from dotenv import load_dotenv
 import numpy as np
 import pymongo
 
+from meeting import envfile
+
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 log = logging.getLogger("meeting.db")
 
-MONGODB_URL = os.getenv("MONGODB_URL", "").strip()
+MONGODB_URL = envfile.clean_value("MONGODB_URL", os.getenv("MONGODB_URL"))   # bỏ dấu nháy dính khi chép từ .env
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "meeting_assistant").strip()
 _DB_ENV = os.getenv("MEETING_DB", "").strip().lower()
 FORCE_MOCK = _DB_ENV in ("mock", "memory", "mongomock")
@@ -60,6 +62,9 @@ def _explain_mongo_error(e: Exception) -> str:
     if "tlsv1_alert_internal_error" in low or "tlsv1 alert internal error" in low:
         return ("Atlas từ chối kết nối TLS: thường do IP hiện tại của máy chưa có trong Network Access của Atlas "
                 "(hoặc mục IP tạm thời đã hết hạn)")
+    if "invalid uri scheme" in low or "must begin with 'mongodb" in low:
+        return ("MONGODB_URL phải bắt đầu bằng mongodb+srv:// (hoặc mongodb://). Kiểm tra giá trị đã dán: có dính chữ "
+                "MONGODB_URL=, dấu nháy, khoảng trắng hay ký tự lạ ở đầu không")
     if "bad auth" in low or "authentication failed" in low:
         return "Sai tài khoản hoặc mật khẩu trong MONGODB_URL"
     if "getaddrinfo" in low or "dns" in low or "nodename nor servname" in low:

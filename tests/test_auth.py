@@ -149,3 +149,24 @@ class LocalModeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EnvValueTests(unittest.TestCase):
+    """Lỗi thật 08/10/2026: chép MONGODB_URL từ .env (có dấu nháy) sang Render, server không kết nối được Atlas."""
+
+    def test_values_pasted_from_env_file_are_cleaned(self):
+        from meeting import envfile
+        url = "mongodb+srv://u:p@x.mongodb.net/?retryWrites=true"
+        for raw in (f'"{url}"', f"'{url}'", f"  {url}  ", f'MONGODB_URL="{url}"', f"MONGODB_URL={url}", url):
+            self.assertEqual(envfile.clean_value("MONGODB_URL", raw), url, raw)
+        self.assertEqual(envfile.clean_value("SONIOX_API_KEY", '"abc"'), "abc")
+        self.assertEqual(envfile.clean_value("X", '"a"b"'), 'a"b')       # chỉ bỏ cặp nháy bao ngoài
+        with mock.patch.dict("os.environ", {"SONIOX_API_KEY": '"abc"', "ANTHROPIC_API_KEY": "sk-ant-x"}):
+            self.assertEqual(envfile.clean_environ(("SONIOX_API_KEY", "ANTHROPIC_API_KEY")), ["SONIOX_API_KEY"])
+            import os
+            self.assertEqual(os.environ["SONIOX_API_KEY"], "abc")
+
+    def test_wrong_scheme_message_points_at_the_pasted_value(self):
+        from meeting import db
+        msg = db._explain_mongo_error(ValueError("Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'"))
+        self.assertIn("dấu nháy", msg)

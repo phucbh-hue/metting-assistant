@@ -19,6 +19,31 @@ EDITABLE: Dict[str, Dict[str, str]] = {
     "MONGODB_URL": {"label": "MongoDB Atlas (lưu trữ, để trống thì lưu trên máy)", "hint": "mongodb+srv://...", "prefix": ""},
 }
 RESTART_KEYS = {"MONGODB_URL"}                  # kết nối DB mở lúc khởi động: đổi xong cần chạy lại
+# Biến hay được chép nguyên từ .env sang biến môi trường của nền tảng chạy server (Render, Docker): .env bỏ dấu nháy
+# "..." khi đọc, còn nền tảng giữ nguyên, nên giá trị dính dấu nháy (lỗi thật 08/10/2026: MONGODB_URL trên Render).
+APP_KEYS = tuple(EDITABLE) + ("GOOGLE_OAUTH_CLIENT_ID", "ALLOWED_DOMAIN", "AUTH_SECRET", "AUTH_ADMIN_EMAILS",
+                              "CORS_ORIGINS", "MONGODB_DB_NAME", "LLM_PROVIDER", "CLAUDE_MODEL", "AGENT_MODEL")
+
+
+def clean_value(name: str, value: Optional[str]) -> str:
+    """Bỏ khoảng trắng, dấu nháy bao ngoài và cả tiền tố "TÊN=" nếu lỡ dán nguyên dòng của .env."""
+    v = (value or "").strip()
+    if v.upper().startswith(name.upper() + "="):
+        v = v[len(name) + 1:].strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+        v = v[1:-1].strip()
+    return v
+
+
+def clean_environ(keys=APP_KEYS) -> list:
+    """Sửa các biến môi trường của ứng dụng bị dính dấu nháy / tiền tố. Trả về TÊN các biến đã sửa (không có giá trị)."""
+    fixed = []
+    for k in keys:
+        raw = os.environ.get(k)
+        if raw is not None and clean_value(k, raw) != raw.strip():
+            os.environ[k] = clean_value(k, raw)
+            fixed.append(k)
+    return fixed
 
 
 def _masked(name: str, value: str) -> str:
