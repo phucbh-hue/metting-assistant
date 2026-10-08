@@ -1,0 +1,19 @@
+# HTTPS cho Meeting Copilot: Caddy tự xin và gia hạn chứng chỉ Let's Encrypt cho DOMAIN (cần cổng 80, 443 mở).
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	# flush ngay: giọng đọc trợ lý phát theo luồng (TTS stream); WebSocket mic/sự kiện được Caddy chuyển tiếp sẵn
+	reverse_proxy app:8080 {
+		flush_interval -1
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "microphone=(self), camera=(), geolocation=()"
+		-Server
+	}
+}

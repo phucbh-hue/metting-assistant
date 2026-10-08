@@ -13,3 +13,6 @@ venv/
 *.wav
 *.mp3
 tests/
+deploy/
+render.yaml
+vercel.json

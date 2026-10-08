@@ -43,7 +43,68 @@ Chạy trên máy (`run.cmd`, `pnpm mst-urbox web`) vẫn y như cũ, không c�
   chuyển sang kiểm tra quyền quản trị.
 - Ghi âm và lưu mẫu giọng ghi lại email người xác nhận đã có sự đồng ý (Nghị định 13/2023/NĐ-CP).
 
-### Các bước triển khai (Render + Vercel)
+### Cách 1 (miễn phí): Oracle Cloud Always Free
+Một máy ảo ARM (2 OCPU, 12 GB RAM, vùng Singapore) chạy `deploy/oracle/`:
+- Docker Compose gồm server và Caddy (HTTPS tự động bằng Let's Encrypt, chuyển tiếp cả WebSocket).
+- Server tự phục vụ luôn giao diện: một địa chỉ `https://<tên miền>`, không cần Vercel.
+
+1. **Đăng ký Oracle Cloud** tại https://signup.cloud.oracle.com
+   - **Home Region: Singapore**. Không đổi được về sau, và tài nguyên miễn phí chỉ có ở Home Region.
+   - Cần thẻ để xác minh (giữ tạm một khoản nhỏ rồi hoàn lại).
+   - Nên nâng lên **Pay As You Go** (Billing > Upgrade):
+     - Vẫn 0 đồng nếu chỉ dùng tài nguyên Always Free.
+     - Máy rảnh không bị Oracle thu hồi.
+     - Dễ tạo máy ARM hơn khi vùng đông.
+   - Tạo luôn cảnh báo ngân sách 1 USD (Billing > Budgets) để biết ngay nếu có gì bị tính tiền.
+2. **Tạo máy ảo**: Compute > Instances > **Create instance**
+   - Name: `meeting-copilot`.
+   - Image: **Canonical Ubuntu 24.04**.
+   - Shape: Ampere > **VM.Standard.A1.Flex**, **2 OCPU, 12 GB** (có nhãn Always Free-eligible).
+   - Networking: tạo VCN mới với public subnet, bật **Assign a public IPv4 address**.
+   - SSH keys: **Generate a key pair for me** > Save private key, lưu thành `C:\Users\<tên>\.ssh\oracle-meeting.key`.
+   - Create, rồi chép **Public IP address**.
+   - Báo "Out of capacity" thì chọn Availability Domain khác hoặc thử lại sau vài giờ.
+3. **Mở cổng 80, 443**: trang máy ảo > subnet > Security Lists > Default Security List > **Add Ingress Rules**:
+   - Source `0.0.0.0/0`, TCP, Destination Port `80`.
+   - Thêm một dòng nữa cho cổng `443`.
+4. **Tên miền trỏ về máy** (bắt buộc để có HTTPS; trình duyệt chỉ cho dùng micro trên https):
+   - Subdomain công ty: nhờ IT tạo bản ghi A, ví dụ `meeting.urbox.vn` trỏ về Public IP.
+   - Hoặc miễn phí: https://www.duckdns.org, đăng nhập, tạo `urbox-meeting`, điền Public IP vào ô "current ip", bấm update.
+     Tên miền sẽ là `urbox-meeting.duckdns.org`.
+5. **SSH vào máy** (PowerShell trên Windows):
+   ```powershell
+   icacls $env:USERPROFILE\.ssh\oracle-meeting.key /inheritance:r /grant:r "$($env:USERNAME):R"
+   ssh -i $env:USERPROFILE\.ssh\oracle-meeting.key ubuntu@<Public IP>
+   ```
+6. **Cài đặt** (trên máy ảo):
+   ```bash
+   curl -fsSLO https://raw.githubusercontent.com/phucbh-hue/metting-assistant/release/deploy/oracle/setup.sh
+   sudo bash setup.sh
+   ```
+   - Script hỏi: tên miền, email nhận thông báo HTTPS, `GOOGLE_OAUTH_CLIENT_ID`, email quản trị, `SONIOX_API_KEY`,
+     `ANTHROPIC_API_KEY`, `MONGODB_URL` (lấy từ `.env` trên máy; khóa không hiện khi dán).
+   - `AUTH_SECRET` tự sinh.
+   - Cấu hình lưu ở `/opt/meeting-copilot/deploy/oracle/prod.env` (chỉ root đọc được).
+   - Lần đầu mất 10-20 phút.
+7. **MongoDB Atlas** > Network Access > Add IP Address: `<Public IP>/32`, rồi trên máy ảo chạy
+   `cd /opt/meeting-copilot/deploy/oracle && sudo docker compose restart app`.
+8. **Google Cloud Console** > APIs & Services > Credentials > OAuth client có mã trùng `GOOGLE_OAUTH_CLIENT_ID` >
+   **Authorized JavaScript origins**: thêm `https://<tên miền>` > Save (Google có thể mất 5 phút tới vài giờ mới áp dụng).
+9. **Dùng thử**:
+   - Mở `https://<tên miền>`, đăng nhập bằng @urbox.vn.
+   - Cài đặt phải hiện email kèm "quản trị viên".
+   - Tạo cuộc họp, bật mic.
+
+Vận hành:
+- Xem log: `cd /opt/meeting-copilot/deploy/oracle && sudo docker compose logs -f app`.
+- Cập nhật bản mới (sau khi đẩy `main` lên `release`): `sudo bash /opt/meeting-copilot/deploy/oracle/update.sh`.
+  Server dừng khoảng 1 phút, nên tránh lúc đang họp.
+- Bản vá bảo mật Ubuntu tự cài (unattended-upgrades). Docker tự chạy lại server khi máy khởi động lại.
+- Dữ liệu chính nằm trên Atlas. Ổ máy ảo chỉ giữ ghi âm (tự xóa sau 30 ngày), ảnh tài liệu và kho dự phòng.
+- Oracle đã từng giảm hạn mức miễn phí mà không báo trước (06/2026). Nếu bị giảm tiếp, chuyển sang Cách 2.
+
+### Cách 2 (trả phí, ít phải tự quản): Render + Vercel
+Các bước:
 Tên dùng trong hướng dẫn (đổi được):
 - Server Render: `urbox-meeting-api`, địa chỉ dạng `https://urbox-meeting-api.onrender.com`. Render thêm đuôi nếu tên đã có
   người dùng, lấy đúng địa chỉ trên trang service.

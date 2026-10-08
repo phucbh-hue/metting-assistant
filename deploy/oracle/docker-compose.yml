@@ -1,0 +1,40 @@
+# Meeting Copilot trên một máy ảo (Oracle Cloud Always Free hoặc máy chủ bất kỳ có Docker).
+# - app: server FastAPI (Dockerfile ở gốc repo), tự phục vụ luôn giao diện ở https://<tên miền>/
+# - caddy: HTTPS tự động (Let's Encrypt), chuyển tiếp cả WebSocket tới app
+# Cài lần đầu: sudo bash setup.sh   |   Cập nhật: sudo bash update.sh   (xem README mục 0)
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: meeting-copilot:latest
+    restart: unless-stopped
+    env_file: prod.env
+    volumes:
+      - meeting-data:/app/data
+    expose:
+      - "8080"
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [app]
+    env_file: caddy.env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  meeting-data:
+  caddy-data:
+  caddy-config:

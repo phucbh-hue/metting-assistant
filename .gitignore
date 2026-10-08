@@ -66,3 +66,7 @@ models/nemotron-diar/
 
 # Bản giao diện dựng cho Vercel (scripts/build-web.mjs)
 web-dist/
+
+# Cấu hình server trên máy ảo (deploy/oracle/setup.sh tạo, chứa khóa)
+deploy/oracle/prod.env
+deploy/oracle/caddy.env
