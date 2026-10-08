@@ -43,40 +43,85 @@ Chạy trên máy (`run.cmd`, `pnpm mst-urbox web`) vẫn y như cũ, không c�
   chuyển sang kiểm tra quyền quản trị.
 - Ghi âm và lưu mẫu giọng ghi lại email người xác nhận đã có sự đồng ý (Nghị định 13/2023/NĐ-CP).
 
-### Các bước triển khai
-1. **Google OAuth Client**: dùng client đang có (`GOOGLE_OAUTH_CLIENT_ID` trong `.env`).
-   - Vào Google Cloud Console > APIs & Services > Credentials > mở client đó > **Authorized JavaScript origins**.
-   - Thêm địa chỉ Vercel, ví dụ `https://meeting-copilot.vercel.app`. Thêm cả địa chỉ server nếu mở trang trực tiếp từ server.
-   - Không cần redirect URI vì đăng nhập dùng cửa sổ bật lên.
-2. **Server**: dựng từ `Dockerfile` trên Render, Railway, Fly.io hoặc máy chủ công ty.
-   - Vùng Singapore. RAM từ 2 GB trở lên (server trên máy đang dùng khoảng 1,2 GB).
-   - Gắn ổ lưu lâu dài vào `/app/data` (ghi âm, ảnh tài liệu, kho dự phòng khi mất Atlas, khóa nhập trong Cài đặt).
-   - **Chỉ 1 bản chạy**, không bật tự nhân bản.
-   - Health check: `/healthz`.
-   - Biến môi trường:
+### Các bước triển khai (Render + Vercel)
+Tên dùng trong hướng dẫn (đổi được):
+- Server Render: `urbox-meeting-api`, địa chỉ dạng `https://urbox-meeting-api.onrender.com`. Render thêm đuôi nếu tên đã có
+  người dùng, lấy đúng địa chỉ trên trang service.
+- Giao diện Vercel: `urbox-meeting-copilot`, địa chỉ `https://urbox-meeting-copilot.vercel.app`.
 
-     | Biến | Giá trị |
-     |---|---|
-     | `AUTH_SECRET` | chuỗi ngẫu nhiên từ 32 ký tự trở lên, giữ cố định (đổi là mọi người phải đăng nhập lại) |
-     | `GOOGLE_OAUTH_CLIENT_ID` | client ở bước 1 |
-     | `ALLOWED_DOMAIN` | `urbox.vn` |
-     | `AUTH_ADMIN_EMAILS` | ví dụ `phuc.bh@urbox.vn` |
-     | `CORS_ORIGINS` | địa chỉ Vercel, ví dụ `https://meeting-copilot.vercel.app` |
-     | `SONIOX_API_KEY`, `ANTHROPIC_API_KEY` (hoặc `GEMINI_API_KEY`), `MONGODB_URL` | như `.env` trên máy |
+Bản web chỉ cập nhật từ nhánh **`release`**:
+- Đẩy lên `main` (làm việc hằng ngày) không làm server khởi động lại giữa cuộc họp.
+- Muốn đưa bản mới lên web: `git push origin main:release`. Render và Vercel cùng tự cập nhật.
+- Server có ổ lưu lâu dài nên mỗi lần cập nhật sẽ dừng khoảng 1-2 phút. Đừng cập nhật khi đang có cuộc họp.
 
-   - Tùy chọn khi build: `WITH_BROWSER=1` để tra cứu bằng trình duyệt thật (thêm khoảng 500 MB); `WITH_LOCAL_TTS=0` để bỏ
-     giọng đọc Piper.
-3. **MongoDB Atlas** > Network Access: thêm IP đi ra của server.
-   - Render và Fly.io có IP tĩnh.
-   - Nếu nền tảng không có IP tĩnh thì phải mở 0.0.0.0/0. Không nên làm vậy với dữ liệu họp.
-4. **Vercel**:
-   - Import repo GitHub, Framework Preset: Other.
-   - Thêm Environment Variable `MA_API_BASE` = địa chỉ https của server ở bước 2, rồi Deploy. `vercel.json` tự lo phần build.
-   - `.vercelignore` chỉ cho tải lên giao diện, không tải `.env`, `data/`, `models/`.
-5. Mở địa chỉ Vercel, đăng nhập bằng email @urbox.vn, tạo cuộc họp và bật mic.
+1. **Render: tạo server từ Blueprint** (`render.yaml`)
+   1. Đăng nhập https://dashboard.render.com bằng GitHub. Thêm thẻ thanh toán (Billing): gói Standard 25 USD/tháng, ổ 5 GB
+      khoảng 1,25 USD/tháng.
+   2. **New > Blueprint**, chọn repo `phucbh-hue/metting-assistant` (lần đầu bấm "Configure GitHub" để cấp quyền repo).
+      Branch: `release`.
+   3. Render đọc `render.yaml` và hỏi giá trị các biến bí mật. Chép từ `.env` trên máy, không dán vào chat hay tài liệu:
+
+      | Biến | Giá trị |
+      |---|---|
+      | `GOOGLE_OAUTH_CLIENT_ID` | như `.env` |
+      | `SONIOX_API_KEY` | như `.env` |
+      | `ANTHROPIC_API_KEY` | như `.env` |
+      | `MONGODB_URL` | như `.env` |
+      | `AUTH_ADMIN_EMAILS` | `phuc.bh@urbox.vn` (thêm người thì cách nhau dấu phẩy) |
+      | `CORS_ORIGINS` | `https://urbox-meeting-copilot.vercel.app` (đúng địa chỉ Vercel, không có `/` ở cuối) |
+
+      `AUTH_SECRET` do Render tự sinh. Các biến còn lại đã có sẵn trong `render.yaml`.
+   4. **Apply**. Lần build đầu mất khoảng 10-15 phút (cài thư viện, tải model giọng nói và giọng đọc). Theo dõi ở tab Logs:
+      xong khi có dòng `Server khởi động hoàn tất`.
+2. **MongoDB Atlas: cho phép server kết nối**
+   1. Trên Render, mở service > nút **Connect** (góc trên phải) > tab **Outbound**: chép các dải IP (dạng `x.x.x.x/yy`).
+   2. Atlas > Security > **Network Access** > Add IP Address: thêm từng dải, ghi chú "Render Singapore".
+   3. Quay lại Render > **Manual Deploy > Restart service**. Server mở kết nối Atlas lúc khởi động. Nếu chưa được phép, server
+      lưu tạm trên ổ của nó (dữ liệu tách khỏi bản trên máy).
+   4. Lưu ý: các dải IP này dùng chung cho mọi khách hàng Render ở Singapore. Mật khẩu Atlas vẫn là lớp bảo vệ chính.
+      Muốn IP riêng thì mua Dedicated IP của Render.
+3. **Kiểm tra server**
+   - `https://urbox-meeting-api.onrender.com/healthz` trả về `{"status":"ok"}`.
+   - `https://urbox-meeting-api.onrender.com/api/auth/config` có `"required": true`.
+   - `https://urbox-meeting-api.onrender.com/api/meetings` trả về 401: đúng, vì chưa đăng nhập.
+4. **Google Cloud Console: cho phép trang đăng nhập Google**
+   1. https://console.cloud.google.com > chọn project chứa OAuth client > APIs & Services > Credentials.
+   2. Mở OAuth 2.0 Client ID có mã trùng `GOOGLE_OAUTH_CLIENT_ID`.
+   3. **Authorized JavaScript origins** > Add URI:
+      - `https://urbox-meeting-copilot.vercel.app`
+      - `https://urbox-meeting-api.onrender.com` (để mở thẳng trang từ server khi cần)
+   4. Save. Google có thể mất 5 phút tới vài giờ mới áp dụng.
+   5. Nếu OAuth consent screen đang ở chế độ "Internal" của Google Workspace urbox.vn thì chỉ tài khoản công ty đăng nhập được.
+      Đó là điều mình muốn.
+5. **Vercel: đưa giao diện lên**
+   1. https://vercel.com > đăng nhập bằng GitHub > **Add New > Project** > Import `phucbh-hue/metting-assistant`.
+   2. Project Name: `urbox-meeting-copilot`. Framework Preset: **Other**. Không sửa Build/Output vì `vercel.json` đã có.
+   3. Environment Variables: `MA_API_BASE` = `https://urbox-meeting-api.onrender.com` (địa chỉ Render ở bước 1).
+   4. Deploy. Sau đó vào Settings > Git > **Production Branch** đổi thành `release`. `vercel.json` đã tắt bản xem trước cho `main`.
+   5. Nếu địa chỉ Vercel khác `https://urbox-meeting-copilot.vercel.app`, sửa lại:
+      - `CORS_ORIGINS` trên Render (Environment > Save, Render tự chạy lại).
+      - Origin ở bước 4.
+6. **Dùng thử**
+   1. Mở địa chỉ Vercel > Đăng nhập bằng Google (@urbox.vn).
+   2. Mở Cài đặt: thấy email kèm "quản trị viên".
+   3. Tạo cuộc họp > bật mic (trình duyệt hỏi quyền micro) > nói thử > thấy chữ chạy và tên người nói.
+
+### Khi gặp lỗi
+| Hiện tượng | Nguyên nhân thường gặp |
+|---|---|
+| Nút Google báo "origin is not allowed" | Bước 4 chưa có địa chỉ Vercel, hoặc Google chưa áp dụng (chờ thêm) |
+| "Chỉ tài khoản @urbox.vn..." | Đăng nhập bằng tài khoản cá nhân |
+| "Không kết nối được máy chủ" ngay khi mở trang | `MA_API_BASE` sai (Vercel > Settings > Environment Variables, sửa xong phải Redeploy), hoặc `CORS_ORIGINS` trên Render không khớp đúng địa chỉ Vercel (F12 > Console sẽ báo lỗi CORS) |
+| Cài đặt > Lưu trữ báo đang lưu trên máy / lỗi Atlas | Bước 2 chưa xong, hoặc chưa Restart server sau khi thêm IP |
+| Build Render lỗi | Xem tab Logs của lần deploy đó, gửi em đoạn lỗi |
+| Không đổi được cài đặt chung ("Chỉ quản trị viên...") | Email chưa có trong `AUTH_ADMIN_EMAILS` |
+
+Dữ liệu dùng chung với bản trên máy (cùng Atlas): cuộc họp, mẫu giọng, tên trợ lý... Không mở cùng một cuộc họp **đang diễn
+ra** ở cả bản trên máy và bản web cùng lúc.
 
 ### Khác với chạy trên máy
-- Gói đăng ký Claude.ai / ChatGPT / Gemini (qua CLI) không có sẵn trong image: dùng API key.
+- Gói đăng ký Claude.ai / ChatGPT / Gemini (qua CLI) không có sẵn trong image: server chỉ dùng API key (`LLM_API_ONLY=1`).
+  Bản trên máy chọn gói đăng ký trong Cài đặt (lưu chung trên Atlas) thì server vẫn chạy bằng API key.
 - Tra cứu web bằng trình duyệt thật tắt mặc định (xem `WITH_BROWSER`).
 - Thư mục tài liệu (mở PowerPoint/PDF để trình bày) là thư mục trên server, không phải máy người dùng.
 - Ghi âm lưu trên ổ của server, vẫn tự xóa sau `RECORDING_RETENTION_DAYS` ngày.
@@ -87,7 +132,7 @@ Chạy trên máy (`run.cmd`, `pnpm mst-urbox web`) vẫn y như cũ, không c�
   - Google: sai client, sai tên miền (kể cả `urbox.vn.evil.com`), email chưa xác minh, hết hạn.
   - API trả 401 kèm header CORS; quyền quản trị; WebSocket cần token; ghi âm lưu email người xác nhận; log không chứa token.
   - Chạy trên máy không cần đăng nhập.
-- Toàn bộ 286 test đều qua.
+- Toàn bộ 287 test đều qua.
 - Chạy thử trên Chromium:
   - Trang tĩnh (giả Vercel, cổng 8092) với server có đăng nhập (cổng 8090).
   - Chưa đăng nhập thì hiện màn hình đăng nhập. Có token thì vào được danh sách cuộc họp.

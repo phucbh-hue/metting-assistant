@@ -38,13 +38,16 @@ COPY mcp_server mcp_server
 COPY slides slides
 COPY vesper.html vesper.html
 
-# Người dùng không có quyền root; data/ (nội dung họp lưu trên máy, ghi âm, ảnh tài liệu, khóa nhập trong Cài đặt)
-# gắn ổ lưu lâu dài vào /app/data
+# Server chạy bằng người dùng "app" (không phải root). data/ (kho dự phòng khi mất Atlas, ghi âm, ảnh tài liệu, khóa
+# nhập trong Cài đặt) gắn ổ lưu lâu dài vào /app/data; docker-entrypoint.sh cấp quyền ổ này rồi mới chạy server.
 RUN useradd --create-home --uid 10001 app && mkdir -p data && chown -R app:app data
-USER app
-ENV MEETING_ENV_FILE=/app/data/.env AUTH_REQUIRED=1 PORT=8080
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+# Bản web: bắt buộc đăng nhập; chỉ dùng API key, không có gói đăng ký qua CLI (cài đặt chung trên Atlas chọn gói đăng ký
+# ở máy cá nhân thì server vẫn chạy bằng API key)
+ENV MEETING_ENV_FILE=/app/data/.env AUTH_REQUIRED=1 LLM_API_ONLY=1 CLI_LLM_DISABLED=1 PORT=8080
 VOLUME ["/app/data"]
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s CMD curl -fsS "http://127.0.0.1:${PORT}/healthz" || exit 1
+ENTRYPOINT ["sh", "/app/docker-entrypoint.sh"]
 CMD ["sh", "-c", "exec uvicorn meeting.app:app --host 0.0.0.0 --port ${PORT}"]

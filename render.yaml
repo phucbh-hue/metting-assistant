@@ -1,0 +1,43 @@
+# Render Blueprint: server Meeting Copilot cho bản web (giao diện chạy trên Vercel). Hướng dẫn: README mục 0.
+# Bản web chỉ cập nhật từ nhánh "release" (git push origin main:release); đẩy lên main không làm server khởi động lại
+# giữa cuộc họp đang diễn ra.
+services:
+  - type: web
+    name: urbox-meeting-api
+    runtime: docker
+    region: singapore
+    plan: standard            # 1 CPU, 2 GB RAM (server trên máy đang dùng khoảng 1,2 GB)
+    branch: release
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    numInstances: 1           # phòng họp đang diễn ra nằm trong bộ nhớ: chỉ chạy MỘT bản
+    autoDeployTrigger: commit
+    disk:
+      name: meeting-data
+      mountPath: /app/data
+      sizeGB: 5
+    envVars:
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: ALLOWED_DOMAIN
+        value: urbox.vn
+      - key: AUTH_ADMIN_EMAILS
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: SONIOX_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: MONGODB_URL
+        sync: false
+      - key: MONGODB_DB_NAME
+        value: meeting_assistant
+      - key: LLM_PROVIDER
+        value: claude
+      - key: CLAUDE_MODEL
+        value: claude-sonnet-5-5
+      - key: RECORDING_RETENTION_DAYS
+        value: "30"

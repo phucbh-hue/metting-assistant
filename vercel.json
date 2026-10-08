@@ -4,6 +4,7 @@
   "installCommand": "echo skip-install",
   "buildCommand": "node scripts/build-web.mjs",
   "outputDirectory": "web-dist",
+  "git": { "deploymentEnabled": { "main": false } },
   "headers": [
     {
       "source": "/(.*)",

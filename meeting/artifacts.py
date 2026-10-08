@@ -77,9 +77,13 @@ def _setting(key: str, default: str = "") -> str:
 def provider() -> str:
     """Nguồn AI đang dùng: claude / gemini (API key) hoặc claude-cli / codex-cli / gemini-cli (gói đăng ký)."""
     p = _setting("llm_provider").strip().lower()
-    if p in API_PROVIDERS or p in cli_llm.PROVIDERS:
-        return p
-    return PROVIDER if PROVIDER in API_PROVIDERS or PROVIDER in cli_llm.PROVIDERS else "claude"
+    if p not in API_PROVIDERS and p not in cli_llm.PROVIDERS:
+        p = PROVIDER if PROVIDER in API_PROVIDERS or PROVIDER in cli_llm.PROVIDERS else "claude"
+    if p in cli_llm.PROVIDERS and os.getenv("LLM_API_ONLY") == "1":
+        # Máy chỉ dùng API key (server web, image Docker): cài đặt chung trên Atlas có chọn gói đăng ký ở máy cá nhân thì
+        # server vẫn chạy bằng API key
+        return PROVIDER if PROVIDER in API_PROVIDERS else "claude"
+    return p
 
 
 def api_fallback() -> bool:

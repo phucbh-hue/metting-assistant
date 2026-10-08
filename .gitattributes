@@ -1,0 +1,3 @@
+# Script chạy trong Docker (Linux): luôn xuống dòng kiểu LF, kể cả khi lấy về trên Windows
+*.sh text eol=lf
+Dockerfile text eol=lf

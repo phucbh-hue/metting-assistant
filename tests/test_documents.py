@@ -479,6 +479,15 @@ class GatewaySubscriptionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await artifacts._call_llm("s", "p"), "qua API")
         self.assertEqual(len(msgs.calls), 1)
 
+    async def test_server_without_cli_uses_api_even_if_shared_setting_picks_subscription(self):
+        """Server web (LLM_API_ONLY=1) dùng chung Atlas với máy cá nhân đang chọn gói đăng ký: vẫn chạy bằng API key."""
+        artifacts.set_provider("claude-cli", fallback=False)
+        self.assertEqual(artifacts.provider(), "claude-cli")
+        with mock.patch.dict(os.environ, {"LLM_API_ONLY": "1"}), mock.patch.object(artifacts, "PROVIDER", "gemini"):
+            self.assertEqual(artifacts.provider(), "gemini")
+        with mock.patch.dict(os.environ, {"LLM_API_ONLY": "1"}), mock.patch.object(artifacts, "PROVIDER", "codex-cli"):
+            self.assertEqual(artifacts.provider(), "claude")
+
     async def test_invalid_provider_and_model_refused(self):
         with self.assertRaises(ValueError):
             artifacts.set_provider("chatgpt-web")
