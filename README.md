@@ -7,8 +7,95 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng người Việt tự nhiên của Soniox, đọc rõ cả từ tiếng
 Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy, miễn phí), vừa làm vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.14.3 - cập nhật 07/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.15.0 - cập nhật 08/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
+
+---
+
+## 0. Chạy trên web: giao diện trên Vercel, server riêng (bản 3.15.0)
+
+Chạy trên máy (`run.cmd`, `pnpm mst-urbox web`) vẫn y như cũ, không cần đăng nhập.
+
+### Vì sao không đưa cả ứng dụng lên Vercel
+- Vercel đã chạy được FastAPI và WebSocket (bản beta từ 06/2026), nhưng:
+  - Mỗi kết nối WebSocket bị cắt khi hết thời gian tối đa của function: gói Hobby 5 phút, gói Pro tối đa 30 phút. Mỗi lần
+    cắt, luồng Soniox mở lại từ đầu và nhãn người nói bị reset.
+  - Các kết nối và request không chắc vào cùng một máy, trong khi phòng họp đang diễn ra giữ trong bộ nhớ của server.
+- Vì vậy chia làm hai phần:
+  - **Vercel**: chỉ giao diện tĩnh (`vercel.json`, `scripts/build-web.mjs` dựng ra `web-dist/`).
+  - **Server FastAPI**: chạy nguyên trạng trong Docker (`Dockerfile`), một bản, luôn bật.
+  - Trình duyệt gọi thẳng server: API qua HTTPS, mic và sự kiện qua WSS.
+
+### Đăng nhập (chỉ bản web)
+- Bật bằng `AUTH_REQUIRED=1` (image Docker bật sẵn). Đăng nhập Google, chỉ email thuộc `ALLOWED_DOMAIN` (mặc định `urbox.vn`).
+- Server kiểm tra ID token với Google (đúng client, email đã xác minh, đúng tên miền), rồi cấp token riêng:
+  - Ký HMAC bằng `AUTH_SECRET`, hạn `AUTH_TTL_HOURS` (mặc định 12 giờ).
+  - Gửi kèm mỗi request; với WebSocket và ảnh trang tài liệu thì gửi qua `?token=`. Token không ghi vào log.
+- Mọi API, WebSocket, ảnh tài liệu đều cần đăng nhập. Công khai chỉ có:
+  - Trang chính và tài nguyên tĩnh.
+  - `/healthz` để nền tảng chạy server kiểm tra.
+  - Cấu hình đăng nhập.
+- Quyền quản trị (`AUTH_ADMIN_EMAILS`, cách nhau bằng dấu phẩy):
+  - Đổi cài đặt chung: khóa dịch vụ, nguồn AI, giọng đọc, thư mục tài liệu, đồng bộ lưu trữ.
+  - Đăng nhập gói AI trên server.
+  - Để trống thì không ai đổi được qua web. Người dùng thường vẫn họp, đặt tên người nói, ghi âm bình thường.
+- Trước đây đổi khóa dịch vụ chỉ cho phép từ chính máy chạy ứng dụng (theo IP). Sau proxy, IP này giả được, nên bản web
+  chuyển sang kiểm tra quyền quản trị.
+- Ghi âm và lưu mẫu giọng ghi lại email người xác nhận đã có sự đồng ý (Nghị định 13/2023/NĐ-CP).
+
+### Các bước triển khai
+1. **Google OAuth Client**: dùng client đang có (`GOOGLE_OAUTH_CLIENT_ID` trong `.env`).
+   - Vào Google Cloud Console > APIs & Services > Credentials > mở client đó > **Authorized JavaScript origins**.
+   - Thêm địa chỉ Vercel, ví dụ `https://meeting-copilot.vercel.app`. Thêm cả địa chỉ server nếu mở trang trực tiếp từ server.
+   - Không cần redirect URI vì đăng nhập dùng cửa sổ bật lên.
+2. **Server**: dựng từ `Dockerfile` trên Render, Railway, Fly.io hoặc máy chủ công ty.
+   - Vùng Singapore. RAM từ 2 GB trở lên (server trên máy đang dùng khoảng 1,2 GB).
+   - Gắn ổ lưu lâu dài vào `/app/data` (ghi âm, ảnh tài liệu, kho dự phòng khi mất Atlas, khóa nhập trong Cài đặt).
+   - **Chỉ 1 bản chạy**, không bật tự nhân bản.
+   - Health check: `/healthz`.
+   - Biến môi trường:
+
+     | Biến | Giá trị |
+     |---|---|
+     | `AUTH_SECRET` | chuỗi ngẫu nhiên từ 32 ký tự trở lên, giữ cố định (đổi là mọi người phải đăng nhập lại) |
+     | `GOOGLE_OAUTH_CLIENT_ID` | client ở bước 1 |
+     | `ALLOWED_DOMAIN` | `urbox.vn` |
+     | `AUTH_ADMIN_EMAILS` | ví dụ `phuc.bh@urbox.vn` |
+     | `CORS_ORIGINS` | địa chỉ Vercel, ví dụ `https://meeting-copilot.vercel.app` |
+     | `SONIOX_API_KEY`, `ANTHROPIC_API_KEY` (hoặc `GEMINI_API_KEY`), `MONGODB_URL` | như `.env` trên máy |
+
+   - Tùy chọn khi build: `WITH_BROWSER=1` để tra cứu bằng trình duyệt thật (thêm khoảng 500 MB); `WITH_LOCAL_TTS=0` để bỏ
+     giọng đọc Piper.
+3. **MongoDB Atlas** > Network Access: thêm IP đi ra của server.
+   - Render và Fly.io có IP tĩnh.
+   - Nếu nền tảng không có IP tĩnh thì phải mở 0.0.0.0/0. Không nên làm vậy với dữ liệu họp.
+4. **Vercel**:
+   - Import repo GitHub, Framework Preset: Other.
+   - Thêm Environment Variable `MA_API_BASE` = địa chỉ https của server ở bước 2, rồi Deploy. `vercel.json` tự lo phần build.
+   - `.vercelignore` chỉ cho tải lên giao diện, không tải `.env`, `data/`, `models/`.
+5. Mở địa chỉ Vercel, đăng nhập bằng email @urbox.vn, tạo cuộc họp và bật mic.
+
+### Khác với chạy trên máy
+- Gói đăng ký Claude.ai / ChatGPT / Gemini (qua CLI) không có sẵn trong image: dùng API key.
+- Tra cứu web bằng trình duyệt thật tắt mặc định (xem `WITH_BROWSER`).
+- Thư mục tài liệu (mở PowerPoint/PDF để trình bày) là thư mục trên server, không phải máy người dùng.
+- Ghi âm lưu trên ổ của server, vẫn tự xóa sau `RECORDING_RETENTION_DAYS` ngày.
+
+### Đã kiểm tra
+- 8 test mới (`tests/test_auth.py`):
+  - Token: hết hạn, bị sửa, khóa ký khác.
+  - Google: sai client, sai tên miền (kể cả `urbox.vn.evil.com`), email chưa xác minh, hết hạn.
+  - API trả 401 kèm header CORS; quyền quản trị; WebSocket cần token; ghi âm lưu email người xác nhận; log không chứa token.
+  - Chạy trên máy không cần đăng nhập.
+- Toàn bộ 286 test đều qua.
+- Chạy thử trên Chromium:
+  - Trang tĩnh (giả Vercel, cổng 8092) với server có đăng nhập (cổng 8090).
+  - Chưa đăng nhập thì hiện màn hình đăng nhập. Có token thì vào được danh sách cuộc họp.
+  - Phòng họp mở WebSocket sự kiện tới đúng server. Đăng xuất và token sai đều quay về màn hình đăng nhập.
+  - Chế độ chạy trên máy vẫn vào thẳng, không lỗi.
+- **Chưa kiểm tra**:
+  - Build Docker image: máy phát triển không có Docker, lần build đầu trên nền tảng sẽ xác nhận.
+  - Đăng nhập Google thật: cần khai báo origin ở bước 1 trước.
 
 ---
 

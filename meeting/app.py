@@ -19,7 +19,9 @@ from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+# MEETING_ENV_FILE: tệp khóa nằm chỗ khác (bản Docker: data/.env trên ổ lưu lâu dài, để khóa nhập trong Cài đặt còn sau
+# khi chạy lại). Biến môi trường do nền tảng chạy server đặt luôn được ưu tiên hơn tệp này.
+load_dotenv(os.getenv("MEETING_ENV_FILE") or (Path(__file__).resolve().parent.parent / ".env"))
 
 import numpy as np  # noqa: E402
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect  # noqa: E402
@@ -28,10 +30,12 @@ from fastapi.responses import FileResponse, Response, StreamingResponse  # noqa:
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
-from meeting import artifacts, cli_llm, db, decks, envfile, live, llm, mcp, recording, tts, voice, websearch  # noqa: E402
+from meeting import artifacts, auth, cli_llm, db, decks, envfile, live, llm, mcp, recording, tts, voice, websearch  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("meeting.app")
+for _name in ("uvicorn.access", "uvicorn.error"):        # token đăng nhập (?token=) không vào log
+    logging.getLogger(_name).addFilter(auth.RedactTokenFilter())
 
 HERE = Path(__file__).resolve().parent
 NO_LLM = ("Chưa có nguồn AI: đặt ANTHROPIC_API_KEY / GEMINI_API_KEY trong .env, hoặc chọn gói đăng ký "
@@ -62,7 +66,12 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Meeting Assistant AI", version="3.2.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# Bản web (AUTH_REQUIRED=1): chặn request chưa đăng nhập. CORS thêm SAU để bọc ngoài cùng: lỗi 401 vẫn có header CORS,
+# trang trên Vercel (khác tên miền) đọc được và hiện màn hình đăng nhập.
+app.add_middleware(auth.AuthMiddleware)
+CORS_ORIGINS = [o.strip().rstrip("/") for o in (os.getenv("CORS_ORIGINS") or "*").split(",") if o.strip()]
+app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"],
+                   expose_headers=["X-Sample-Rate"])
 app.mount("/static", StaticFiles(directory=str(HERE.parent / "static")), name="static")
 
 
@@ -241,6 +250,55 @@ def index():
 @app.get("/vesper")
 def vesper():
     return FileResponse(HERE.parent / "vesper.html")
+
+
+@app.get("/config.js")
+def web_config():
+    """Cấu hình của trang: server tự phục vụ trang thì gọi API cùng địa chỉ. Bản Vercel tạo tệp này lúc build
+    (scripts/build-web.mjs) với địa chỉ server riêng."""
+    return Response("window.MA_CONFIG = window.MA_CONFIG || {};\n", media_type="application/javascript",
+                    headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/healthz")
+def healthz():
+    """Kiểm tra server còn sống (cho nền tảng chạy server; không cần đăng nhập, không lộ thông tin)."""
+    return {"status": "ok"}
+
+
+# ==============================================================================
+# ĐĂNG NHẬP (bản web: AUTH_REQUIRED=1)
+# ==============================================================================
+class GoogleLoginReq(BaseModel):
+    credential: str = Field(..., min_length=10, max_length=8192)
+
+
+def _user(request: Request) -> Optional[Dict[str, Any]]:
+    return getattr(request.state, "user", None)
+
+
+@app.get("/api/auth/config")
+def auth_config():
+    return {"required": auth.ENABLED, "google_client_id": auth.CLIENT_ID if auth.ENABLED else "",
+            "domains": auth.DOMAINS if auth.ENABLED else []}
+
+
+@app.post("/api/auth/google")
+async def auth_google(req: GoogleLoginReq):
+    """ID token của Google Identity Services -> token đăng nhập của ứng dụng."""
+    if not auth.ENABLED:
+        raise HTTPException(status_code=400, detail="Bản chạy trên máy không cần đăng nhập")
+    try:
+        user = await asyncio.to_thread(auth.verify_google, req.credential)
+    except auth.AuthError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    log.info("meeting.auth: %s đăng nhập", user["email"])
+    return {**auth.issue(user), "user": {**user, "admin": auth.is_admin(user)}}
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    return {"required": auth.ENABLED, "user": _user(request)}
 
 
 def _db_status_text(st: Dict[str, Any]) -> str:
@@ -472,7 +530,11 @@ async def set_llm_provider(req: ProviderReq):
 
 
 def _local_only(request: Request) -> None:
-    """Đổi khóa / đăng nhập gói chỉ từ chính máy đang chạy ứng dụng."""
+    """Đổi khóa / đăng nhập gói chỉ từ chính máy đang chạy ứng dụng (bản web: chỉ quản trị viên)."""
+    if auth.ENABLED:
+        if not auth.is_admin(_user(request)):
+            raise HTTPException(status_code=403, detail="Chỉ quản trị viên được đổi khóa và đăng nhập gói AI trên server")
+        return
     host = (request.client.host if request.client else "") or ""
     if host not in ("127.0.0.1", "::1", "localhost", "testclient"):
         raise HTTPException(status_code=403, detail="Chỉ đổi khóa và đăng nhập từ chính máy đang chạy ứng dụng")
@@ -734,14 +796,15 @@ class RecordingReq(BaseModel):
 
 
 @app.post("/api/meetings/{mid}/recording")
-async def set_meeting_recording(mid: int, req: RecordingReq):
+async def set_meeting_recording(mid: int, req: RecordingReq, request: Request):
     """Bật / tắt lưu âm thanh cuộc họp trên máy này (dữ liệu sinh trắc học: cần xác nhận mọi người đồng ý)."""
     if req.enabled and not req.consent:
         raise HTTPException(status_code=400, detail="Cần xác nhận mọi người trong phòng đã đồng ý ghi âm")
     s = await _session_or_404(mid)
     if req.enabled and not s.is_live():
         raise HTTPException(status_code=400, detail="Cuộc họp đã kết thúc")
-    return await s.set_recording(req.enabled)
+    u = _user(request)
+    return await s.set_recording(req.enabled, consent_by=u["email"] if u else "meeting_host")
 
 
 @app.delete("/api/meetings/{mid}/recording")
@@ -816,9 +879,10 @@ async def merge_meeting_speaker(mid: int, sid: int, req: MergeReq):
 
 
 @app.post("/api/meetings/{mid}/speakers/{sid}/save-voice")
-async def save_speaker_voice(mid: int, sid: int):
+async def save_speaker_voice(mid: int, sid: int, request: Request):
     s = await _session_or_404(mid)
-    res = await s.save_profile_voice(sid)
+    u = _user(request)
+    res = await s.save_profile_voice(sid, consent_by=u["email"] if u else "meeting_host_confirm")
     await _finish_op(s)
     return res
 

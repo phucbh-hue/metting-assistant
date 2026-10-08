@@ -1,0 +1,10 @@
+# Vercel chỉ cần giao diện tĩnh: KHÔNG tải lên .env (khóa), data/ (nội dung họp, giọng nói), models/, node_modules/
+/*
+!/vercel.json
+!/scripts
+/scripts/*
+!/scripts/build-web.mjs
+!/meeting
+/meeting/*
+!/meeting/index.html
+!/static

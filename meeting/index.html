@@ -13,6 +13,8 @@
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <!-- Địa chỉ server: server tự phục vụ trang thì để trống; bản Vercel tạo tệp này lúc build (scripts/build-web.mjs) -->
+  <script src="/config.js"></script>
   <script>
     tailwind.config = {
       theme: {
@@ -706,12 +708,103 @@ function initials(name) {
 }
 function colorOf(sid) { return sid ? PALETTE[(sid - 1) % PALETTE.length] : NEUTRAL; }
 
+/* ---------- Server & đăng nhập ----------
+   Chạy trên máy: trang và API cùng địa chỉ, không cần đăng nhập.
+   Bản web: trang ở Vercel, API ở server riêng (MA_CONFIG.apiBase); đăng nhập Google, token gửi kèm mỗi request. */
+const MA_CFG = window.MA_CONFIG || {};
+const API_BASE = String(MA_CFG.apiBase || '').replace(/\/+$/, '');
+const AUTH = { token: '', user: null, required: false, clientId: '', domains: [] };
+try { AUTH.token = localStorage.getItem('ma_token') || ''; } catch (e) { /* trình duyệt chặn lưu trữ */ }
+/** '/api/...', '/ws/...' -> địa chỉ server; withToken: thêm ?token= (ảnh, WebSocket không gắn header được). */
+function apiUrl(path, withToken) {
+  if (typeof path !== 'string' || !/^\/(api|ws)\//.test(path)) return path;
+  let u = API_BASE + path;
+  if (withToken && AUTH.token) u += (u.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(AUTH.token);
+  return u;
+}
+function authHeaders(h = {}) { if (AUTH.token) h.Authorization = `Bearer ${AUTH.token}`; return h; }
+/** fetch tới server: thêm địa chỉ server và token; hết phiên đăng nhập (401) -> mở màn hình đăng nhập. */
+async function apiFetch(path, opt = {}) {
+  const res = await fetch(apiUrl(path), { ...opt, headers: authHeaders({ ...(opt.headers || {}) }) });
+  if (res.status === 401 && AUTH.required) requireLogin();
+  return res;
+}
+function loadScript(src) {
+  return new Promise((ok, bad) => { const el = document.createElement('script'); el.src = src; el.async = true;
+    el.onload = ok; el.onerror = () => bad(new Error(`Không tải được ${src}`)); document.head.appendChild(el); });
+}
+/** Trước khi vào ứng dụng: bản web cần đăng nhập thì chờ tới khi đăng nhập xong. */
+async function ensureLogin() {
+  let cfg = null;
+  try { const r = await fetch(apiUrl('/api/auth/config')); if (r.ok) cfg = await r.json(); } catch (e) { /* server chưa chạy: báo lỗi như cũ */ }
+  if (!cfg || !cfg.required) return;
+  Object.assign(AUTH, { required: true, clientId: cfg.google_client_id || '', domains: cfg.domains || [] });
+  if (AUTH.token) {
+    try {
+      const r = await fetch(apiUrl('/api/auth/me'), { headers: authHeaders() });
+      if (r.ok) { AUTH.user = (await r.json()).user; if (AUTH.user) return; }
+    } catch (e) { /* thử đăng nhập lại */ }
+  }
+  await showLogin();
+}
+let loginShown = null;
+function showLogin(message) {
+  if (loginShown) return loginShown;
+  loginShown = new Promise(resolve => {
+    const root = document.createElement('div');
+    root.id = 'login-root';
+    root.setAttribute('role', 'dialog'); root.setAttribute('aria-modal', 'true'); root.setAttribute('aria-labelledby', 'login-title');
+    root.style.cssText = 'position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:16px;background:rgb(var(--base))';
+    const dom = AUTH.domains.length ? AUTH.domains.map(d => '@' + d).join(', ') : 'của công ty';
+    root.innerHTML = `<div style="width:100%;max-width:380px;background:rgb(var(--panel));border:1px solid var(--line-strong);border-radius:18px;padding:28px 24px;text-align:center">
+        <h1 id="login-title" class="text-xl font-semibold mb-1">Meeting Copilot - UrBox</h1>
+        <p class="text-muted text-[13.5px] mb-5">Đăng nhập bằng tài khoản Google ${esc(dom)} để tiếp tục.</p>
+        <div id="login-btn" class="flex justify-center" style="min-height:44px"><span class="spinner"></span></div>
+        <p id="login-msg" class="text-[13px] mt-4" role="alert" style="color:rgb(var(--danger));min-height:1em">${esc(message || '')}</p>
+      </div>`;
+    document.body.appendChild(root);
+    const msg = t => { $('#login-msg', root).textContent = t; };
+    if (!AUTH.clientId) { $('#login-btn', root).innerHTML = ''; msg('Server chưa cấu hình GOOGLE_OAUTH_CLIENT_ID.'); return; }
+    loadScript('https://accounts.google.com/gsi/client').then(() => {
+      google.accounts.id.initialize({
+        client_id: AUTH.clientId, ux_mode: 'popup', auto_select: false,
+        callback: async ({ credential }) => {
+          msg('');
+          try {
+            const r = await fetch(apiUrl('/api/auth/google'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential }) });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(typeof d.detail === 'string' ? d.detail : `Lỗi ${r.status}`);
+            AUTH.token = d.token; AUTH.user = d.user;
+            try { localStorage.setItem('ma_token', d.token); } catch (e) { /* chỉ giữ trong phiên này */ }
+            root.remove(); loginShown = null; resolve();
+          } catch (e) { msg(e.message || 'Không đăng nhập được'); }
+        },
+      });
+      $('#login-btn', root).innerHTML = '';
+      google.accounts.id.renderButton($('#login-btn', root), { theme: 'filled_blue', size: 'large', text: 'signin_with', shape: 'pill', locale: 'vi' });
+    }).catch(e => { $('#login-btn', root).innerHTML = ''; msg(e.message); });
+  });
+  return loginShown;
+}
+/** Đang dùng mà hết phiên đăng nhập: đăng nhập lại rồi tải lại trang để kết nối lại mọi thứ. */
+function requireLogin() {
+  if (loginShown) return;
+  AUTH.token = ''; AUTH.user = null;
+  try { localStorage.removeItem('ma_token'); } catch (e) { /* bỏ qua */ }
+  showLogin('Phiên đăng nhập đã hết hạn, hãy đăng nhập lại.').then(() => location.reload());
+}
+function logout() {
+  try { localStorage.removeItem('ma_token'); } catch (e) { /* bỏ qua */ }
+  try { if (window.google && google.accounts) google.accounts.id.disableAutoSelect(); } catch (e) { /* bỏ qua */ }
+  location.reload();
+}
+
 async function api(method, url, body) {
   const opt = { method, headers: {} };
   if (body instanceof FormData) opt.body = body;
   else if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
   let res;
-  try { res = await fetch(url, opt); }
+  try { res = await apiFetch(url, opt); }
   catch (e) { throw new Error('Không kết nối được máy chủ. Kiểm tra server đang chạy.'); }
   let data = null;
   try { data = await res.json(); } catch (e) { /* không phải JSON */ }
@@ -1093,7 +1186,11 @@ function renderRoom() {
 }
 
 /* ---------- WebSocket sự kiện ---------- */
-function wsUrl(path) { return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`; }
+function wsUrl(path) {
+  const u = new URL(apiUrl(path, true), location.href);
+  u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
+  return u.toString();
+}
 function connectEvents(R) {
   if (R.closed) return;
   const ws = new WebSocket(wsUrl(`/ws/meeting/${R.id}/events`));
@@ -2439,7 +2536,7 @@ function fetchTts(text) {
   const finish = () => { st.done = true; gotFirst(st.chunks.length > 0); if (st.onchunk) st.onchunk(); };
   (async () => {
     try {
-      const r = await fetch('/api/tts/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      const r = await apiFetch('/api/tts/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }), signal: st.ctrl.signal });
       if (!r.ok || !r.body) return finish();
       st.rate = parseInt(r.headers.get('X-Sample-Rate'), 10) || 24000;
@@ -3213,11 +3310,11 @@ function slideHtml(deck, i, animate) {
   const li = arr => arr.map(x => `<li>${esc(x)}</li>`).join('');
   if (sl.layout === 'image' && sl.image) {           // trang PDF / slide PowerPoint: hiện đúng hình gốc
     return `<div class="slide slide-img ${animate && !REDUCED_MOTION ? 'slide-enter' : ''}" role="img" aria-label="Trang ${i + 1} trên ${n}: ${esc(sl.title)}">
-      <img src="${esc(sl.image)}" alt="" decoding="async"><span class="sl-badge">${i + 1} / ${n}</span></div>`;
+      <img src="${esc(apiUrl(sl.image, true))}" alt="" decoding="async"><span class="sl-badge">${i + 1} / ${n}</span></div>`;
   }
   const media = sl.layout === 'media' && sl.image;
   let body;
-  if (media) body = `<div class="sl-text"><h2>${esc(sl.title)}</h2><ul>${li(b)}</ul></div><img class="sl-pic" src="${esc(sl.image)}" alt="" decoding="async">`;
+  if (media) body = `<div class="sl-text"><h2>${esc(sl.title)}</h2><ul>${li(b)}</ul></div><img class="sl-pic" src="${esc(apiUrl(sl.image, true))}" alt="" decoding="async">`;
   else if (sl.layout === 'title') body = `<h1>${esc(sl.title)}</h1>${b.length ? `<p class="sl-sub">${b.map(esc).join('<br>')}</p>` : ''}`;
   else if (sl.layout === 'quote') body = `<blockquote>${esc(b[0] || sl.title)}</blockquote>${b[1] ? `<cite>${esc(b[1])}</cite>` : ''}`;
   else if (sl.layout === 'metrics') body = `<h2>${esc(sl.title)}</h2><div class="metrics">${b.map(x => {
@@ -3317,7 +3414,7 @@ async function renderStageFrame(animate, navOnly) {
     const deck = parseDeck(art.content); const i = Math.max(0, Math.min(R.stage.slide, deck.slides.length - 1));
     frame.innerHTML = `<div class="slide-wrap">${slideHtml(deck, i, animate)}</div>`;
     fitSlide();
-    const nx = deck.slides[i + 1]; if (nx && nx.image) { const im = new Image(); im.src = nx.image; }   // trang sau hiện ngay khi chuyển
+    const nx = deck.slides[i + 1]; if (nx && nx.image) { const im = new Image(); im.src = apiUrl(nx.image, true); }   // trang sau hiện ngay khi chuyển
     const prompterOn = !$('#stage-prompter').classList.contains('hidden');
     const followOn = R.stage.follow !== false;
     nav.innerHTML = `<div class="flex flex-wrap items-center justify-between gap-2">
@@ -3877,7 +3974,10 @@ async function loadAssistant() {
 }
 function openSettings() {
   const a = S.assistant || { name: 'Jarvis', aliases: [] };
-  openModal(`
+  const acct = AUTH.required && AUTH.user ? `<div class="flex items-center justify-between gap-3 mb-4 pb-4 border-b divider text-[13px]">
+      <div class="min-w-0"><div class="font-medium truncate">${esc(AUTH.user.name)}</div><div class="text-muted truncate">${esc(AUTH.user.email)}${AUTH.user.admin ? ' - quản trị viên' : ''}</div></div>
+      <button type="button" class="btn btn-ghost" data-act="logout">Đăng xuất</button></div>` : '';
+  openModal(`${acct}
     <h3 class="text-lg font-semibold mb-1">Cài đặt trợ lý</h3>
     <p class="text-muted text-[13px] mb-4">Đặt tên để gọi trợ lý trong cuộc họp thay cho "Jarvis".</p>
     <form id="as-form" class="flex flex-col gap-4">
@@ -4266,7 +4366,7 @@ async function renderUsage(box) {
 }
 async function exportMeetingData(mid) {
   try {
-    const res = await fetch(`/api/meetings/${mid}/export`);
+    const res = await apiFetch(`/api/meetings/${mid}/export`);
     if (!res.ok) throw new Error(`Không xuất được (${res.status})`);
     const blob = await res.blob();
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `meeting-${mid}.json`; a.click();
@@ -4281,13 +4381,13 @@ async function toggleRecording() {
   if (!on) {
     const days = (R.recording && R.recording.retention_days) || 30;
     const ok = await confirmDialog({ title: 'Bật ghi âm cuộc họp?', ok: 'Mọi người đã đồng ý, bật ghi âm',
-      body: `Âm thanh từ lúc này được lưu trên máy chạy ứng dụng (thư mục data/recordings), không đưa lên Atlas, tự xóa sau ${days} ngày, xóa được bất cứ lúc nào trong menu cuộc họp. Giọng nói là dữ liệu sinh trắc học (Nghị định 13/2023/NĐ-CP): chỉ bật khi MỌI NGƯỜI trong phòng đã đồng ý. Dùng để chạy lại và so sánh các cách phân biệt người nói.` });
+      body: `Âm thanh từ lúc này được lưu trên máy chủ chạy ứng dụng (thư mục data/recordings), không đưa lên Atlas, tự xóa sau ${days} ngày, xóa được bất cứ lúc nào trong menu cuộc họp. Giọng nói là dữ liệu sinh trắc học (Nghị định 13/2023/NĐ-CP): chỉ bật khi MỌI NGƯỜI trong phòng đã đồng ý. Dùng để chạy lại và so sánh các cách phân biệt người nói.` });
     if (!ok) return;
   }
   try {
     R.recording = await POST(`/api/meetings/${R.id}/recording`, { enabled: !on, consent: !on });
     renderTopbar();
-    toast(on ? 'Đã dừng ghi âm.' : 'Đang ghi âm cuộc họp trên máy này.', 'info');
+    toast(on ? 'Đã dừng ghi âm.' : 'Đang ghi âm cuộc họp.', 'info');
   } catch (e) { toast(e.message, 'err'); }
 }
 async function deleteRecording() {
@@ -4295,7 +4395,8 @@ async function deleteRecording() {
   const ok = await confirmDialog({ title: 'Xóa bản ghi âm?', body: 'Toàn bộ âm thanh đã lưu của cuộc họp này bị xóa vĩnh viễn. Bản chép lời và người nói vẫn giữ nguyên.', ok: 'Xóa bản ghi âm', danger: true });
   if (!ok) return;
   try {
-    await fetch(`/api/meetings/${R.id}/recording`, { method: 'DELETE' });
+    const r = await apiFetch(`/api/meetings/${R.id}/recording`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(`Không xóa được bản ghi âm (${r.status})`);
     R.recording = { ...(R.recording || {}), enabled: false, runs: 0, seconds: 0 };
     renderTopbar(); toast('Đã xóa bản ghi âm.');
   } catch (e) { toast(e.message, 'err'); }
@@ -4476,6 +4577,7 @@ document.addEventListener('click', async e => {
       const cur = $$('[data-act="lib-remove"]', box).map(b => b.dataset.dir).filter(x => x !== d);
       return saveLibraryDirs(cur, box); }
     case 'settings': closeMenu(); return openSettings();
+    case 'logout': return logout();
     case 'modal-close': return closeModal();
   }
 });
@@ -4497,15 +4599,17 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target instanceof Element && e.target.matches('.mrow[data-act="open-meeting"]')) location.hash = `#/m/${e.target.dataset.mid}`;
 });
 
-/* Khởi động */
-mountFaces();
-updateVoiceUi();
-loadTtsStatus();
-requestAnimationFrame(avFrame);
-loadAssistant();
-loadHealth();
-route();
-setInterval(loadHealth, 60000);
+/* Khởi động (bản web: sau khi đăng nhập) */
+ensureLogin().then(() => {
+  mountFaces();
+  updateVoiceUi();
+  loadTtsStatus();
+  requestAnimationFrame(avFrame);
+  loadAssistant();
+  loadHealth();
+  route();
+  setInterval(loadHealth, 60000);
+});
 </script>
 </body>
 </html>

@@ -1,0 +1,15 @@
+# Không đưa khóa, dữ liệu họp, giọng nói, model đã tải và công cụ trên máy vào image
+.env
+.env.*
+data/
+models/
+node_modules/
+web-dist/
+.git/
+.claude/
+.venv/
+venv/
+**/__pycache__/
+*.wav
+*.mp3
+tests/
