@@ -929,6 +929,14 @@ function showView(name) {
 }
 async function route() {
   closeMenu();
+  const dq = (location.hash || '').match(/[?&]drive=(ok|err|denied)(?:&msg=([^&]*))?/);
+  if (dq) {
+    const msg = dq[2] ? decodeURIComponent(dq[2].replace(/\+/g, ' ')) : '';
+    toast(dq[1] === 'ok' ? 'Đã kết nối Google Drive. Biên bản các nhóm anh chị làm chủ sẽ tự lưu vào Drive.'
+      : dq[1] === 'denied' ? 'Anh chị chưa cho phép Google Drive nên chưa kết nối.' : `Chưa kết nối được Google Drive: ${msg}`,
+      dq[1] === 'ok' ? 'ok' : 'err', 8000);
+    history.replaceState(null, '', location.pathname + location.search + '#/');
+  }
   const h = location.hash || '#/';
   const m = h.match(/^#\/m\/(\d+)/);
   if (m) { ensureGroups(); return openRoom(parseInt(m[1], 10)); }
@@ -958,7 +966,7 @@ function renderTopbar() {
           ${groupOf(m.group_id) ? `<span class="chip hidden md:inline-flex">${esc(groupOf(m.group_id).name)}</span>` : ''}
           <span class="chip hidden md:inline-flex">${esc(m.meeting_type || 'Cuộc họp')}</span>
           ${live ? `<span class="chip chip-live"><span class="dot-live" style="width:6px;height:6px"></span>Đang diễn ra <span class="num" data-since="${m.started_at}">${fmt.clock(Date.now() / 1000 - m.started_at)}</span></span>`
-                 : `<span class="truncate">Đã kết thúc ${esc(fmt.date(m.ended_at))}<span class="hidden sm:inline">, dài ${esc(fmt.dur((m.ended_at || 0) - (m.started_at || 0)))}</span></span>`}
+                 : `<span class="truncate">Đã kết thúc ${esc(fmt.date(m.ended_at))}<span class="hidden sm:inline">, dài ${esc(fmt.dur((m.ended_at || 0) - (m.started_at || 0)))}</span></span>${driveChip(m)}`}
         </div>
       </div>
       ${live ? `<button class="btn btn-ghost btn-sm shrink-0 ml-1 ${S.room.recording && S.room.recording.enabled ? 'rec-on' : ''}" data-act="rec-toggle"
@@ -1016,7 +1024,8 @@ function renderGroupNav() {
   $('#hub-group-head').innerHTML = g ? `<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
       <div class="min-w-0"><h2 class="text-lg font-semibold truncate">${esc(g.name)}</h2>
         <p class="text-[13px] text-muted">${AUTH.required ? `${g.role === 'owner' ? 'Anh chị là chủ nhóm' : `Chủ nhóm: ${esc(g.owner || '')}`}, ${(g.members || []).length + 1} người` : 'Nhóm cuộc họp'}</p></div>
-      <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-ghost btn-sm" data-act="group-settings" data-gid="${g.id}">${g.role === 'owner' ? 'Cài đặt nhóm' : 'Thành viên'}</button>
+      <div class="flex flex-wrap gap-2">${g.drive && g.drive.folder_url ? `<a class="btn btn-ghost btn-sm" href="${esc(g.drive.folder_url)}" target="_blank" rel="noopener noreferrer">Thư mục Drive</a>` : ''}
+        <button type="button" class="btn btn-ghost btn-sm" data-act="group-settings" data-gid="${g.id}">${g.role === 'owner' ? 'Cài đặt nhóm' : 'Thành viên'}</button>
         <button type="button" class="btn btn-primary btn-sm" data-act="create-meeting">Tạo cuộc họp trong nhóm</button></div></div>` : '';
 }
 function storageNotice(sto, inSettings = false) {
@@ -1164,10 +1173,10 @@ async function openGroupSettings(gid) {
     ${owner ? `<div class="mt-5 pt-4 border-t divider"><h4 class="font-semibold mb-2">Ghi âm trên Google Drive</h4>
         <label class="text-[13px] flex items-center gap-2">Tự xóa sau <input id="gs-days" class="input" type="number" min="1" max="3650" style="width:90px" value="${g.recording_drive_days || ''}" placeholder="30"> ngày</label>
         <p class="text-[12px] text-muted mt-1">Để trống là theo mặc định của hệ thống. Biên bản không tự xóa.</p></div>
-      <div id="gs-drive"></div>
       <div class="mt-5 pt-4 border-t divider flex flex-wrap justify-between items-center gap-3">
         <span class="text-[12.5px] text-muted">Xóa nhóm không xóa cuộc họp: các cuộc họp chỉ không thuộc nhóm nào nữa.</span>
         <button type="button" class="btn btn-ghost btn-sm" style="color:rgb(var(--danger))" data-gs="delete">Xóa nhóm</button></div>` : ''}
+    <div id="gs-drive"></div>
     <div class="flex justify-end mt-5"><button type="button" class="btn btn-ghost" data-act="modal-close">Đóng</button></div>`, {
     onMount(m) {
       const renderMembers = () => {
@@ -1196,7 +1205,7 @@ async function openGroupSettings(gid) {
       });
       const days = $('#gs-days', m);
       if (days) days.addEventListener('change', e => save({ recording_drive_days: parseInt(e.target.value, 10) || 0 }, 'Đã lưu số ngày giữ ghi âm.'));
-      if (typeof renderGroupDrive === 'function') renderGroupDrive($('#gs-drive', m), g);
+      renderGroupDrive($('#gs-drive', m), g);
       m.addEventListener('click', async e => {
         const rm = e.target.closest('[data-gs-rm]');
         if (rm) return save({ members: members.filter(v => v !== rm.dataset.gsRm) }, 'Đã bỏ thành viên khỏi nhóm.');
@@ -1452,6 +1461,14 @@ function onEvent(R, ev) {
       // Co-design gửi từ chính trình duyệt này: lời đáp đã hiện qua phản hồi HTTP
       if (ev.artifact && ev.artifact.chat_message && !R.pendingCoDesign) appendAssistantNote(ev.artifact.chat_message, ev.artifact);
       break;
+    case 'drive_status': {
+      const before = (R.meeting.drive || {}).status;
+      R.meeting.drive = ev.drive || {};
+      renderTopbar();
+      if (R.meeting.drive.status === 'done' && before !== 'done') toast('Đã lưu biên bản lên Google Drive của nhóm.');
+      if (R.meeting.drive.status === 'need_connect' && before !== 'need_connect') toast(R.meeting.drive.error || 'Chưa kết nối Google Drive.', 'err', 7000);
+      break;
+    }
     case 'meeting_status':
       R.meeting = Object.assign(R.meeting, ev.meeting || {}, { status: ev.status, minutes_status: ev.minutes_status });
       if (ev.status === 'ended' && MIC.on && MIC.mid === R.id) stopMic(true);
@@ -4121,6 +4138,60 @@ async function renderClientLibrarySettings(box) {
     if (S.room) clibSync(S.room);
   };
 }
+/* ---------- Google Drive (bản web): mỗi người kết nối Drive của mình ---------- */
+async function renderDriveSettings(box) {
+  if (!box) return;
+  let st;
+  try { st = await GET('/api/google/status'); } catch (e) { box.innerHTML = `<p style="color:rgb(var(--danger))">${esc(e.message)}</p>`; return; }
+  if (!st.available) { box.innerHTML = '<p class="text-muted">Server chưa cấu hình kết nối Google (báo quản trị viên).</p>'; return; }
+  box.innerHTML = st.connected
+    ? `<div class="flex items-center justify-between gap-3"><div class="min-w-0"><div>Đã kết nối <b>${esc(st.google_email || '')}</b></div>
+        <div class="text-[12px] text-muted">Biên bản và ghi âm các nhóm anh chị làm chủ (và cuộc họp riêng của anh chị) được lưu vào thư mục "Meeting Copilot" trong Drive này.</div></div>
+        <button type="button" class="btn btn-ghost btn-sm shrink-0" data-gd="disconnect">Ngắt kết nối</button></div>`
+    : `<p class="text-muted mb-2">Kết nối Drive để tự lưu biên bản (Google Docs) và ghi âm vào thư mục của từng nhóm. Ứng dụng chỉ thấy các tệp do chính nó tạo trong Drive của anh chị.</p>
+       <button type="button" class="btn btn-primary btn-sm" data-gd="connect">Kết nối Google Drive</button>`;
+  box.onclick = async e => {
+    const b = e.target.closest('[data-gd]'); if (!b) return;
+    if (b.dataset.gd === 'connect') {
+      try { const r = await POST('/api/google/connect', { return_to: location.origin + location.pathname }); location.href = r.url; }
+      catch (err) { toast(err.message, 'err'); }
+      return;
+    }
+    const ok = await confirmDialog({ title: 'Ngắt kết nối Google Drive?', ok: 'Ngắt kết nối', danger: true,
+      body: 'Các biên bản đã lưu vẫn còn trong Drive. Từ giờ biên bản các nhóm của anh chị không tự lưu lên Drive nữa, cho tới khi kết nối lại.' });
+    if (!ok) return;
+    try { await POST('/api/google/disconnect', {}); toast('Đã ngắt kết nối Google Drive.'); } catch (err) { toast(err.message, 'err'); }
+  };
+}
+function renderGroupDrive(box, g) {
+  if (!box || !AUTH.required) return;
+  const d = g.drive || {};
+  const warn = d.keeper_connected === false
+    ? `<p class="text-[12.5px] mt-1" style="color:rgb(255 193 69)">${g.role === 'owner' ? 'Anh chị chưa kết nối Google Drive nên biên bản của nhóm chưa được lưu lên Drive. Vào Cài đặt, mục Google Drive để kết nối.' : 'Chủ nhóm chưa kết nối Google Drive nên biên bản chưa được lưu lên Drive.'}</p>` : '';
+  box.innerHTML = `<div class="mt-5 pt-4 border-t divider"><h4 class="font-semibold mb-1">Thư mục trên Google Drive</h4>
+    <p class="text-[13px]">${d.folder_url ? `<a class="link" href="${esc(d.folder_url)}" target="_blank" rel="noopener noreferrer">Mở thư mục của nhóm trên Drive</a>`
+      : `Tạo ở lần lưu biên bản đầu tiên: Meeting Copilot / ${esc(g.name)}, trong Drive của chủ nhóm.`}</p>${warn}
+    <p class="text-[12px] text-muted mt-1">Mỗi cuộc họp một thư mục con theo ngày giờ, gồm biên bản (Google Docs) và ghi âm (nếu có bật ghi âm). Thành viên được chia sẻ quyền chỉnh sửa.</p></div>`;
+}
+/** Trạng thái lưu Drive của cuộc họp đã kết thúc (thanh tiêu đề phòng họp). */
+function driveChip(m) {
+  if (!AUTH.required || !m || m.status !== 'ended') return '';
+  const d = m.drive || {};
+  if (d.status === 'done' && d.folder_url) return `<a class="chip hidden sm:inline-flex" href="${esc(d.folder_url)}" target="_blank" rel="noopener noreferrer" title="Mở thư mục cuộc họp trên Google Drive">Đã lưu lên Drive</a>`;
+  if (d.status === 'saving') return '<span class="chip hidden sm:inline-flex"><span class="spinner" style="width:10px;height:10px"></span>Đang lưu lên Drive</span>';
+  if (d.status === 'need_connect') return `<button type="button" class="chip hidden sm:inline-flex" data-act="settings" title="${esc(d.error || '')}">Chưa lưu Drive: cần kết nối</button>`;
+  if (d.status === 'error') return `<button type="button" class="chip hidden sm:inline-flex" style="color:rgb(var(--danger))" data-act="drive-save" title="${esc(d.error || '')}">Lưu Drive lỗi - Lưu lại</button>`;
+  if (m.minutes_status === 'done') return '<button type="button" class="chip hidden sm:inline-flex" data-act="drive-save">Lưu lên Drive</button>';
+  return '';
+}
+async function saveToDrive(R) {
+  if (!R) return;
+  try {
+    await POST(`/api/meetings/${R.id}/drive-save`, {});
+    R.meeting.drive = { ...(R.meeting.drive || {}), status: 'saving' };
+    renderTopbar(); toast('Đang lưu biên bản lên Google Drive...', 'info');
+  } catch (e) { toast(e.message, 'err'); }
+}
 function libRow(it) {
   const when = it.mtime ? fmt.date(it.mtime).split(' ')[0] : '';
   return `<button type="button" class="lib-row" data-lib-path="${esc(it.path)}" title="${esc(it.path)}">
@@ -4337,7 +4408,9 @@ function openSettings() {
   const acct = AUTH.required && AUTH.user ? `<div class="flex items-center justify-between gap-3 mb-4 pb-4 border-b divider text-[13px]">
       <div class="min-w-0"><div class="font-medium truncate">${esc(AUTH.user.name)}</div><div class="text-muted truncate">${esc(AUTH.user.email)}${AUTH.user.admin ? ' - quản trị viên' : ''}</div></div>
       <button type="button" class="btn btn-ghost" data-act="logout">Đăng xuất</button></div>` : '';
-  openModal(`${acct}
+  const gdrive = AUTH.required ? `<div class="mb-5 pb-4 border-b divider"><h4 class="font-semibold mb-2">Google Drive</h4>
+      <div id="gd-box" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang kiểm tra...</div></div></div>` : '';
+  openModal(`${acct}${gdrive}
     <h3 class="text-lg font-semibold mb-1">Cài đặt trợ lý</h3>
     <p class="text-muted text-[13px] mb-4">Đặt tên để gọi trợ lý trong cuộc họp thay cho "Jarvis".</p>
     <form id="as-form" class="flex flex-col gap-4">
@@ -4393,6 +4466,7 @@ function openSettings() {
     onMount(m) {
       renderUsage($('#usage-box', m));
       renderStorage($('#storage-box', m));
+      renderDriveSettings($('#gd-box', m));
       renderLlm($('#llm-box', m));
       renderServices($('#svc-box', m));
       renderLibrarySettings($('#lib-box', m));
@@ -4742,7 +4816,7 @@ async function toggleRecording() {
   if (!on) {
     const days = (R.recording && R.recording.retention_days) || 30;
     const ok = await confirmDialog({ title: 'Bật ghi âm cuộc họp?', ok: 'Mọi người đã đồng ý, bật ghi âm',
-      body: `Âm thanh từ lúc này được lưu trên máy chủ chạy ứng dụng (thư mục data/recordings), không đưa lên Atlas, tự xóa sau ${days} ngày, xóa được bất cứ lúc nào trong menu cuộc họp. Giọng nói là dữ liệu sinh trắc học (Nghị định 13/2023/NĐ-CP): chỉ bật khi MỌI NGƯỜI trong phòng đã đồng ý. Dùng để chạy lại và so sánh các cách phân biệt người nói.` });
+      body: `Âm thanh từ lúc này được lưu trên máy chủ chạy ứng dụng (thư mục data/recordings), không đưa lên Atlas, tự xóa sau ${days} ngày, xóa được bất cứ lúc nào trong menu cuộc họp.${AUTH.required ? ' Sau cuộc họp, bản ghi âm cũng được lưu vào thư mục của nhóm trên Google Drive và tự xóa theo hạn của nhóm.' : ''} Giọng nói là dữ liệu sinh trắc học (Nghị định 13/2023/NĐ-CP): chỉ bật khi MỌI NGƯỜI trong phòng đã đồng ý. Dùng để chạy lại và so sánh các cách phân biệt người nói.` });
     if (!ok) return;
   }
   try {
@@ -4828,6 +4902,7 @@ document.addEventListener('click', async e => {
     case 'create-meeting': return openCreateMeeting();
     case 'hub-group': location.hash = el.dataset.gid ? `#/g/${el.dataset.gid}` : '#/'; return;
     case 'create-group': return openCreateGroup();
+    case 'drive-save': return saveToDrive(S.room);
     case 'group-settings': return openGroupSettings(parseInt(el.dataset.gid, 10));
     case 'open-meeting': location.hash = `#/m/${mid}`; return;
     case 'nav-room': { const t = S.room ? S.room.id : MIC.mid; if (t) location.hash = `#/m/${t}`; return; }
@@ -4844,11 +4919,13 @@ document.addEventListener('click', async e => {
     case 'room-menu': {
       const R = S.room; if (!R) return;
       const items = [{ id: 'reanalyze', text: 'Phân tích lại người nói' }, { id: 'move', text: 'Chuyển vào nhóm...' }, { id: 'export', text: 'Xuất Markdown' }, { id: 'export-data', text: 'Xuất dữ liệu phân tích (JSON)' }];
+      if (AUTH.required && R.meeting && R.meeting.status === 'ended') items.push({ id: 'drive-save', text: 'Lưu lên Google Drive' });
       if (R.recording && R.recording.runs) items.push({ id: 'rec-delete', text: `Xóa bản ghi âm (${fmt.dur(R.recording.seconds || 0)})`, danger: true });
       items.push({ id: 'delete', text: 'Xóa cuộc họp', danger: true });
       const c = await openMenu(el, items);
       if (c === 'rec-delete') deleteRecording();
       if (c === 'move') openMoveMeeting(R.id);
+      if (c === 'drive-save') saveToDrive(R);
       if (c === 'reanalyze') reanalyzeMeeting();
       if (c === 'export-data') exportMeetingData(S.room.id);
       if (c === 'export') exportMarkdown(R.id);
