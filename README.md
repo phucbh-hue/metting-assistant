@@ -64,13 +64,16 @@ Thiết kế: `docs/plans/2026-10-09-groups-drive-design.md`. Kế hoạch: `doc
 - Server trên Render chạy giờ UTC nên giờ trong biên bản lệch 7 tiếng. Image Docker giờ đặt `TZ=ICT-7` (giờ Việt Nam).
 
 ### Việc làm một lần để bật Google Drive
-1. Google Cloud Console, project chứa OAuth client đang dùng (`GOOGLE_OAUTH_CLIENT_ID`):
+1. Google Cloud Console, project chứa OAuth client mà Render đang dùng (số đầu của `GOOGLE_OAUTH_CLIENT_ID` là số project):
    - **APIs & Services > Library**: bật **Google Drive API**.
    - **Credentials**: mở OAuth client, thêm **Authorized redirect URIs**:
      `https://urbox-meeting-api.onrender.com/api/google/callback`.
    - **OAuth consent screen** (Data access): thêm quyền `.../auth/drive.file`. Nên để User type **Internal**, để chỉ tài
      khoản urbox.vn kết nối được và không cần Google thẩm định.
-2. Render > Environment: đặt `GOOGLE_OAUTH_CLIENT_SECRET` (lấy trong `.env`). `PUBLIC_BASE_URL` đã có trong `render.yaml`.
+2. Render > Environment: đặt `GOOGLE_OAUTH_CLIENT_SECRET` là secret của **đúng OAuth client mà Render đang dùng**
+   (client có ID trùng `GOOGLE_OAUTH_CLIENT_ID` trên Render; có thể khác client trong `.env` trên máy). Google Auth
+   Platform > Clients > mở client đó > Client secrets (secret cũ không xem lại được thì bấm Add secret).
+   `PUBLIC_BASE_URL` đã có trong `render.yaml`.
 3. Mở ứng dụng, Cài đặt, mục Google Drive, Kết nối.
 
 ### Đã kiểm tra
