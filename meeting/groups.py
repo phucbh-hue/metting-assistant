@@ -3,7 +3,10 @@
 Bản web (AUTH_REQUIRED=1):
 - Chủ nhóm và thành viên xem được mọi cuộc họp của nhóm, tạo và tham gia cuộc họp trong nhóm.
 - Chỉ chủ nhóm quản lý nhóm: đổi tên, thêm / bớt thành viên, thư mục Drive, xóa nhóm.
-- Xóa nhóm không xóa cuộc họp: các cuộc họp thành "không thuộc nhóm" và vẫn thuộc người đã tạo.
+- Xóa nhóm không xóa cuộc họp: các cuộc họp thành "không thuộc nhóm" và vẫn thuộc người đã tạo. Tài liệu (KB) và lịch
+  sử trò chuyện của nhóm bị xóa theo.
+- bd_mode (bản 3.19): chủ nhóm bật "Nhóm BD" thì mọi cuộc họp trong nhóm có bảng gợi ý BD, chủ nhóm có khung trò chuyện /
+  báo cáo trên toàn bộ cuộc họp của nhóm.
 
 Chạy trên máy (không đăng nhập): một người dùng, mọi nhóm đều là của người đó, không có chia sẻ.
 """
@@ -56,7 +59,7 @@ def clean_members(members: Any, owner: Optional[str]) -> List[str]:
 
 def create_group(name: Any, owner: Optional[str]) -> Dict[str, Any]:
     doc = {"id": db._next_id("groups"), "name": clean_name(name), "owner": _email(owner) or None, "members": [],
-           "drive": {}, "recording_drive_days": None, "created_at": time.time()}
+           "drive": {}, "recording_drive_days": None, "bd_mode": False, "created_at": time.time()}
     _col().insert_one(dict(doc))
     _CACHE.pop(doc["id"], None)
     return doc
@@ -112,7 +115,7 @@ def list_groups_for(email: Optional[str]) -> List[Dict[str, Any]]:
 
 
 def update_group(gid: Any, name: Any = None, members: Any = None,
-                 recording_drive_days: Any = None) -> Dict[str, Any]:
+                 recording_drive_days: Any = None, bd_mode: Any = None) -> Dict[str, Any]:
     g = get_group(gid)
     if g is None:
         raise KeyError("Không tìm thấy nhóm")
@@ -126,6 +129,8 @@ def update_group(gid: Any, name: Any = None, members: Any = None,
         if days < 0 or days > 3650:
             raise ValueError("Số ngày giữ ghi âm phải từ 1 đến 3650 (0 = theo mặc định của hệ thống)")
         upd["recording_drive_days"] = days or None
+    if bd_mode is not None:
+        upd["bd_mode"] = bool(bd_mode)
     if upd:
         _col().update_one({"id": g["id"]}, {"$set": upd})
         _CACHE.pop(g["id"], None)
@@ -144,6 +149,8 @@ def delete_group(gid: Any) -> bool:
     if g is None:
         return False
     db._get_db()["meetings"].update_many({"group_id": g["id"]}, {"$unset": {"group_id": ""}})
+    db._get_db()["group_docs"].delete_many({"group_id": g["id"]})
+    db._get_db()["group_chats"].delete_many({"group_id": g["id"]})
     ok = _col().delete_one({"id": g["id"]}).deleted_count > 0
     _CACHE.pop(g["id"], None)
     return ok

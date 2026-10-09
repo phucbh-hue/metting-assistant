@@ -191,6 +191,8 @@ def _gemini():
 # Mọi lời gọi LLM đi qua đây để ghi lại: cuộc họp nào, việc gì, bao nhiêu token vào/ra, bao lâu, tốn khoảng bao nhiêu.
 CURRENT_MEETING: ContextVar[Optional[int]] = ContextVar("llm_meeting_id", default=None)
 CURRENT_PURPOSE: ContextVar[str] = ContextVar("llm_purpose", default="khác")
+# Lời gọi không thuộc cuộc họp nào nhưng của một người cụ thể (trò chuyện nhóm của chủ nhóm): dùng gói AI riêng của người đó
+CURRENT_OWNER: ContextVar[Optional[str]] = ContextVar("llm_owner", default=None)
 # USD cho 1 triệu token (vào, ra, hệ số giá đọc cache) theo trang Pricing của Anthropic (lấy ngày 02/10/2026).
 # Ghi cache 5 phút = 1,25 lần giá vào. Model không có trong bảng thì ghi 0.
 PRICES_USD = {"claude-fable-5-1": (10.0, 50.0, 0.025), "claude-fable-5": (10.0, 50.0, 0.1),
@@ -218,11 +220,19 @@ def user_subscription() -> Optional[Tuple[str, Any]]:
     riêng; không thì None (dùng API key của công ty)."""
     if not auth.ENABLED:
         return None
-    mid = CURRENT_MEETING.get()
-    if mid is None:
-        return None
+    owner = CURRENT_OWNER.get()
+    if owner is None:
+        mid = CURRENT_MEETING.get()
+        if mid is None:
+            return None
+        owner = _meeting_owner(mid)
     from meeting import user_llm
-    return user_llm.active(_meeting_owner(mid))
+    return user_llm.active(owner)
+
+
+def set_owner(email: Optional[str]) -> None:
+    """Các lời gọi LLM tiếp theo trong tác vụ hiện tại là của người này (dùng gói AI riêng của họ nếu có)."""
+    CURRENT_OWNER.set((email or "").strip().lower() or None)
 
 
 def set_meeting(meeting_id: Optional[int], purpose: Optional[str] = None) -> None:
@@ -768,6 +778,13 @@ async def generate_meeting_minutes(meeting_id: int, segments: List[Dict[str, Any
               f"Transcript cuộc họp:\n{transcript_text}\n\nHãy lập biên bản cuộc họp chi tiết theo cấu trúc. "
               "Ngày tháng ghi theo dd/mm/yyyy.")
     content = await _call_llm(MINUTES_SYSTEM, prompt, max_tokens=3500)
+    if meeting.get("group_id"):
+        # Nhớ xuyên cuộc họp: nói khác điều nhóm đã chốt ở buổi trước thì biên bản có mục "Thay đổi so với các buổi trước"
+        try:
+            from meeting import group_memory
+            content = await group_memory.with_changes(meeting_id, meeting, content)
+        except Exception as e:
+            log.warning("meeting.artifacts: so với các buổi trước của nhóm lỗi: %s", e)
 
     # Lưu vào DB
     aid = db.save_artifact(

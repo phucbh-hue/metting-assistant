@@ -640,6 +640,7 @@ class MeetingSession:
         self._gates: Dict[str, VoiceGate] = {}
         self._stream_raws: Dict[str, Dict[int, Set[str]]] = {}
         self._meet_texts: Deque[Tuple[float, float, List[str]]] = deque(maxlen=60)   # câu Meet gần đây (chặn tiếng vọng)
+        self.bd = None                                         # trợ lý BD (nhóm bật chế độ BD, bản 3.19)
         self._held: Set[asyncio.Task] = set()
         self._queue: asyncio.Queue = asyncio.Queue()
         self._db_queue: asyncio.Queue = asyncio.Queue()
@@ -894,6 +895,9 @@ class MeetingSession:
         await self._check_wake(seg)
         await self._follow_slide(seg)
         self.identity.notify(seg)
+        if self.meeting.get("group_id"):
+            from meeting import bd
+            bd.on_segment(self, seg)                 # nhóm BD: gợi ý cho đội BD trên bảng riêng
 
     def note_interim(self):
         self._speech_at = time.monotonic()
@@ -2393,6 +2397,8 @@ class MeetingSession:
 
     def dispose(self):
         self.disposed = True
+        if self.bd is not None:
+            self.bd.close()
         for t in self._workers:
             t.cancel()
         self._workers = []

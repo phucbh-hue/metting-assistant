@@ -33,9 +33,9 @@ from fastapi.responses import FileResponse, RedirectResponse, Response, Streamin
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
-from meeting import (artifacts, auth, cli_llm, db, decks, drive_sync, envfile, gcalendar, google_oauth,  # noqa: E402
-                     groups, live, llm, mcp, meet_bots, recall, recap_export, recording, tts, user_llm, user_prefs,
-                     voice, websearch)
+from meeting import (artifacts, auth, bd, cli_llm, db, decks, drive_sync, envfile, gcalendar,  # noqa: E402
+                     google_oauth, group_chat, group_kb, groups, live, llm, mcp, meet_bots, recall, recap_export,
+                     recording, tts, user_llm, user_prefs, voice, websearch)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("meeting.app")
@@ -1279,6 +1279,7 @@ class GroupPatch(BaseModel):
     name: Optional[str] = Field(None, max_length=200)
     members: Optional[List[str]] = Field(None, max_length=200)
     recording_drive_days: Optional[int] = None
+    bd_mode: Optional[bool] = None
 
 
 class MeetingGroupReq(BaseModel):
@@ -1292,7 +1293,8 @@ def _group_public(g: Dict[str, Any], email: Optional[str]) -> Dict[str, Any]:
         info["keeper_connected"] = google_oauth.status(g["owner"])["connected"]
     return {"id": g["id"], "name": g["name"], "owner": g.get("owner"), "members": g.get("members") or [],
             "role": groups.role_of(g, email), "meeting_count": g.get("meeting_count"),
-            "recording_drive_days": g.get("recording_drive_days"), "created_at": g.get("created_at"), "drive": info}
+            "recording_drive_days": g.get("recording_drive_days"), "created_at": g.get("created_at"), "drive": info,
+            "bd_mode": bool(g.get("bd_mode")), "doc_count": group_kb.signature(g["id"])[0]}
 
 
 def _group_for(gid: int, request: Request, need_owner: bool = False) -> Dict[str, Any]:
@@ -1331,7 +1333,8 @@ def get_group(gid: int, request: Request):
 async def patch_group(gid: int, req: GroupPatch, request: Request):
     g = await asyncio.to_thread(_group_for, gid, request, True)
     try:
-        g = await asyncio.to_thread(groups.update_group, g["id"], req.name, req.members, req.recording_drive_days)
+        g = await asyncio.to_thread(groups.update_group, g["id"], req.name, req.members, req.recording_drive_days,
+                                    req.bd_mode)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if req.members is not None:
@@ -1346,6 +1349,137 @@ def delete_group(gid: int, request: Request):
     for mid in groups.group_meeting_ids(g["id"]):
         _MEETING_KEYS.pop(mid, None)
     return {"success": groups.delete_group(g["id"])}
+
+
+# ------------------------------------------------- tài liệu của nhóm (kho tri thức BD, 3.19) ---
+@app.get("/api/groups/{gid}/docs")
+def list_group_docs(gid: int, request: Request):
+    g = _group_for(gid, request)
+    return {"docs": group_kb.list_docs(g["id"]), "max_docs": group_kb.MAX_DOCS, "exts": list(group_kb.EXTS),
+            "can_edit": groups.role_of(g, (_user(request) or {}).get("email")) == "owner"}
+
+
+@app.post("/api/groups/{gid}/docs")
+async def upload_group_doc(gid: int, request: Request, file: UploadFile = File(...)):
+    """Chủ nhóm tải tài liệu lên kho của nhóm: chỉ giữ chữ đã trích, tệp gốc xóa ngay sau khi đọc."""
+    import tempfile
+    g = await asyncio.to_thread(_group_for, gid, request, True)
+    name = Path(file.filename or "tai-lieu").name
+    fd, tmp = tempfile.mkstemp(suffix=Path(name).suffix.lower(), prefix="gkb-")
+    size = 0
+    try:
+        with os.fdopen(fd, "wb") as out:
+            while True:
+                chunk = await file.read(1 << 20)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > group_kb.MAX_BYTES:
+                    raise HTTPException(status_code=400, detail="Tệp lớn hơn 25 MB")
+                out.write(chunk)
+        try:
+            return await asyncio.to_thread(group_kb.add, g["id"], name, tmp, (_user(request) or {}).get("email"), size)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+@app.delete("/api/groups/{gid}/docs/{doc_id}")
+def delete_group_doc(gid: int, doc_id: int, request: Request):
+    g = _group_for(gid, request, need_owner=True)
+    if not group_kb.delete(g["id"], doc_id):
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài liệu")
+    return {"success": True}
+
+
+# ------------------------------------------------- trò chuyện của chủ nhóm BD (3.19) ---
+class ChatReq(BaseModel):
+    question: str = Field(..., max_length=2000)
+
+
+def _chat_group(gid: int, request: Request) -> Dict[str, Any]:
+    g = _group_for(gid, request)
+    if groups.role_of(g, (_user(request) or {}).get("email")) != "owner":
+        raise HTTPException(status_code=403, detail="Chỉ chủ nhóm được trò chuyện trên toàn bộ cuộc họp của nhóm")
+    if not g.get("bd_mode"):
+        raise HTTPException(status_code=400, detail="Nhóm chưa bật chế độ BD (Cài đặt nhóm)")
+    return g
+
+
+@app.get("/api/groups/{gid}/chat")
+def group_chat_messages(gid: int, request: Request):
+    g = _chat_group(gid, request)
+    return {"messages": group_chat.messages(g["id"])}
+
+
+@app.post("/api/groups/{gid}/chat")
+async def group_chat_ask(gid: int, req: ChatReq, request: Request):
+    """Hỏi trên toàn bộ cuộc họp của nhóm: trả lời chạy nền (đọc song song các cuộc họp liên quan), giao diện tự cập nhật."""
+    g = await asyncio.to_thread(_chat_group, gid, request)
+    try:
+        msg = await asyncio.to_thread(group_chat.prepare, g["id"], req.question, (_user(request) or {}).get("email"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    group_chat.start(g["id"], msg, (_user(request) or {}).get("email"))
+    return {"message": msg, "messages": await asyncio.to_thread(group_chat.messages, g["id"])}
+
+
+@app.delete("/api/groups/{gid}/chat")
+def group_chat_clear(gid: int, request: Request):
+    g = _chat_group(gid, request)
+    group_chat.clear(g["id"])
+    return {"messages": []}
+
+
+# ------------------------------------------------- bảng BD của cuộc họp (3.19) ---
+class BDAskReq(BaseModel):
+    question: str = Field(..., max_length=500)
+
+
+class BDRoleReq(BaseModel):
+    role: str = ""
+
+
+async def _bd_of(mid: int) -> "bd.BDAssistant":
+    s = await _session_or_404(mid)
+    a = bd.assistant(s)
+    if a is None:
+        raise HTTPException(status_code=400, detail="Nhóm của cuộc họp này chưa bật chế độ BD")
+    return a
+
+
+@app.get("/api/meetings/{mid}/bd")
+async def meeting_bd(mid: int):
+    s = await _session_or_404(mid)
+    a = bd.assistant(s)
+    if a is None:
+        return {"enabled": False}
+    g = groups.get_group(s.meeting.get("group_id")) or {}
+    return {"enabled": True, "cards": await asyncio.to_thread(bd.load_cards, mid), "roles": a.roles, "busy": a.inflight,
+            "group": {"id": g.get("id"), "name": g.get("name"), "doc_count": group_kb.signature(g["id"])[0] if g else 0}}
+
+
+@app.post("/api/meetings/{mid}/bd/ask")
+async def meeting_bd_ask(mid: int, req: BDAskReq, request: Request):
+    """Hỏi nhanh trên bảng BD: 2 lời gọi song song (tài liệu, các buổi trước), kết quả qua kênh /ws/meeting/<id>/bd."""
+    a = await _bd_of(mid)
+    if not req.question.strip():
+        raise HTTPException(status_code=400, detail="Câu hỏi trống")
+    a.ask_soon(req.question, (_user(request) or {}).get("email"))
+    return {"ok": True}
+
+
+@app.put("/api/meetings/{mid}/bd/roles/{sid}")
+async def meeting_bd_role(mid: int, sid: int, req: BDRoleReq):
+    a = await _bd_of(mid)
+    try:
+        return {"roles": await a.set_role(sid, req.role)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/api/meetings/{mid}/drive-save")
@@ -1949,6 +2083,45 @@ async def ws_audio(ws: WebSocket, mid: int):
         if s.audio_owner is None:
             s.set_mic_user(None)
         log.info("meeting.app: mic ngắt kết nối cho cuộc họp %d", mid)
+
+
+@app.websocket("/ws/meeting/{mid}/bd")
+async def ws_bd(ws: WebSocket, mid: int):
+    """Kênh riêng của bảng BD: thẻ gợi ý, vai trò Khách / Đội mình. Kênh sự kiện chung (màn hình trình chiếu) không có các
+    thẻ này. Người không xem được cuộc họp đã bị chặn ở MeetingAccessMiddleware."""
+    await ws.accept()
+    s = await live.get_session(mid)
+    a = bd.assistant(s) if s is not None else None
+    if a is None:
+        await ws.send_text(_dumps({"type": "error", "text": "Nhóm của cuộc họp này chưa bật chế độ BD"}))
+        await ws.close(code=4003)
+        return
+    q = await a.subscribe()
+    try:
+        await ws.send_text(_dumps({"type": "bd_init", "cards": await asyncio.to_thread(bd.load_cards, mid),
+                                   "roles": a.roles, "busy": a.inflight}))
+
+        async def sender():
+            while True:
+                await ws.send_text(_dumps(await q.get()))
+
+        async def receiver():
+            while True:
+                if (await ws.receive_text()) == '{"type":"ping"}':
+                    q.put_nowait({"type": "pong"})
+
+        tasks = [asyncio.create_task(sender()), asyncio.create_task(receiver())]
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for t in pending:
+            t.cancel()
+        for t in done:
+            exc = t.exception()                  # trình duyệt đóng kênh: WebSocketDisconnect, không cần báo
+            if exc and not isinstance(exc, (WebSocketDisconnect, RuntimeError)):
+                log.debug("ws_bd %d kết thúc: %s", mid, exc)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        a.unsubscribe(q)
 
 
 @app.websocket("/ws/recall/{rid}/")
