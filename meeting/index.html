@@ -311,6 +311,10 @@
     .sl-media .sl-pic { flex: 0 1 40%; max-width: 40%; max-height: 100%; object-fit: contain; border-radius: 1cqw; }
     /* trợ lý hỏi cách trình bày tài liệu */
     .ask-card { position: fixed; left: 50%; bottom: 88px; transform: translateX(-50%); z-index: 58; width: min(640px, calc(100vw - 32px)); background: rgb(var(--raise)); border: 1px solid var(--line-strong); border-left: 3px solid rgb(var(--accent)); border-radius: 16px; padding: 14px 16px; box-shadow: 0 24px 70px rgba(0,0,0,.55); animation: toastIn .2s ease-out; }
+    .gnav { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; padding: 7px 10px; border-radius: 10px; font-size: 13.5px; color: rgb(var(--muted)); }
+    .gnav:hover, .gnav:focus-visible { background: rgba(255,255,255,.05); color: rgb(var(--ink)); }
+    .gnav[aria-current="true"] { background: rgb(var(--accent) / .14); color: rgb(var(--ink)); }
+    .gnav .gnav-n { margin-left: auto; font-size: 12px; }
     .lib-row { width: 100%; display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 10px; align-items: center; text-align: left; padding: 7px 10px; border-radius: 10px; }
     .lib-row:hover, .lib-row:focus-visible { background: rgba(255,255,255,.06); }
     .lib-ext { width: 38px; height: 34px; border-radius: 8px; display: grid; place-items: center; font-size: 10.5px; font-weight: 700; text-transform: uppercase; background: rgba(255,255,255,.06); }
@@ -505,7 +509,11 @@
     <main class="flex-1 min-h-0 overflow-hidden">
       <!-- ============ VIEW: DANH SÁCH CUỘC HỌP ============ -->
       <section id="view-hub" class="h-full overflow-y-auto">
-        <div class="max-w-6xl mx-auto px-4 md:px-6 py-6">
+        <div class="max-w-6xl mx-auto px-4 md:px-6 py-6 md:flex md:gap-6">
+          <aside id="hub-groups" class="hidden md:block w-56 shrink-0" aria-label="Nhóm cuộc họp"></aside>
+          <div class="flex-1 min-w-0">
+          <select id="hub-group-select" class="input md:hidden mb-4" aria-label="Chọn nhóm cuộc họp"></select>
+          <div id="hub-group-head"></div>
           <p id="hub-summary" class="text-muted mb-5"></p>
           <div id="hub-storage"></div>
           <div id="hub-live"></div>
@@ -521,6 +529,7 @@
             <span>Cuộc họp</span><span class="mcol">Thời lượng</span><span class="mcol">Người nói</span><span class="mcol">Số câu</span><span class="mcol">Trạng thái</span><span></span>
           </div>
           <ul id="hub-list" class="flex flex-col gap-1"></ul>
+          </div>
         </div>
       </section>
 
@@ -897,6 +906,7 @@ function closeMenu() {
    ===================================================================== */
 const S = {
   view: 'hub', meetings: [], stats: null, filter: 'all', q: '',
+  groups: [], groupsLoaded: false, groupId: null,
   voices: [], directory: [], health: null,
   assistant: { name: 'Jarvis', aliases: [] },
   room: null,
@@ -921,8 +931,10 @@ async function route() {
   closeMenu();
   const h = location.hash || '#/';
   const m = h.match(/^#\/m\/(\d+)/);
-  if (m) return openRoom(parseInt(m[1], 10));
+  if (m) { ensureGroups(); return openRoom(parseInt(m[1], 10)); }
   if (h.startsWith('#/voices')) { showView('voices'); return loadVoices(); }
+  const g = h.match(/^#\/g\/(\d+)/);
+  S.groupId = g ? parseInt(g[1], 10) : null;
   showView('hub');
   return loadHub();
 }
@@ -937,12 +949,13 @@ function renderTopbar() {
     const m = S.room.meeting;
     const live = m.status !== 'ended';
     left.innerHTML = `
-      <a href="#/" class="icon-btn shrink-0" aria-label="Về danh sách cuộc họp" title="Về danh sách cuộc họp">
+      <a href="${m.group_id ? `#/g/${m.group_id}` : '#/'}" class="icon-btn shrink-0" aria-label="Về danh sách cuộc họp" title="Về danh sách cuộc họp">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
       </a>
       <div class="min-w-0">
         <h1 class="font-semibold text-[16px] truncate">${esc(m.title)}</h1>
         <div class="flex items-center gap-2 text-[12.5px] text-muted min-w-0">
+          ${groupOf(m.group_id) ? `<span class="chip hidden md:inline-flex">${esc(groupOf(m.group_id).name)}</span>` : ''}
           <span class="chip hidden md:inline-flex">${esc(m.meeting_type || 'Cuộc họp')}</span>
           ${live ? `<span class="chip chip-live"><span class="dot-live" style="width:6px;height:6px"></span>Đang diễn ra <span class="num" data-since="${m.started_at}">${fmt.clock(Date.now() / 1000 - m.started_at)}</span></span>`
                  : `<span class="truncate">Đã kết thúc ${esc(fmt.date(m.ended_at))}<span class="hidden sm:inline">, dài ${esc(fmt.dur((m.ended_at || 0) - (m.started_at || 0)))}</span></span>`}
@@ -968,11 +981,43 @@ function renderTopbar() {
    DANH SÁCH CUỘC HỌP
    ===================================================================== */
 async function loadHub() {
+  const gid = S.groupId;
   try {
-    const [m, st, sto] = await Promise.all([GET('/api/meetings'), GET('/api/stats'), GET('/api/storage').catch(() => null)]);
-    S.meetings = m.meetings || []; S.stats = st; S.storage = sto;
-  } catch (e) { toast(e.message, 'err'); }
+    const [m, st, sto, gr] = await Promise.all([GET(gid ? `/api/meetings?group_id=${gid}` : '/api/meetings'), GET('/api/stats'),
+      GET('/api/storage').catch(() => null), GET('/api/groups').catch(() => ({ groups: [] }))]);
+    S.meetings = m.meetings || []; S.stats = st; S.storage = sto; S.groups = gr.groups || []; S.groupsLoaded = true;
+  } catch (e) {
+    toast(e.message, 'err');
+    if (gid) { location.hash = '#/'; return; }      // nhóm đã bị xóa / không còn là thành viên
+  }
+  if (gid !== S.groupId) return;                     // đã chuyển sang nhóm khác trong lúc tải
   renderHub();
+}
+/** Tải danh sách nhóm một lần (mở thẳng link phòng họp vẫn biết tên nhóm). */
+async function ensureGroups() {
+  if (S.groupsLoaded) return;
+  try { S.groups = (await GET('/api/groups')).groups || []; S.groupsLoaded = true; } catch (e) { /* bỏ qua */ }
+  if (S.view === 'room') renderTopbar();
+}
+const groupOf = id => (S.groups || []).find(g => g.id === id) || null;
+function renderGroupNav() {
+  const cur = S.groupId;
+  const item = g => `<button type="button" class="gnav" data-act="hub-group" data-gid="${g.id}" aria-current="${cur === g.id}" title="${esc(g.name)}">
+      <span class="truncate">${esc(g.name)}</span>${g.role === 'member' ? '<span class="chip" style="font-size:10.5px">được chia sẻ</span>' : ''}<span class="gnav-n num">${g.meeting_count || 0}</span></button>`;
+  $('#hub-groups').innerHTML = `<div class="text-[12px] text-muted mb-2">Nhóm</div>
+    <div class="flex flex-col gap-0.5">
+      <button type="button" class="gnav" data-act="hub-group" data-gid="" aria-current="${!cur}"><span>Tất cả cuộc họp</span></button>
+      ${(S.groups || []).map(item).join('')}
+    </div>
+    <button type="button" class="btn btn-ghost btn-sm mt-3 w-full" data-act="create-group">+ Tạo nhóm</button>`;
+  $('#hub-group-select').innerHTML = `<option value="">Tất cả cuộc họp</option>${(S.groups || []).map(g =>
+    `<option value="${g.id}" ${cur === g.id ? 'selected' : ''}>${esc(g.name)}${g.role === 'member' ? ' (được chia sẻ)' : ''}</option>`).join('')}<option value="new">+ Tạo nhóm...</option>`;
+  const g = groupOf(cur);
+  $('#hub-group-head').innerHTML = g ? `<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <div class="min-w-0"><h2 class="text-lg font-semibold truncate">${esc(g.name)}</h2>
+        <p class="text-[13px] text-muted">${AUTH.required ? `${g.role === 'owner' ? 'Anh chị là chủ nhóm' : `Chủ nhóm: ${esc(g.owner || '')}`}, ${(g.members || []).length + 1} người` : 'Nhóm cuộc họp'}</p></div>
+      <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-ghost btn-sm" data-act="group-settings" data-gid="${g.id}">${g.role === 'owner' ? 'Cài đặt nhóm' : 'Thành viên'}</button>
+        <button type="button" class="btn btn-primary btn-sm" data-act="create-meeting">Tạo cuộc họp trong nhóm</button></div></div>` : '';
 }
 function storageNotice(sto, inSettings = false) {
   if (!sto) return '';
@@ -1023,9 +1068,12 @@ async function renderStorage(box) {
   } catch (e) { box.innerHTML = `<p style="color:rgb(var(--danger))">${esc(e.message)}</p>`; }
 }
 function renderHub() {
+  renderGroupNav();
   $('#hub-storage').innerHTML = storageNotice(S.storage);
   const st = S.stats;
-  if (st) {
+  if (S.groupId) {
+    $('#hub-summary').textContent = `${S.meetings.length} cuộc họp trong nhóm.`;
+  } else if (st) {
     const parts = [`${st.meetings_total} cuộc họp`];
     if (st.total_duration_s) parts.push(`tổng ${fmt.dur(st.total_duration_s)} đã ghi`);
     parts.push(`${st.voices_total} hồ sơ giọng nói`);
@@ -1042,7 +1090,7 @@ function renderHub() {
   const list = $('#hub-list');
   if (!rows.length) {
     const msg = S.meetings.length === 0
-      ? 'Chưa có cuộc họp nào. Bấm "Tạo cuộc họp" ở góc trên bên phải để bắt đầu.'
+      ? (S.groupId ? 'Nhóm chưa có cuộc họp nào. Bấm "Tạo cuộc họp trong nhóm" để bắt đầu.' : 'Chưa có cuộc họp nào. Bấm "Tạo cuộc họp" ở góc trên bên phải để bắt đầu.')
       : (q ? `Không có cuộc họp nào khớp "${S.q}".` : (S.filter === 'all' ? 'Không có cuộc họp đã kết thúc.' : 'Không có cuộc họp nào trong mục này.'));
     list.innerHTML = `<li class="text-muted py-10 text-center">${esc(msg)}</li>`;
   } else list.innerHTML = rows.map(rowHtml).join('');
@@ -1056,7 +1104,7 @@ function rowHtml(m) {
   return `<li class="mrow ${isLive ? 'is-live' : ''}" data-act="open-meeting" data-mid="${m.id}" tabindex="0">
     <div class="min-w-0">
       <div class="mrow-title">${esc(m.title)}</div>
-      <div class="mrow-sub">${esc(m.meeting_type || '')}${m.meeting_type ? ', ' : ''}${esc(fmt.date(m.started_at))}
+      <div class="mrow-sub">${!S.groupId && groupOf(m.group_id) ? `<span class="chip" style="font-size:11px">${esc(groupOf(m.group_id).name)}</span> ` : ''}${esc(m.meeting_type || '')}${m.meeting_type ? ', ' : ''}${esc(fmt.date(m.started_at))}
         <span class="mcol-mobile hidden">${esc(fmt.dur(m.duration_s))}, ${m.speaker_count || 0} người nói</span></div>
     </div>
     <span class="mcol num text-muted">${isLive ? `<span data-since="${m.started_at}">${fmt.clock(Date.now() / 1000 - m.started_at)}</span>` : esc(fmt.dur(m.duration_s))}</span>
@@ -1069,17 +1117,138 @@ function rowHtml(m) {
   </li>`;
 }
 $('#hub-search').addEventListener('input', e => { S.q = e.target.value; renderHub(); });
+$('#hub-group-select').addEventListener('change', e => {
+  const v = e.target.value;
+  if (v === 'new') { e.target.value = S.groupId || ''; return openCreateGroup(); }
+  location.hash = v ? `#/g/${v}` : '#/';
+});
+
+/* =====================================================================
+   NHÓM CUỘC HỌP
+   ===================================================================== */
+function openCreateGroup() {
+  openModal(`<h3 class="text-lg font-semibold mb-1">Tạo nhóm cuộc họp</h3>
+    <p class="text-muted text-[13px] mb-4">Gom các cuộc họp cùng chủ đề hoặc cùng phòng ban.${AUTH.required ? ' Anh chị mời đồng nghiệp vào nhóm để cùng xem và cùng họp.' : ''}</p>
+    <form id="cg-form" class="flex flex-col gap-4">
+      <div><label class="field" for="cg-name">Tên nhóm</label>
+        <input id="cg-name" class="input" required maxlength="80" placeholder="Ví dụ: Sprint Payment, Phòng BD, Khách hàng Vinmart"></div>
+      <div class="flex justify-end gap-2"><button type="button" class="btn btn-ghost" data-act="modal-close">Hủy</button><button class="btn btn-primary" type="submit">Tạo nhóm</button></div>
+    </form>`, {
+    onMount(m) {
+      $('#cg-form', m).addEventListener('submit', async e => {
+        e.preventDefault();
+        try {
+          const g = await POST('/api/groups', { name: $('#cg-name', m).value.trim() });
+          closeModal(); toast('Đã tạo nhóm.');
+          S.groupsLoaded = false; location.hash = `#/g/${g.id}`;
+        } catch (err) { toast(err.message, 'err'); }
+      });
+    }
+  });
+}
+async function openGroupSettings(gid) {
+  let g;
+  try { g = await GET(`/api/groups/${gid}`); } catch (e) { return toast(e.message, 'err'); }
+  const owner = g.role === 'owner';
+  const members = [...(g.members || [])];
+  const x = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  openModal(`<h3 class="text-lg font-semibold mb-4">${owner ? 'Cài đặt nhóm' : esc(g.name)}</h3>
+    ${owner ? `<form id="gs-name" class="flex gap-2 mb-5"><input id="gs-name-in" class="input" maxlength="80" value="${esc(g.name)}" aria-label="Tên nhóm" required>
+      <button class="btn btn-ghost btn-sm shrink-0" style="height:38px" type="submit">Đổi tên</button></form>` : ''}
+    ${AUTH.required ? `<h4 class="font-semibold mb-2">Thành viên</h4>
+      <ul id="gs-members" class="flex flex-col gap-1 mb-2 text-[13px]"></ul>
+      ${owner ? `<form id="gs-add" class="flex gap-2"><input id="gs-add-in" class="input" type="email" autocomplete="off" placeholder="email@urbox.vn" aria-label="Email thành viên mới">
+        <button class="btn btn-ghost btn-sm shrink-0" style="height:38px" type="submit">Thêm</button></form>
+        <p class="text-[12px] text-muted mt-1">Thành viên xem được mọi cuộc họp và biên bản của nhóm, tạo và tham gia cuộc họp trong nhóm. Chỉ chủ nhóm quản lý thành viên.</p>` : ''}`
+      : '<p class="text-[13px] text-muted">Bản chạy trên máy không chia sẻ nhóm cho người khác được.</p>'}
+    ${owner ? `<div class="mt-5 pt-4 border-t divider"><h4 class="font-semibold mb-2">Ghi âm trên Google Drive</h4>
+        <label class="text-[13px] flex items-center gap-2">Tự xóa sau <input id="gs-days" class="input" type="number" min="1" max="3650" style="width:90px" value="${g.recording_drive_days || ''}" placeholder="30"> ngày</label>
+        <p class="text-[12px] text-muted mt-1">Để trống là theo mặc định của hệ thống. Biên bản không tự xóa.</p></div>
+      <div id="gs-drive"></div>
+      <div class="mt-5 pt-4 border-t divider flex flex-wrap justify-between items-center gap-3">
+        <span class="text-[12.5px] text-muted">Xóa nhóm không xóa cuộc họp: các cuộc họp chỉ không thuộc nhóm nào nữa.</span>
+        <button type="button" class="btn btn-ghost btn-sm" style="color:rgb(var(--danger))" data-gs="delete">Xóa nhóm</button></div>` : ''}
+    <div class="flex justify-end mt-5"><button type="button" class="btn btn-ghost" data-act="modal-close">Đóng</button></div>`, {
+    onMount(m) {
+      const renderMembers = () => {
+        const ul = $('#gs-members', m); if (!ul) return;
+        ul.innerHTML = `<li class="flex items-center justify-between gap-2"><span class="truncate">${esc(g.owner || '')}</span><span class="chip">chủ nhóm</span></li>`
+          + members.map(e => `<li class="flex items-center justify-between gap-2"><span class="truncate">${esc(e)}</span>
+            ${owner ? `<button type="button" class="icon-btn" data-gs-rm="${esc(e)}" aria-label="Bỏ ${esc(e)} khỏi nhóm" title="Bỏ khỏi nhóm">${x}</button>` : ''}</li>`).join('');
+      };
+      const save = async (body, msg) => {
+        try {
+          g = await PATCH(`/api/groups/${gid}`, body);
+          members.splice(0, members.length, ...(g.members || []));
+          renderMembers(); toast(msg);
+          if (S.view === 'hub') loadHub();
+          return true;
+        } catch (e) { toast(e.message, 'err'); return false; }
+      };
+      renderMembers();
+      const fName = $('#gs-name', m);
+      if (fName) fName.addEventListener('submit', e => { e.preventDefault(); save({ name: $('#gs-name-in', m).value.trim() }, 'Đã đổi tên nhóm.'); });
+      const fAdd = $('#gs-add', m);
+      if (fAdd) fAdd.addEventListener('submit', async e => {
+        e.preventDefault();
+        const v = $('#gs-add-in', m).value.trim().toLowerCase(); if (!v) return;
+        if (await save({ members: [...members, v] }, `Đã thêm ${v} vào nhóm.`)) $('#gs-add-in', m).value = '';
+      });
+      const days = $('#gs-days', m);
+      if (days) days.addEventListener('change', e => save({ recording_drive_days: parseInt(e.target.value, 10) || 0 }, 'Đã lưu số ngày giữ ghi âm.'));
+      if (typeof renderGroupDrive === 'function') renderGroupDrive($('#gs-drive', m), g);
+      m.addEventListener('click', async e => {
+        const rm = e.target.closest('[data-gs-rm]');
+        if (rm) return save({ members: members.filter(v => v !== rm.dataset.gsRm) }, 'Đã bỏ thành viên khỏi nhóm.');
+        if (!e.target.closest('[data-gs="delete"]')) return;
+        const ok = await confirmDialog({ title: `Xóa nhóm "${g.name}"?`, ok: 'Xóa nhóm', danger: true,
+          body: 'Các cuộc họp trong nhóm vẫn còn, chỉ không thuộc nhóm nào nữa. Thành viên sẽ không xem được các cuộc họp của người khác trong nhóm này.' });
+        if (!ok) return;
+        try { await DEL(`/api/groups/${gid}`); closeModal(); toast('Đã xóa nhóm.'); S.groupsLoaded = false; location.hash = '#/'; if (!S.groupId) loadHub(); }
+        catch (err) { toast(err.message, 'err'); }
+      });
+    }
+  });
+}
+async function openMoveMeeting(mid) {
+  if (!S.groupsLoaded) await ensureGroups();
+  const m = (S.meetings || []).find(v => v.id === mid) || (S.room && S.room.id === mid ? S.room.meeting : null) || {};
+  const cur = m.group_id ?? null;
+  const opts = [{ id: null, name: 'Không thuộc nhóm' }, ...(S.groups || [])];
+  openModal(`<h3 class="text-lg font-semibold mb-1">Chuyển cuộc họp vào nhóm</h3>
+    <p class="text-muted text-[13px] mb-3">${esc(m.title || '')}</p>
+    <div class="flex flex-col gap-1" role="radiogroup" aria-label="Chọn nhóm">${opts.map(g => `<label class="flex items-center gap-2 px-2 py-1.5 rounded-lg">
+      <input type="radio" name="mv-g" value="${g.id ?? ''}" ${cur === g.id ? 'checked' : ''}><span>${esc(g.name)}</span></label>`).join('')}</div>
+    ${(S.groups || []).length ? '' : '<p class="text-[12.5px] text-muted mt-2">Chưa có nhóm nào: tạo nhóm ở trang Cuộc họp.</p>'}
+    <div class="flex justify-end gap-2 mt-4"><button type="button" class="btn btn-ghost" data-act="modal-close">Hủy</button><button type="button" class="btn btn-primary" id="mv-ok">Chuyển</button></div>`, {
+    onMount(md) {
+      $('#mv-ok', md).addEventListener('click', async () => {
+        const v = ($('input[name="mv-g"]:checked', md) || {}).value;
+        const gid = v ? parseInt(v, 10) : null;
+        try {
+          await PUT(`/api/meetings/${mid}/group`, { group_id: gid });
+          closeModal(); toast(gid ? 'Đã chuyển cuộc họp vào nhóm.' : 'Đã gỡ cuộc họp khỏi nhóm.');
+          if (S.view === 'hub') loadHub();
+          if (S.room && S.room.id === mid && S.room.meeting) { S.room.meeting.group_id = gid; renderTopbar(); }
+        } catch (e) { toast(e.message, 'err'); }
+      });
+    }
+  });
+}
 
 /* =====================================================================
    TẠO CUỘC HỌP
    ===================================================================== */
 async function openCreateMeeting() {
+  if (!S.groupsLoaded) await ensureGroups();
   if (!S.voices.length) { try { S.voices = (await GET('/api/voices')).voices || []; } catch (e) { /* bỏ qua */ } }
   openModal(`
     <h3 class="text-lg font-semibold mb-4">Tạo cuộc họp</h3>
     <form id="create-form" class="flex flex-col gap-4">
       <div><label class="field" for="cm-title">Tên cuộc họp</label>
         <input id="cm-title" class="input" required maxlength="160" placeholder="Ví dụ: Review Sprint 39 - Payment"></div>
+      ${(S.groups || []).length ? `<div><label class="field" for="cm-group">Nhóm</label>
+        <select id="cm-group" class="input"><option value="">Không thuộc nhóm</option>${S.groups.map(g => `<option value="${g.id}" ${S.groupId === g.id ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></div>` : ''}
       <div class="grid grid-cols-2 gap-3">
         <div><label class="field" for="cm-type">Loại cuộc họp</label>
           <select id="cm-type" class="input">${MEETING_TYPES.map(t => `<option>${esc(t)}</option>`).join('')}</select></div>
@@ -1107,6 +1276,7 @@ async function openCreateMeeting() {
             host_id: parseInt($('#cm-host', m).value, 10) || null,
             expected_attendees: $('#cm-attendees', m).value.split(',').map(s => s.trim()).filter(Boolean),
             agenda: $('#cm-agenda', m).value.split('\n').map(s => s.trim()).filter(Boolean),
+            group_id: $('#cm-group', m) ? (parseInt($('#cm-group', m).value, 10) || null) : null,
           });
           closeModal();
           toast('Đã tạo cuộc họp. Bấm "Bật mic" để bắt đầu ghi.');
@@ -4656,24 +4826,29 @@ document.addEventListener('click', async e => {
   const mid = el.dataset.mid ? parseInt(el.dataset.mid, 10) : null;
   switch (act) {
     case 'create-meeting': return openCreateMeeting();
+    case 'hub-group': location.hash = el.dataset.gid ? `#/g/${el.dataset.gid}` : '#/'; return;
+    case 'create-group': return openCreateGroup();
+    case 'group-settings': return openGroupSettings(parseInt(el.dataset.gid, 10));
     case 'open-meeting': location.hash = `#/m/${mid}`; return;
     case 'nav-room': { const t = S.room ? S.room.id : MIC.mid; if (t) location.hash = `#/m/${t}`; return; }
     case 'go-recording': if (MIC.mid) location.hash = `#/m/${MIC.mid}`; return;
     case 'meeting-menu': {
       e.stopPropagation();
-      const c = await openMenu(el, [{ id: 'open', text: 'Mở cuộc họp' }, { id: 'export', text: 'Xuất Markdown' }, { id: 'delete', text: 'Xóa cuộc họp', danger: true }]);
+      const c = await openMenu(el, [{ id: 'open', text: 'Mở cuộc họp' }, { id: 'move', text: 'Chuyển vào nhóm...' }, { id: 'export', text: 'Xuất Markdown' }, { id: 'delete', text: 'Xóa cuộc họp', danger: true }]);
       if (c === 'open') location.hash = `#/m/${mid}`;
+      if (c === 'move') openMoveMeeting(mid);
       if (c === 'export') exportMarkdown(mid);
       if (c === 'delete') deleteMeeting(mid);
       return;
     }
     case 'room-menu': {
       const R = S.room; if (!R) return;
-      const items = [{ id: 'reanalyze', text: 'Phân tích lại người nói' }, { id: 'export', text: 'Xuất Markdown' }, { id: 'export-data', text: 'Xuất dữ liệu phân tích (JSON)' }];
+      const items = [{ id: 'reanalyze', text: 'Phân tích lại người nói' }, { id: 'move', text: 'Chuyển vào nhóm...' }, { id: 'export', text: 'Xuất Markdown' }, { id: 'export-data', text: 'Xuất dữ liệu phân tích (JSON)' }];
       if (R.recording && R.recording.runs) items.push({ id: 'rec-delete', text: `Xóa bản ghi âm (${fmt.dur(R.recording.seconds || 0)})`, danger: true });
       items.push({ id: 'delete', text: 'Xóa cuộc họp', danger: true });
       const c = await openMenu(el, items);
       if (c === 'rec-delete') deleteRecording();
+      if (c === 'move') openMoveMeeting(R.id);
       if (c === 'reanalyze') reanalyzeMeeting();
       if (c === 'export-data') exportMeetingData(S.room.id);
       if (c === 'export') exportMarkdown(R.id);
