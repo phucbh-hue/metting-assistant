@@ -272,7 +272,7 @@ class SpeakerProfile:
     name: str = ""                      # Tên thật (rỗng = chưa định danh)
     voice_id: Optional[int] = None      # Liên kết hồ sơ giọng nói toàn cục (collection voices)
     role: str = ""
-    origin: str = "new"                 # new | voiceprint | manual | ai
+    origin: str = "new"                 # new | voiceprint | manual | ai | meet (tên trong Google Meet)
     locked: bool = False                # Người dùng đã tự đặt tên -> AI không tự đổi nữa
     confidence: float = 0.0
     vsum: Optional[np.ndarray] = None   # Tổng có trọng số các vector (chưa chuẩn hóa)
@@ -283,6 +283,9 @@ class SpeakerProfile:
     last_t: float = 0.0
     merged_into: Optional[int] = None
     apart: List[int] = field(default_factory=list)   # Người dùng đã tách khỏi các hồ sơ này: không tự gộp lại
+    # Hồ sơ gắn với luồng của MỘT người trong Google Meet ("meet<id>"): nhận mọi câu của luồng đó, không nhận câu của luồng
+    # khác, không tự gộp / tự tách (giọng qua Meet và giọng ở mic trong phòng của hai người khác nhau giống tới ~0.6)
+    pin: str = ""
 
     @property
     def label(self) -> str:
@@ -318,6 +321,7 @@ class SpeakerProfile:
             "last_t": self.last_t,
             "merged_into": self.merged_into,
             "apart": list(self.apart),
+            "pin": self.pin,
             "has_voice": self.vsum is not None and self.weight > 0,
         }
         if with_vector:
@@ -468,6 +472,24 @@ class MeetingSpeakers:
                 return p
         return None
 
+    def pinned(self, stream: str) -> Optional[SpeakerProfile]:
+        """Hồ sơ gắn với luồng này (đã gộp thì theo hồ sơ đích)."""
+        for p in self.profiles.values():
+            if p.pin == stream:
+                return self.profile(p.sid)
+        return None
+
+    def pin_profile(self, stream: str, name: str = "", t: float = 0.0) -> SpeakerProfile:
+        """Hồ sơ cho một người trong Google Meet, đặt sẵn tên trong Meet (không gộp với hồ sơ trùng tên ở luồng khác)."""
+        p = self.pinned(stream)
+        if p is None:
+            p = self._new_profile(t)
+            p.pin = stream
+        if name and not p.name:
+            p.name, p.origin, p.confidence = name, "meet", 0.95
+            self.dirty.add(p.sid)
+        return p
+
     def _new_profile(self, t: float = 0.0) -> SpeakerProfile:
         p = SpeakerProfile(sid=self.next_sid, first_t=t, last_t=t)
         self.profiles[p.sid] = p
@@ -555,10 +577,14 @@ class MeetingSpeakers:
             self.epoch_fresh[key] = any(p.n_segments > 0 for p in self.active_profiles())
         return self.epoch_fresh[key]
 
-    def _decide(self, v: Optional[np.ndarray], w: float, rk) -> Tuple[Optional[int], str]:
+    def _decide(self, v: Optional[np.ndarray], w: float, rk, stream: str = "mic") -> Tuple[Optional[int], str]:
         """Trả về (sid hoặc None = tạo hồ sơ mới, lý do)."""
         mapped = self._mapped_sid(rk)
         fresh = self._is_fresh(rk)
+        # Hồ sơ gắn luồng Meet chỉ nhận câu của luồng đó; câu của luồng Meet (máy phòng họp nhiều người) không nhận vào
+        # hồ sơ của mic trong phòng
+        meet = str(stream).startswith("meet")
+        pool = [p for p in self.active_profiles() if p.pin == stream or (not p.pin and not meet)]
         if v is None:
             recent = self._recent_voice_sid(rk)
             if recent is not None:
@@ -568,7 +594,7 @@ class MeetingSpeakers:
             if rk is not None and fresh:
                 # Nhãn Soniox đã đánh số lại: chưa biết là ai -> tạm gán người không bị chặn gần nhất
                 blocked = self._blocked_sids(rk)
-                cands = sorted((p for p in self.active_profiles() if p.n_segments and p.sid not in blocked),
+                cands = sorted((p for p in pool if p.n_segments and p.sid not in blocked),
                                key=lambda p: p.last_t, reverse=True)
                 if cands:
                     return cands[0].sid, "pending_soniox"
@@ -576,12 +602,13 @@ class MeetingSpeakers:
             if rk is not None:
                 # Soniox gắn nhãn chưa từng gặp trong phiên -> người mới
                 return None, "soniox_new"
-            if self.last_sid is not None and self.profile(self.last_sid):
-                return self.profile(self.last_sid).sid, "continuity"
+            last = self.profile(self.last_sid) if self.last_sid is not None else None
+            if last is not None and (not last.pin or last.pin == stream):
+                return last.sid, "continuity"
             return None, "first"
 
         sims: Dict[int, float] = {}
-        for p in self.active_profiles():
+        for p in pool:
             c = p.centroid()
             if c is not None:
                 sims[p.sid] = cosine_sim(v, c)
@@ -615,8 +642,9 @@ class MeetingSpeakers:
 
         if not ranked:
             # Chưa hồ sơ nào có giọng: không có diarization thì coi như người vừa nói đang nói tiếp
-            if rk is None and self.last_sid is not None and self.profile(self.last_sid):
-                return self.profile(self.last_sid).sid, "continuity"
+            last = self.profile(self.last_sid) if self.last_sid is not None else None
+            if rk is None and last is not None and (not last.pin or last.pin == stream):
+                return last.sid, "continuity"
             return None, "first"
 
         blocked = self._blocked_sids(rk)
@@ -637,8 +665,8 @@ class MeetingSpeakers:
     # --------------------------------------------------------------- add ---
     def add(self, key: Any, v: Optional[np.ndarray], raw_label: Any = None, t: float = 0.0,
             voiced: float = 1.0, text: str = "", epoch: int = 0, dur: Optional[float] = None,
-            stream: str = "mic") -> Dict[Any, Tuple[str, Optional[int]]]:
-        """Thêm câu mới và phân vai.
+            stream: str = "mic", force_sid: Optional[int] = None) -> Dict[Any, Tuple[str, Optional[int]]]:
+        """Thêm câu mới và phân vai. force_sid: câu chắc chắn của hồ sơ này (luồng Google Meet của một người).
 
         Trả về {key: (speaker_label, voice_id)} cho câu mới và mọi câu cũ bị đổi nhãn (do gộp hồ sơ...).
         """
@@ -652,7 +680,10 @@ class MeetingSpeakers:
         before = {s["key"]: self._label_of(s) for s in self.segs}
         self._now = float(t)
 
-        sid, reason = self._decide(v, w, rk)
+        if force_sid is not None and self.profile(force_sid) is not None:
+            sid, reason = self.profile(force_sid).sid, "stream"
+        else:
+            sid, reason = self._decide(v, w, rk, stream)
         p = self.profile(sid) if sid is not None else None
         if p is None:
             p = self._new_profile(t)
@@ -686,7 +717,7 @@ class MeetingSpeakers:
         self.last_sid = p.sid
         log.debug("meeting.voice: seg %s raw=%s -> %s (%s)", key, raw, p.label, reason)
 
-        if v is not None:
+        if v is not None and not p.pin:
             q = self._maybe_split(p)
             if q is not None:
                 self.last_sid = self.profile(seg["sid"]).sid
@@ -757,7 +788,7 @@ class MeetingSpeakers:
             return
         if not others and best < self.ANCHOR_T_SOLO:
             return
-        if p.name and p.origin in ("manual", "ai") and p.name.casefold() != self.anchors[vid]["name"].casefold():
+        if p.name and p.origin in ("manual", "ai", "meet") and p.name.casefold() != self.anchors[vid]["name"].casefold():
             return
         a = self.anchors[vid]
         p.voice_id = vid
@@ -804,7 +835,7 @@ class MeetingSpeakers:
 
     def _maybe_split(self, p: SpeakerProfile) -> Optional[SpeakerProfile]:
         """Tìm trong hồ sơ p hai cụm giọng khác hẳn nhau; cụm mới hơn trở thành người nói mới."""
-        if not p.active:
+        if not p.active or p.pin:
             return None
         members = [s for s in self.segs if s["v"] is not None and s["reason"] != "manual"
                    and self.profile(s["sid"]) is p][-self.SPLIT_WINDOW:]
@@ -944,13 +975,13 @@ class MeetingSpeakers:
         return any(len(s) == 2 for s in seen.values())
 
     def _maybe_merge(self, p: SpeakerProfile):
-        if not p.active:
+        if not p.active or p.pin:
             return
         c = p.centroid()
         if c is None:
             return
         for q in self.active_profiles():
-            if q.sid == p.sid:
+            if q.sid == p.sid or q.pin:
                 continue
             qc = q.centroid()
             if qc is None:
@@ -1156,6 +1187,7 @@ class MeetingSpeakers:
                 confidence=float(d.get("confidence") or 0.0), merged_into=d.get("merged_into"),
                 apart=[int(x) for x in (d.get("apart") or [])],
                 first_t=float(d.get("first_t") or 0.0), last_t=float(d.get("last_t") or 0.0),
+                pin=str(d.get("pin") or ""),
             )
             self.profiles[sid] = p
             self.next_sid = max(self.next_sid, sid + 1)

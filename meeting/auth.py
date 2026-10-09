@@ -57,7 +57,8 @@ if ENABLED and not CLIENT_ID:
 # /api/health (tên DB, số mẫu giọng...) vẫn cần đăng nhập; nền tảng chạy server dùng /healthz.
 PUBLIC_PATHS = {"/", "/vesper", "/config.js", "/favicon.ico", "/healthz", "/api/auth/config", "/api/auth/google",
                 "/api/google/callback"}      # Google chuyển hướng về đây (kiểm bằng state đã ký, không bằng token)
-PUBLIC_PREFIXES = ("/static/",)
+# /ws/recall/: bot Recall gửi âm thanh Google Meet, xác thực bằng mã ngẫu nhiên của từng buổi (meet_bots.check_token)
+PUBLIC_PREFIXES = ("/static/", "/ws/recall/")
 # Chỉ quản trị viên được ĐỔI (mọi method trừ GET/HEAD) các mục cài đặt dùng chung của server
 # (Kết nối gói đăng ký /api/llm/connect là của từng người trên bản web, không cần quyền quản trị.)
 ADMIN_PREFIXES = ("/api/settings/", "/api/llm/provider", "/api/storage/sync")

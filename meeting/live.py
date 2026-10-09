@@ -13,11 +13,13 @@ Xử lý luồng âm thanh PCM16 16kHz:
 6. Phát tán sự kiện thời gian thực qua WebSockets cho Web UI.
 """
 import asyncio
+import difflib
 import json
 import logging
 import os
 import re
 import time
+import unicodedata
 from collections import deque
 from pathlib import Path
 from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple
@@ -53,6 +55,12 @@ MAX_SEGMENT_S = 20.0            # Câu dài hơn: cắt tại dấu câu để t
 AUDIO_KEEP_S = 180              # Giữ tối đa ngần này giây audio để cắt clip / phát lại
 REPLAY_MAX_S = 15.0             # Tối đa số giây audio phát lại sau khi nối lại Soniox
 IDLE_CLOSE_S = float(os.getenv("SONIOX_IDLE_CLOSE_S", "30"))
+# Họp nửa online nửa trực tiếp: tiếng người trong Meet phát ra loa của máy trong phòng có thể lọt vào mic của ứng dụng.
+# Khi người trong Meet vừa nói, câu của mic được giữ ECHO_HOLD_S giây rồi so với câu Meet cùng lúc: trùng thì bỏ.
+ECHO_HOLD_S = float(os.getenv("MEET_ECHO_HOLD_S", "2.0"))
+# Mỗi luồng Meet là MỘT người (tắt tách người nói: Soniox đôi khi chia một giọng thành 2 nhãn). Máy phòng họp có nhiều
+# người cùng vào Meet thì đặt MEET_DIARIZE=1 để tách người trong luồng đó như mic.
+MEET_DIARIZE = os.getenv("MEET_DIARIZE", "0") == "1"
 MIN_ENROLL_S = voice.MIN_ANCHOR_S
 AUTO_ENROLL_AI = os.getenv("AUTO_ENROLL_VOICES", "0").strip().lower() in ("1", "true", "yes", "on")
 
@@ -484,6 +492,73 @@ class MeetingStream:
         self._set_state("closed")
 
 
+class VoiceGate:
+    """Cổng tiếng nói cho luồng của một người trong Google Meet: im lặng quá IDLE_S giây thì tạm dừng luồng (đóng Soniox
+    sau IDLE_CLOSE_S, đỡ tốn phí cho người tắt mic / ngồi nghe); có tiếng lại thì mở kèm PREROLL_S giây âm thanh ngay
+    trước đó để không mất chữ đầu câu."""
+    PREROLL_S = 0.6
+    IDLE_S = float(os.getenv("MEET_IDLE_S", "15"))
+    RMS_ON = float(os.getenv("MEET_VOICE_RMS", "300"))       # khoảng -40 dBFS
+
+    def __init__(self):
+        self.active = False
+        self.last_voice = 0.0
+        self.pre: Deque[bytes] = deque()
+        self.pre_bytes = 0
+
+    @staticmethod
+    def rms(pcm: bytes) -> float:
+        n = len(pcm) - len(pcm) % 2
+        if n <= 0:
+            return 0.0
+        a = np.frombuffer(pcm[:n], dtype="<i2").astype(np.float32)
+        return float(np.sqrt(np.mean(a * a)))
+
+    def push(self, pcm: bytes, now: float) -> Tuple[List[bytes], bool]:
+        """(các đoạn âm thanh cần đưa vào luồng, có tạm dừng luồng không)."""
+        voiced = bool(pcm) and self.rms(pcm) >= self.RMS_ON
+        if voiced:
+            self.last_voice = now
+        if self.active:
+            if not voiced and now - self.last_voice > self.IDLE_S:
+                self.active = False
+                self._keep(pcm)
+                return [], True
+            return ([pcm] if pcm else []), False
+        if not voiced:
+            self._keep(pcm)
+            return [], False
+        self.active = True
+        out = [c for c in self.pre if c] + [pcm]
+        self.pre.clear()
+        self.pre_bytes = 0
+        return out, False
+
+    def _keep(self, pcm: bytes):
+        if not pcm:
+            return
+        self.pre.append(pcm)
+        self.pre_bytes += len(pcm)
+        while len(self.pre) > 1 and self.pre_bytes - len(self.pre[0]) >= self.PREROLL_S * BPS:
+            self.pre_bytes -= len(self.pre.popleft())
+
+
+def norm_name(name: str) -> str:
+    """So tên không phân biệt dấu, hoa thường, khoảng trắng ("Bùi Hồng Phúc" = "bui hong phuc")."""
+    t = unicodedata.normalize("NFKD", (name or "").replace("đ", "d").replace("Đ", "D"))
+    return " ".join("".join(c for c in t if not unicodedata.combining(c)).casefold().split())
+
+
+def same_person(person: Dict[str, Any], user: Optional[Dict[str, Any]]) -> bool:
+    """Người trong Meet có phải người đang bật mic trong ứng dụng không (máy trong phòng thường vào Meet bằng chính tài
+    khoản đó): trùng email, hoặc trùng tên."""
+    if not user:
+        return False
+    if person.get("email") and user.get("email") and person["email"].lower() == str(user["email"]).lower():
+        return True
+    return bool(person.get("name")) and norm_name(person["name"]) == norm_name(user.get("name") or "")
+
+
 # ==============================================================================
 # MEETING SESSION (QUẢN LÝ CUỘC HỌP TOÀN DIỆN)
 # ==============================================================================
@@ -556,6 +631,16 @@ class MeetingSession:
         # một tệp chỉ được gửi lên khi cần mở / đọc kịch bản (need_file -> trình duyệt gửi tệp -> resolve_client_file).
         self.client_files: List[Dict[str, Any]] = []
         self._file_waits: Dict[str, "asyncio.Future"] = {}
+        # Cuộc họp có bot Google Meet (bản 3.18): mỗi người trong Meet một luồng "meet<id>". mic_user: người đang bật mic
+        # trong ứng dụng (họp nửa online nửa trực tiếp: luồng Meet của chính máy đó bị bỏ qua để không chép trùng).
+        self.meet_people: Dict[str, Dict[str, Any]] = {}
+        self.meet_bot: Optional[Dict[str, Any]] = None
+        self.mic_user: Optional[Dict[str, Any]] = None
+        self._meet_modes: Dict[str, str] = dict(((meeting.get("meet") or {}).get("modes") or {}))
+        self._gates: Dict[str, VoiceGate] = {}
+        self._stream_raws: Dict[str, Dict[int, Set[str]]] = {}
+        self._meet_texts: Deque[Tuple[float, float, List[str]]] = deque(maxlen=60)   # câu Meet gần đây (chặn tiếng vọng)
+        self._held: Set[asyncio.Task] = set()
         self._queue: asyncio.Queue = asyncio.Queue()
         self._db_queue: asyncio.Queue = asyncio.Queue()
         self._workers: List[asyncio.Task] = []
@@ -677,6 +762,7 @@ class MeetingSession:
             "mic_active": self.audio_owner is not None,
             "stage": self.stage_public(),
             "recording": self.recording_public(),
+            "meet": self.meet_public(),
         }
 
     # ----------------------------------------------------------- workers ---
@@ -709,6 +795,8 @@ class MeetingSession:
         """Chờ xử lý xong mọi câu và ghi xong DB."""
         self._ensure_workers()
         try:
+            if self._held:                       # câu mic đang giữ để chặn tiếng vọng
+                await asyncio.wait_for(asyncio.gather(*list(self._held), return_exceptions=True), ECHO_HOLD_S + 5)
             await asyncio.wait_for(self._queue.join(), timeout)
             await asyncio.wait_for(self._db_queue.join(), timeout)
         except asyncio.TimeoutError:
@@ -722,10 +810,53 @@ class MeetingSession:
         seq = self.next_seq
         self.next_seq += 1
         self._ensure_workers()
-        await self._queue.put({"seq": seq, "t_start": t_start, "t_end": t_end, "raw": raw_speaker,
-                               "text": text, "clip": clip_pcm, "epoch": epoch, "stream": stream,
-                               "vector": vector, "voiced": voiced})
+        item = {"seq": seq, "t_start": t_start, "t_end": t_end, "raw": raw_speaker, "text": text, "clip": clip_pcm,
+                "epoch": epoch, "stream": stream, "vector": vector, "voiced": voiced}
+        if str(stream).startswith("meet"):
+            self._meet_texts.append((t_start, t_end, self._words(text)))
+        elif stream == "mic" and self._meet_voice_recent():
+            task = asyncio.create_task(self._hold_mic(item))
+            self._held.add(task)
+            task.add_done_callback(self._held.discard)
+            return seq
+        await self._queue.put(item)
         return seq
+
+    @staticmethod
+    def _words(text: str) -> List[str]:
+        return re.sub(r"[^\w\s]", " ", (text or "").casefold()).split()
+
+    def _meet_voice_recent(self) -> bool:
+        now = time.monotonic()
+        return any(g.active or now - g.last_voice < 5.0 for g in self._gates.values())
+
+    def _is_echo(self, t_start: float, t_end: float, text: str) -> bool:
+        """Câu của mic trùng câu người trong Meet nói cùng lúc (kể cả câu Meet đang nói dở chưa chốt)."""
+        mine = self._words(text)
+        if not mine:
+            return False
+        cands = [w for ts, te, w in self._meet_texts if ts - 3.0 <= t_end and te + 3.0 >= t_start]
+        for st in self.streams.values():
+            if st.name.startswith("meet") and st._last_interim and st._last_interim[0]:
+                cands.append(self._words(st._last_interim[0]))
+        for other in cands:
+            if not other:
+                continue
+            if len(mine) < 3:
+                if mine == other:
+                    return True
+                continue
+            sm = difflib.SequenceMatcher(None, mine, other, autojunk=False)
+            if sum(b.size for b in sm.get_matching_blocks()) / len(mine) >= 0.7:
+                return True
+        return False
+
+    async def _hold_mic(self, item: Dict[str, Any]):
+        await asyncio.sleep(ECHO_HOLD_S)
+        if self._is_echo(item["t_start"], item["t_end"], item["text"]):
+            log.info("meeting.live: bỏ câu mic trùng tiếng người trong Meet (phát ra loa): %s", item["text"][:80])
+            return
+        await self._queue.put(item)
 
     async def _process(self, it: Dict[str, Any]):
         async with self._lock:
@@ -737,9 +868,10 @@ class MeetingSession:
             voiced = voice.voiced_s(clip) if clip else 0.0
         if vector is None and clip and voiced >= voice.MIN_SEG_S and voice.available():
             vector = await asyncio.to_thread(voice.embed, clip)
+        force = self._meet_profile(it) if str(it["stream"]).startswith("meet") else None
         changes = self.speakers.add(key=seq, v=vector, raw_label=it["raw"], t=it["t_start"], voiced=voiced,
                                     text=it["text"], epoch=it["epoch"], dur=it["t_end"] - it["t_start"],
-                                    stream=it["stream"])
+                                    stream=it["stream"], force_sid=force)
         prof = self.speakers.profile(self.speakers.sid_of(seq))
         seg = {
             "seq": seq, "meeting_id": self.id, "t_start": it["t_start"], "t_end": it["t_end"],
@@ -1105,6 +1237,138 @@ class MeetingSession:
     async def feed(self, pcm: bytes, stream_name: str = "mic"):
         if stream_name in self.streams:
             await self.streams[stream_name].feed(pcm)
+
+    # ------------------------------------------------------- Google Meet ---
+    def set_mic_user(self, user: Optional[Dict[str, Any]]):
+        """Người đang bật mic trong ứng dụng (None: mic tắt). Luồng Meet trùng người đó bị bỏ qua khi mic đang bật."""
+        self.mic_user = {"email": str(user.get("email") or "").lower(), "name": str(user.get("name") or "")} if user else None
+        if self.meet_people:
+            asyncio.ensure_future(self._emit_meet())
+
+    def _meet_mode(self, stream: str) -> str:
+        return self._meet_modes.get(stream, "auto")
+
+    def meet_ignored(self, stream: str) -> bool:
+        mode = self._meet_mode(stream)
+        if mode in ("ignore", "listen"):
+            return mode == "ignore"
+        person = self.meet_people.get(stream) or {}
+        return self.audio_owner is not None and same_person(person, self.mic_user)
+
+    def meet_public(self) -> Dict[str, Any]:
+        people = [{"stream": k, "name": v.get("name") or "", "email": v.get("email") or "", "is_host": v.get("is_host"),
+                   "mode": self._meet_mode(k), "ignored": self.meet_ignored(k), "speaking": bool(v.get("speaking"))}
+                  for k, v in self.meet_people.items()]
+        return {"bot": self.meet_bot, "people": people}
+
+    async def _emit_meet(self):
+        await self.emit({"type": "meet", "meet": self.meet_public()})
+
+    async def set_meet_bot(self, bot: Optional[Dict[str, Any]]):
+        self.meet_bot = bot
+        await self._emit_meet()
+
+    async def set_meet_mode(self, stream: str, mode: str) -> Dict[str, Any]:
+        """auto: bỏ qua khi trùng người đang bật mic; ignore: luôn bỏ qua (máy trong phòng); listen: luôn chép."""
+        if stream not in self.meet_people:
+            raise KeyError(stream)
+        if mode not in ("auto", "ignore", "listen"):
+            raise ValueError("Chế độ không hợp lệ")
+        if mode == "auto":
+            self._meet_modes.pop(stream, None)
+        else:
+            self._meet_modes[stream] = mode
+        await asyncio.to_thread(db.update_meeting, self.id, {"meet.modes": dict(self._meet_modes)}, True)
+        if self.meet_ignored(stream):
+            await self._pause_meet(stream)
+        await self._emit_meet()
+        return self.meet_public()
+
+    async def _pause_meet(self, stream: str):
+        g = self._gates.get(stream)
+        if g is not None:
+            g.active = False
+        person = self.meet_people.get(stream)
+        if person is not None:
+            person["speaking"] = False
+        st = self.streams.get(stream)
+        if st is not None and not st.closed:
+            await st.pause()
+
+    async def feed_meet(self, participant: Dict[str, Any], pcm: bytes):
+        """Âm thanh của một người trong Google Meet (từ bot Recall): mỗi người một luồng nhận dạng riêng."""
+        if not self.is_live() or self.disposed:
+            return
+        stream = f"meet{participant.get('id')}"
+        person = self.meet_people.get(stream)
+        changed = False
+        if person is None:
+            person = {"name": participant.get("name") or "", "email": participant.get("email") or "",
+                      "is_host": bool(participant.get("is_host")), "speaking": False, "failed_at": 0.0}
+            self.meet_people[stream] = person
+            changed = True
+        elif participant.get("name") and (person["name"], person["email"]) != (participant["name"], participant.get("email") or ""):
+            person.update(name=participant["name"], email=participant.get("email") or "")
+            changed = True
+        if self.meet_ignored(stream):
+            if person.get("speaking"):
+                await self._pause_meet(stream)
+                changed = True
+            if changed:
+                await self._emit_meet()
+            return
+        gate = self._gates.setdefault(stream, VoiceGate())
+        out, stop = gate.push(pcm, time.monotonic())
+        if stop:
+            await self._pause_meet(stream)
+            await self._emit_meet()
+            return
+        if not out:
+            if changed:
+                await self._emit_meet()
+            return
+        st = self.streams.get(stream)
+        if st is None or st.closed:
+            st = MeetingStream(stream, self, diarize=MEET_DIARIZE)
+            self.streams[stream] = st
+        if not st.is_open and not st.reconnecting:
+            if time.monotonic() - person.get("failed_at", 0.0) < 30:
+                gate.active = False
+                return
+            try:
+                await st.ensure_open()
+            except Exception as e:
+                person["failed_at"] = time.monotonic()
+                gate.active = False
+                log.warning("meeting.live: không mở được luồng %s của cuộc họp %d: %s", stream, self.id, e)
+                await self.emit({"type": "error", "text": f"Không nhận dạng được giọng của {person['name'] or 'người trong Meet'}: {e}"})
+                return
+        if not person["speaking"]:
+            person["speaking"] = True
+            changed = True
+        if changed:
+            await self._emit_meet()
+        for chunk in out:
+            await st.feed(chunk)
+
+    async def meet_disconnected(self):
+        """Bot ngắt kết nối âm thanh: chốt chữ còn treo của mọi luồng Meet (Recall nối lại thì chạy tiếp)."""
+        for stream in list(self.meet_people):
+            await self._pause_meet(stream)
+        if self.meet_people:
+            await self._emit_meet()
+
+    def _meet_profile(self, it: Dict[str, Any]) -> Optional[int]:
+        """Hồ sơ người nói cho câu từ luồng Meet: luồng chỉ một giọng thì là người trong Meet đó (đặt tên theo Meet);
+        luồng có nhiều giọng (máy trong phòng vào Meet) thì tách người như mic."""
+        stream = str(it["stream"])
+        per_epoch = self._stream_raws.setdefault(stream, {})
+        if it["raw"] is not None:
+            per_epoch.setdefault(int(it["epoch"]), set()).add(str(it["raw"]))
+        if any(len(v) > 1 for v in per_epoch.values()):
+            return None
+        person = self.meet_people.get(stream) or {}
+        return self.speakers.pin_profile(stream, person.get("name") or "", float(it["t_start"])).sid
 
     # ----------------------------------------------------------------- AI ---
     async def _handle_ai_activation(self, command: str, full_sentence: str, name: str = "", source: str = "voice"):

@@ -1,14 +1,15 @@
 """Kết nối Google của từng người (bản web): OAuth 2.0 authorization code + refresh token.
 
-- Quyền: `drive.file` (chỉ thấy file / thư mục do ứng dụng tạo hoặc người dùng chọn), kèm `openid email` để biết đúng
-  tài khoản. Giai đoạn 2 (Calendar) xin thêm quyền bằng `include_granted_scopes`.
+- Quyền: `drive.file` (chỉ thấy file / thư mục do ứng dụng tạo hoặc người dùng chọn), `calendar.events.readonly` (đọc
+  lịch để bot vào Google Meet, bản 3.18), kèm `openid email` để biết đúng tài khoản. Người dùng bỏ đánh dấu một quyền
+  trên màn hình của Google thì tính năng đó báo cần kết nối lại, tính năng kia vẫn chạy.
 - Tài khoản Google phải trùng email đăng nhập ứng dụng.
 - Refresh token mã hóa AES-GCM (khóa sinh từ GOOGLE_TOKEN_KEY hoặc AUTH_SECRET) trước khi lưu vào Atlas
   (`google_tokens`); access token chỉ giữ trong RAM tới gần hết hạn.
 - Google báo `invalid_grant` (người dùng thu hồi quyền, đổi mật khẩu, quá lâu không dùng): xóa kết nối, báo NeedReconnect.
 
 Cần trên Google Cloud Console: OAuth client loại Web application có redirect URI `<server>/api/google/callback`, bật
-Google Drive API, thêm quyền drive.file vào màn hình đồng ý (nên để loại Internal).
+Google Drive API và Google Calendar API, thêm 2 quyền trên vào màn hình đồng ý (nên để loại Internal).
 """
 import base64
 import hashlib
@@ -34,7 +35,8 @@ AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke"
 DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"
-SCOPES = ("openid", "email", DRIVE_SCOPE)
+CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events.readonly"
+SCOPES = ("openid", "email", DRIVE_SCOPE, CALENDAR_SCOPE)
 STATE_TTL_S = 600
 
 _transport: Optional[httpx.AsyncBaseTransport] = None        # test thay bằng httpx.MockTransport
@@ -46,7 +48,7 @@ class OAuthError(Exception):
 
 
 class NeedReconnect(OAuthError):
-    """Chưa kết nối, hoặc Google đã thu hồi quyền: người dùng cần bấm Kết nối Google Drive lại."""
+    """Chưa kết nối, hoặc Google đã thu hồi quyền: người dùng cần bấm Kết nối Google lại."""
 
 
 def client_id() -> str:
@@ -149,7 +151,7 @@ async def _token_request(data: Dict[str, str]) -> Dict[str, Any]:
     if r.status_code >= 400:
         err = str(body.get("error") or r.status_code)
         if err == "invalid_grant":
-            raise NeedReconnect("Kết nối Google đã hết hạn hoặc bị thu hồi, hãy bấm Kết nối Google Drive lại")
+            raise NeedReconnect("Kết nối Google đã hết hạn hoặc bị thu hồi, hãy bấm Kết nối Google lại")
         raise OAuthError(f"Google từ chối ({err}): {str(body.get('error_description') or '')[:120]}".rstrip(": "))
     return body
 
@@ -167,8 +169,9 @@ async def exchange(code: str, state: str, base_url: str) -> Dict[str, str]:
         raise OAuthError(f"Anh chị vừa chọn tài khoản Google {g_email or '(không rõ)'}, khác email đăng nhập {email}. "
                          "Hãy chọn đúng tài khoản công ty.")
     scopes = str(tok.get("scope") or "").split()
-    if DRIVE_SCOPE not in scopes:
-        raise OAuthError("Anh chị chưa cho phép quyền Google Drive (ô đánh dấu trên màn hình của Google)")
+    if DRIVE_SCOPE not in scopes and CALENDAR_SCOPE not in scopes:
+        raise OAuthError("Anh chị chưa cho phép quyền nào (Google Drive hoặc Lịch): hãy đánh dấu các ô trên màn hình "
+                         "của Google")
     refresh = tok.get("refresh_token")
     old = _col().find_one({"email": email}) or {}
     if not refresh and not old.get("refresh_enc"):
@@ -179,7 +182,8 @@ async def exchange(code: str, state: str, base_url: str) -> Dict[str, str]:
     _col().update_one({"email": email}, {"$set": fields}, upsert=True)
     if tok.get("access_token"):
         _ACCESS[email] = (tok["access_token"], time.time() + float(tok.get("expires_in") or 3600) - 60)
-    log.info("meeting.google: %s đã kết nối Google Drive", email)
+    log.info("meeting.google: %s đã kết nối Google (Drive: %s, Lịch: %s)", email, DRIVE_SCOPE in scopes,
+             CALENDAR_SCOPE in scopes)
     return {"email": email, "return_to": str(st.get("r") or "")}
 
 
@@ -191,7 +195,7 @@ async def access_token(email: str) -> str:
         return hit[0]
     doc = _col().find_one({"email": email})
     if not doc or not doc.get("refresh_enc"):
-        raise NeedReconnect(f"{email} chưa kết nối Google Drive")
+        raise NeedReconnect(f"{email} chưa kết nối Google")
     try:
         refresh = _decrypt(doc["refresh_enc"], email)
     except Exception:
@@ -211,8 +215,14 @@ def status(email: Optional[str]) -> Dict[str, Any]:
     doc = _col().find_one({"email": (email or "").lower()}) if email else None
     if not doc or not doc.get("refresh_enc"):
         return {"connected": False}
+    scopes = doc.get("scopes") or []
     return {"connected": True, "google_email": doc.get("google_email"), "connected_at": doc.get("connected_at"),
-            "drive": DRIVE_SCOPE in (doc.get("scopes") or [])}
+            "drive": DRIVE_SCOPE in scopes, "calendar": CALENDAR_SCOPE in scopes}
+
+
+def forget_access(email: str) -> None:
+    """Access token bị Google từ chối (401) trước hạn: lần sau lấy token mới."""
+    _ACCESS.pop((email or "").lower(), None)
 
 
 def get_doc(email: str) -> Dict[str, Any]:

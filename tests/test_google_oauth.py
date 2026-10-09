@@ -86,10 +86,11 @@ class GoogleOAuthTests(unittest.TestCase):
         self.assertEqual(r.status_code, 303, r.text)
         return r.headers["location"]
 
-    def test_consent_url_asks_only_for_drive_file_offline(self):
+    def test_consent_url_asks_for_drive_file_and_calendar_offline(self):
         q = parse_qs(urlparse(self.connect_url()).query)
         self.assertEqual(q["client_id"], [ENV["GOOGLE_OAUTH_CLIENT_ID"]])
-        self.assertEqual(set(q["scope"][0].split()), {"openid", "email", DRIVE})
+        self.assertEqual(set(q["scope"][0].split()), {"openid", "email", DRIVE,
+                                                      "https://www.googleapis.com/auth/calendar.events.readonly"})
         self.assertEqual((q["access_type"], q["prompt"], q["login_hint"]), (["offline"], ["consent"], ["an@urbox.vn"]))
         self.assertEqual(q["redirect_uri"], ["http://testserver/api/google/callback"])
         r = self.client.post("/api/google/connect", json={"return_to": "https://evil.example.com/"}, headers=self.h)

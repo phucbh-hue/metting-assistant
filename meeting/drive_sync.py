@@ -63,6 +63,9 @@ async def save_meeting(mid: int) -> Dict[str, Any]:
     keeper = keeper_of(m, g)
     if not keeper:
         return await _status(mid, status="skipped", error="Cuộc họp cũ chưa có chủ, không biết lưu vào Drive của ai")
+    if not (await asyncio.to_thread(google_oauth.status, keeper)).get("drive", True):
+        raise google_oauth.NeedReconnect(f"{keeper} chưa cho phép quyền Google Drive: hãy kết nối Google lại và đánh "
+                                         "dấu ô Drive")
     minutes = await asyncio.to_thread(_latest_minutes, mid)
     seconds = (await asyncio.to_thread(recording.info, mid)).get("seconds") or 0
     md = m.get("drive") or {}

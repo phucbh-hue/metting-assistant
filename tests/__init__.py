@@ -7,7 +7,8 @@ import os
 os.environ["MEETING_DB"] = "mock"
 # Model giọng cố định cho test (ngưỡng và vector tổng hợp đo theo CAM++); máy thật mặc định ERes2NetV2 nếu đã tải
 os.environ["VOICE_MODEL"] = "campplus"
-for _key in ("SONIOX_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
+for _key in ("SONIOX_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "RECALLAI_API_KEY", "RECALL_API_KEY",
+             "RECALL_REGION"):
     os.environ[_key] = ""
 os.environ.setdefault("IDENTITY_MIN_INTERVAL_S", "0")
 # Tra cứu web mặc định không mở trình duyệt / không gọi mạng; test nào cần thì tự đặt WEB_SEARCH_PROVIDER và mock

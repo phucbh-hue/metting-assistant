@@ -55,6 +55,10 @@ def reset_db():
     appmod = sys.modules.get("meeting.app")
     if appmod is not None:
         appmod._MEETING_KEYS.clear()           # id cuộc họp được dùng lại sau khi dựng lại DB
+    from meeting import gcalendar, meet_bots, recall
+    gcalendar._CACHE.clear()                   # lịch, vùng Recall, khóa từng buổi của test trước
+    recall._region.clear()
+    meet_bots._locks.clear()
     for s in list(live.SESSIONS.values()):
         s.dispose()
     live.SESSIONS.clear()

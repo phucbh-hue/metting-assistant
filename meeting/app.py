@@ -33,8 +33,9 @@ from fastapi.responses import FileResponse, RedirectResponse, Response, Streamin
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
-from meeting import (artifacts, auth, cli_llm, db, decks, drive_sync, envfile, google_oauth, groups, live,  # noqa: E402
-                     llm, mcp, recap_export, recording, tts, user_llm, voice, websearch)
+from meeting import (artifacts, auth, cli_llm, db, decks, drive_sync, envfile, gcalendar, google_oauth,  # noqa: E402
+                     groups, live, llm, mcp, meet_bots, recall, recap_export, recording, tts, user_llm, user_prefs,
+                     voice, websearch)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("meeting.app")
@@ -70,10 +71,12 @@ async def lifespan(_app: FastAPI):
     if tts.model_present():
         asyncio.get_running_loop().run_in_executor(None, tts.preload)   # nạp giọng đọc ở nền
     purge = asyncio.create_task(_drive_purge_loop()) if drive_sync.enabled() else None
+    bots = meet_bots.start()                              # bot Google Meet theo lịch (bản web có key Recall)
     log.info("meeting.app: Server khởi động hoàn tất")
     yield
-    if purge is not None:
-        purge.cancel()
+    for t in (purge, bots):
+        if t is not None:
+            t.cancel()
     for s in list(live.SESSIONS.values()):
         try:
             for st in list(s.streams.values()):
@@ -1132,6 +1135,140 @@ async def google_disconnect(request: Request):
 
 
 # ==============================================================================
+# LỊCH GOOGLE VÀ BOT VÀO GOOGLE MEET (bản web, 3.18)
+# ==============================================================================
+class AutojoinReq(BaseModel):
+    enabled: bool
+
+
+class SkipEventReq(BaseModel):
+    skip: bool = True
+
+
+class EventGroupReq(BaseModel):
+    group_id: Optional[int] = None
+
+
+class MeetModeReq(BaseModel):
+    mode: str
+
+
+def _me(request: Request) -> Dict[str, Any]:
+    u = _user(request)
+    if not auth.ENABLED or not u:
+        raise HTTPException(status_code=400, detail="Lịch Google chỉ có ở bản web (cần đăng nhập)")
+    return u
+
+
+def _calendar_payload(email: str, events: List[Dict[str, Any]], error: str = "") -> Dict[str, Any]:
+    prefs = user_prefs.get(email)
+    st = google_oauth.status(email)
+    skip = set(prefs.get("skip_events") or [])
+    series_groups = prefs.get("series_groups") or {}
+    out = {"available": google_oauth.configured(), "bot_ready": meet_bots.enabled(),
+           "connected": bool(st.get("connected")), "calendar": bool(st.get("calendar")),
+           "autojoin": bool(prefs.get("calendar_autojoin")), "error": error or prefs.get("calendar_error") or "",
+           "events": []}
+    for ev in events:
+        rec = meet_bots.find_for_event(email, ev)
+        bot = meet_bots.public(rec) if rec and rec.get("status") != "cancelled" else None
+        names = [a.get("name") or a.get("email") for a in ev.get("attendees") or []]
+        out["events"].append({
+            **{k: ev.get(k) for k in ("id", "series", "title", "start", "end", "all_day", "meet_url", "declined",
+                                      "link", "is_organizer")},
+            "attendees": len(names), "attendee_names": names[:12], "skipped": ev["id"] in skip,
+            "group_id": series_groups.get(ev.get("series") or ev["id"]), "bot": bot,
+            "bot_mine": bool(bot) and bot.get("owner") == email})
+    return out
+
+
+@app.get("/api/calendar")
+async def calendar_upcoming(request: Request, refresh: bool = False):
+    """Các buổi sắp tới trên lịch của tôi (7 ngày), trạng thái bot từng buổi, công tắc tự vào cuộc họp."""
+    u = _user(request)
+    if not auth.ENABLED or not u:
+        return {"available": False, "events": []}
+    events: List[Dict[str, Any]] = []
+    err = ""
+    st = await asyncio.to_thread(google_oauth.status, u["email"])
+    if st.get("connected") and st.get("calendar"):
+        try:
+            events = await gcalendar.upcoming(u["email"], refresh=refresh)
+        except (google_oauth.OAuthError, gcalendar.CalendarError) as e:
+            err = str(e)
+    return await asyncio.to_thread(_calendar_payload, u["email"], events, err)
+
+
+@app.put("/api/calendar/autojoin")
+async def calendar_autojoin(req: AutojoinReq, request: Request):
+    """Công tắc: từ giờ bot tự vào mọi cuộc họp có link Google Meet trên lịch của tôi (tắt thì thôi)."""
+    u = _me(request)
+    if req.enabled:
+        st = await asyncio.to_thread(google_oauth.status, u["email"])
+        if not (st.get("connected") and st.get("calendar")):
+            raise HTTPException(status_code=400, detail="Cần kết nối Google và cho phép quyền xem Lịch trước")
+        if not meet_bots.enabled():
+            raise HTTPException(status_code=400, detail="Server chưa cấu hình bot (RECALLAI_API_KEY, PUBLIC_BASE_URL)")
+    await asyncio.to_thread(user_prefs.update, u["email"], calendar_autojoin=req.enabled, name=u.get("name") or "")
+    meet_bots.run_soon()
+    return await calendar_upcoming(request)
+
+
+def _event(email: str, eid: str) -> Dict[str, Any]:
+    ev = next((e for e in gcalendar.cached(email) if e["id"] == eid), None)
+    if ev is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy buổi họp này trên lịch (tải lại danh sách)")
+    return ev
+
+
+@app.put("/api/calendar/events/{eid}/skip")
+async def calendar_skip(eid: str, req: SkipEventReq, request: Request):
+    """Bỏ qua (hoặc cho vào lại) một buổi: bot không vào buổi đó."""
+    u = _me(request)
+    await asyncio.to_thread(meet_bots.skip_event, u["email"], eid[:200], req.skip)
+    meet_bots.run_soon()
+    return await calendar_upcoming(request)
+
+
+@app.put("/api/calendar/events/{eid}/group")
+async def calendar_event_group(eid: str, req: EventGroupReq, request: Request):
+    """Nhóm cho cuộc họp tạo từ buổi này; buổi lặp lại thì áp dụng cho cả chuỗi."""
+    u = _me(request)
+    ev = _event(u["email"], eid)
+    if req.group_id:
+        g = await asyncio.to_thread(groups.get_group, req.group_id)
+        if g is None or groups.role_of(g, u["email"]) not in ("owner", "member"):
+            raise HTTPException(status_code=404, detail="Không tìm thấy nhóm")
+    await asyncio.to_thread(meet_bots.set_series_group, u["email"], ev.get("series") or ev["id"], req.group_id)
+    return await calendar_upcoming(request)
+
+
+@app.post("/api/calendar/events/{eid}/retry")
+async def calendar_retry(eid: str, request: Request):
+    """Mời bot vào lại (lần trước chưa ai cho vào, hoặc bot lỗi)."""
+    u = _me(request)
+    ev = _event(u["email"], eid)
+    if not ev.get("meet_url"):
+        raise HTTPException(status_code=400, detail="Buổi này không có link Google Meet")
+    if not meet_bots.enabled():
+        raise HTTPException(status_code=400, detail="Server chưa cấu hình bot (RECALLAI_API_KEY, PUBLIC_BASE_URL)")
+    await meet_bots.retry(u["email"], ev, u.get("name") or "")
+    return await calendar_upcoming(request)
+
+
+@app.put("/api/meetings/{mid}/meet-people/{stream}")
+async def set_meet_person_mode(mid: int, stream: str, req: MeetModeReq):
+    """Người trong Meet: auto (bỏ qua khi trùng người đang bật mic), ignore (máy trong phòng), listen (luôn chép)."""
+    s = await _session_or_404(mid)
+    try:
+        return await s.set_meet_mode(stream, req.mode)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Không có người này trong Meet")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ==============================================================================
 # NHÓM CUỘC HỌP
 # ==============================================================================
 class GroupCreate(BaseModel):
@@ -1330,6 +1467,8 @@ async def archive_meeting(mid: int):
     """Kết thúc cuộc họp và lập biên bản ở chế độ nền (sự kiện artifact_created khi xong)."""
     s = await _session_or_404(mid)
     res = await s.finish(generate_minutes=True)
+    if recall.enabled():
+        await meet_bots.on_meeting_ended(mid)
     return {"success": True, "meeting_id": mid, **res}
 
 
@@ -1337,6 +1476,8 @@ async def archive_meeting(mid: int):
 async def end_meeting(mid: int):
     s = await _session_or_404(mid)
     res = await s.finish(generate_minutes=False)
+    if recall.enabled():
+        await meet_bots.on_meeting_ended(mid)
     return {"success": True, "meeting_id": mid, **res}
 
 
@@ -1785,6 +1926,7 @@ async def ws_audio(ws: WebSocket, mid: int):
         await ws.send_text(_dumps({"type": "error", "code": 4500, "text": f"Không mở được dịch vụ nhận dạng giọng nói: {e}"}))
         await ws.close(code=4500)
         return
+    s.set_mic_user(getattr(ws.state, "user", None))
     await ws.send_text(_dumps({"type": "ready", "stream": "mic", "meeting_id": mid}))
     log.info("meeting.app: mic kết nối cho cuộc họp %d", mid)
     try:
@@ -1804,4 +1946,16 @@ async def ws_audio(ws: WebSocket, mid: int):
         pass
     finally:
         await s.stop_audio(owner)
+        if s.audio_owner is None:
+            s.set_mic_user(None)
         log.info("meeting.app: mic ngắt kết nối cho cuộc họp %d", mid)
+
+
+@app.websocket("/ws/recall/{rid}/")
+async def ws_recall(ws: WebSocket, rid: str):
+    """Bot Recall gửi âm thanh từng người trong Google Meet. Không cần đăng nhập: xác thực bằng mã ngẫu nhiên của từng
+    buổi trong địa chỉ (chỉ server và Recall biết)."""
+    if not meet_bots.enabled():
+        await ws.close(code=4404)
+        return
+    await meet_bots.serve(ws, rid)
