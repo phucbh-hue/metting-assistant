@@ -173,7 +173,8 @@ class BDAssistant:
     async def check(self) -> None:
         """Có câu hỏi / băn khoăn mới của khách thì chạy một lượt gợi ý (giữ giới hạn tần suất)."""
         now = time.monotonic()
-        fresh = [g for g in self.s.segments if int(g.get("seq") or 0) > self.last_seq]
+        # chỉ xét câu trong 90 giây gần nhất: server khởi động lại giữa buổi thì không xét lại cả buổi họp
+        fresh = [g for g in self._window() if int(g.get("seq") or 0) > self.last_seq]
         if not fresh or not self.s.is_live():
             return
         if self.inflight >= MAX_INFLIGHT or now - self.last_run < MIN_GAP_S:
