@@ -16,7 +16,7 @@ import time
 import wave
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 
@@ -33,7 +33,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse  # noqa:
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
-from meeting import artifacts, auth, cli_llm, db, decks, envfile, live, llm, mcp, recording, tts, voice, websearch  # noqa: E402
+from meeting import artifacts, auth, cli_llm, db, decks, envfile, groups, live, llm, mcp, recording, tts, voice, websearch  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("meeting.app")
@@ -74,21 +74,29 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Meeting Assistant AI", version="3.2.0", lifespan=lifespan)
 _MEETING_PATH = re.compile(r"^/(?:api/meetings|ws/meeting)/(\d+)(?:/|$)")
 _ARTIFACT_PATH = re.compile(r"^/api/artifacts/(\d+)(?:/|$)")
-_OWNERS: Dict[int, str] = {}       # id cuộc họp -> email người tạo ("" = chưa có chủ); chủ không đổi nên nhớ luôn
+_GROUP_PATH = re.compile(r"^/api/groups/(\d+)(?:/|$)")
+# id cuộc họp -> (email người tạo hoặc "", mã nhóm hoặc None). Người tạo không đổi; nhóm đổi qua API chuyển nhóm / xóa
+# nhóm, các API đó xóa mục tương ứng.
+_MEETING_KEYS: Dict[int, Tuple[str, Optional[int]]] = {}
 
 
-def _meeting_owner(mid: int) -> Optional[str]:
-    if mid not in _OWNERS:
+def _meeting_key(mid: int) -> Optional[Tuple[str, Optional[int]]]:
+    if mid not in _MEETING_KEYS:
         m = db.get_meeting(mid)
         if m is None:
             return None
-        _OWNERS[mid] = str(m.get("owner") or "")
-    return _OWNERS[mid]
+        _MEETING_KEYS[mid] = (str(m.get("owner") or ""), m.get("group_id"))
+    return _MEETING_KEYS[mid]
+
+
+def _can_view(user: Optional[Dict[str, Any]], owner: str, gid: Optional[int]) -> bool:
+    return auth.can_access(user, {"owner": owner, "group_id": gid}, groups.get_group(gid) if gid else None)
 
 
 class MeetingAccessMiddleware:
-    """Bản web: mỗi cuộc họp (API, WebSocket, sản phẩm AI của cuộc họp) chỉ người tạo truy cập được. Người khác nhận
-    404 như cuộc họp không tồn tại. Chạy SAU AuthMiddleware (đã biết người dùng)."""
+    """Bản web: mỗi cuộc họp (API, WebSocket, sản phẩm AI của cuộc họp) chỉ người tạo và người trong nhóm của cuộc họp
+    truy cập được; mỗi nhóm chỉ chủ nhóm và thành viên. Người khác nhận 404 như không tồn tại.
+    Chạy SAU AuthMiddleware (đã biết người dùng)."""
 
     def __init__(self, app_):
         self.app = app_
@@ -105,15 +113,23 @@ class MeetingAccessMiddleware:
                 if a:
                     art = await asyncio.to_thread(db.get_artifact, int(a.group(1)))
                     mid = int(art["meeting_id"]) if art and art.get("meeting_id") is not None else None
+            user = (scope.get("state") or {}).get("user")
+            denied = False
             if mid is not None:
-                owner = await asyncio.to_thread(_meeting_owner, mid)
-                user = (scope.get("state") or {}).get("user")
-                if owner is not None and not auth.can_access(user, {"owner": owner}):
-                    if scope["type"] == "websocket":
-                        from starlette.websockets import WebSocketClose
-                        return await WebSocketClose(code=4404)(scope, receive, send)
-                    from starlette.responses import JSONResponse
-                    return await JSONResponse({"detail": "Không tìm thấy cuộc họp"}, status_code=404)(scope, receive, send)
+                key = await asyncio.to_thread(_meeting_key, mid)
+                denied = key is not None and not await asyncio.to_thread(_can_view, user, *key)
+            else:
+                gm = _GROUP_PATH.match(path)
+                if gm:
+                    g = await asyncio.to_thread(groups.get_group, int(gm.group(1)))
+                    denied = g is not None and groups.role_of(g, (user or {}).get("email")) is None
+            if denied:
+                if scope["type"] == "websocket":
+                    from starlette.websockets import WebSocketClose
+                    return await WebSocketClose(code=4404)(scope, receive, send)
+                from starlette.responses import JSONResponse
+                what = "nhóm" if mid is None else "cuộc họp"
+                return await JSONResponse({"detail": f"Không tìm thấy {what}"}, status_code=404)(scope, receive, send)
         return await self.app(scope, receive, send)
 
 
@@ -140,6 +156,7 @@ class MeetingCreate(BaseModel):
     expected_attendees: List[str] = Field(default_factory=list)
     vocab: Optional[List[str]] = None
     source: str = "mic"
+    group_id: Optional[int] = None
 
 
 class RenameReq(BaseModel):
@@ -407,7 +424,7 @@ def health():
 @app.get("/api/stats")
 def stats(request: Request):
     u = _user(request)
-    return db.get_stats(db.owner_filter(u["email"], include_unowned=auth.is_admin(u)) if auth.ENABLED and u else None)
+    return db.get_stats(_visible_filter(u))
 
 
 @app.get("/api/settings/assistant")
@@ -849,16 +866,31 @@ async def remove_voice(vid: int):
 # ==============================================================================
 # MEETINGS API
 # ==============================================================================
+def _visible_filter(u: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Điều kiện lọc các cuộc họp một người xem được (bản web): của mình, của nhóm mình, và cuộc họp cũ nếu là quản trị viên."""
+    if not auth.ENABLED or not u:
+        return None
+    return db.owner_filter(u["email"], include_unowned=auth.is_admin(u), group_ids=groups.group_ids_for(u["email"]))
+
+
 @app.get("/api/meetings")
-def get_meetings(request: Request):
+def get_meetings(request: Request, group_id: Optional[int] = None):
     u = _user(request)
-    where = db.owner_filter(u["email"], include_unowned=auth.is_admin(u)) if auth.ENABLED and u else None
-    return {"meetings": db.list_meetings_with_stats(where=where)}
+    if group_id is not None:
+        g = groups.get_group(group_id)
+        if g is None or groups.role_of(g, (u or {}).get("email")) is None:
+            raise HTTPException(status_code=404, detail="Không tìm thấy nhóm")
+        return {"meetings": db.list_meetings_with_stats(where={"group_id": g["id"]})}
+    return {"meetings": db.list_meetings_with_stats(where=_visible_filter(u))}
 
 
 @app.post("/api/meetings")
 def create_meeting(req: MeetingCreate, request: Request):
     title = req.title.strip() or "Cuộc họp nội bộ"
+    if req.group_id is not None:
+        g = groups.get_group(req.group_id)
+        if g is None or groups.role_of(g, (_user(request) or {}).get("email")) is None:
+            raise HTTPException(status_code=403, detail="Anh chị không thuộc nhóm này nên không tạo cuộc họp trong nhóm được")
     mid = db.create_meeting(
         title=title,
         description=req.description.strip(),
@@ -870,8 +902,10 @@ def create_meeting(req: MeetingCreate, request: Request):
         source=req.source,
         owner=(_user(request) or {}).get("email") if auth.ENABLED else None,
     )
-    _OWNERS.pop(mid, None)
-    return {"success": True, "meeting_id": mid, "title": title}
+    if req.group_id is not None:
+        groups.set_meeting_group(mid, req.group_id)
+    _MEETING_KEYS.pop(mid, None)
+    return {"success": True, "meeting_id": mid, "title": title, "group_id": req.group_id}
 
 
 @app.get("/api/meetings/{mid}")
@@ -918,15 +952,131 @@ def update_meeting_details(mid: int, payload: Dict[str, Any]):
     return {"success": ok}
 
 
+def _can_manage_meeting(u: Optional[Dict[str, Any]], m: Dict[str, Any]) -> bool:
+    """Xóa / chuyển nhóm một cuộc họp: người tạo, hoặc chủ nhóm đang chứa cuộc họp (cuộc họp cũ chưa có chủ, không
+    thuộc nhóm: quản trị viên). Thành viên nhóm chỉ xem và họp, không xóa cuộc họp của người khác."""
+    if not auth.ENABLED:
+        return True
+    email = (u or {}).get("email", "")
+    if (m.get("owner") or "") == email and email:
+        return True
+    g = groups.get_group(m["group_id"]) if m.get("group_id") else None
+    if g is not None and groups.role_of(g, email) == "owner":
+        return True
+    return not m.get("owner") and not m.get("group_id") and auth.is_admin(u)
+
+
 @app.delete("/api/meetings/{mid}")
-async def delete_meeting_record(mid: int):
+async def delete_meeting_record(mid: int, request: Request):
+    m = await asyncio.to_thread(db.get_meeting, mid)
+    if m is not None and not _can_manage_meeting(_user(request), m):
+        raise HTTPException(status_code=403, detail="Chỉ người tạo cuộc họp hoặc chủ nhóm được xóa cuộc họp này")
     s = live.SESSIONS.get(mid)
     if s is not None:
         await s.close()
     await asyncio.to_thread(recording.delete, mid)
     await asyncio.to_thread(decks.delete_uploads, mid)
-    _OWNERS.pop(mid, None)
+    _MEETING_KEYS.pop(mid, None)
     return {"success": await asyncio.to_thread(db.delete_meeting, mid)}
+
+
+# ==============================================================================
+# NHÓM CUỘC HỌP
+# ==============================================================================
+class GroupCreate(BaseModel):
+    name: str = Field(..., max_length=200)
+
+
+class GroupPatch(BaseModel):
+    name: Optional[str] = Field(None, max_length=200)
+    members: Optional[List[str]] = Field(None, max_length=200)
+    recording_drive_days: Optional[int] = None
+
+
+class MeetingGroupReq(BaseModel):
+    group_id: Optional[int] = None
+
+
+def _group_public(g: Dict[str, Any], email: Optional[str]) -> Dict[str, Any]:
+    drive = g.get("drive") or {}
+    return {"id": g["id"], "name": g["name"], "owner": g.get("owner"), "members": g.get("members") or [],
+            "role": groups.role_of(g, email), "meeting_count": g.get("meeting_count"),
+            "recording_drive_days": g.get("recording_drive_days"), "created_at": g.get("created_at"),
+            "drive": {k: drive.get(k) for k in ("folder_url", "status", "error") if drive.get(k)}}
+
+
+def _group_for(gid: int, request: Request, need_owner: bool = False) -> Dict[str, Any]:
+    email = (_user(request) or {}).get("email")
+    g = groups.get_group(gid)
+    if g is None or groups.role_of(g, email) is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy nhóm")
+    if need_owner and groups.role_of(g, email) != "owner":
+        raise HTTPException(status_code=403, detail="Chỉ chủ nhóm được thay đổi nhóm")
+    return g
+
+
+@app.get("/api/groups")
+def list_groups(request: Request):
+    email = (_user(request) or {}).get("email")
+    return {"groups": [_group_public(g, email) for g in groups.list_groups_for(email)]}
+
+
+@app.post("/api/groups")
+def create_group(req: GroupCreate, request: Request):
+    email = (_user(request) or {}).get("email")
+    try:
+        g = groups.create_group(req.name, email)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _group_public({**g, "meeting_count": 0}, email)
+
+
+@app.get("/api/groups/{gid}")
+def get_group(gid: int, request: Request):
+    g = _group_for(gid, request)
+    return _group_public({**g, "meeting_count": len(groups.group_meeting_ids(g["id"]))}, (_user(request) or {}).get("email"))
+
+
+@app.patch("/api/groups/{gid}")
+def patch_group(gid: int, req: GroupPatch, request: Request):
+    g = _group_for(gid, request, need_owner=True)
+    try:
+        g = groups.update_group(g["id"], name=req.name, members=req.members, recording_drive_days=req.recording_drive_days)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _group_public({**g, "meeting_count": len(groups.group_meeting_ids(g["id"]))}, (_user(request) or {}).get("email"))
+
+
+@app.delete("/api/groups/{gid}")
+def delete_group(gid: int, request: Request):
+    g = _group_for(gid, request, need_owner=True)
+    for mid in groups.group_meeting_ids(g["id"]):
+        _MEETING_KEYS.pop(mid, None)
+    return {"success": groups.delete_group(g["id"])}
+
+
+@app.put("/api/meetings/{mid}/group")
+def move_meeting_group(mid: int, req: MeetingGroupReq, request: Request):
+    """Chuyển cuộc họp vào nhóm (hoặc gỡ khỏi nhóm): người tạo / chủ nhóm hiện tại, và phải thuộc nhóm đích."""
+    u = _user(request)
+    m = db.get_meeting(mid)
+    if not m:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc họp")
+    if not _can_manage_meeting(u, m):
+        raise HTTPException(status_code=403, detail="Chỉ người tạo cuộc họp hoặc chủ nhóm được chuyển cuộc họp này")
+    if req.group_id is not None:
+        g = groups.get_group(req.group_id)
+        if g is None or groups.role_of(g, (u or {}).get("email")) is None:
+            raise HTTPException(status_code=403, detail="Anh chị không thuộc nhóm đích")
+    groups.set_meeting_group(mid, req.group_id)
+    _MEETING_KEYS.pop(mid, None)
+    s = live.SESSIONS.get(mid)
+    if s is not None:
+        if req.group_id is None:
+            s.meeting.pop("group_id", None)
+        else:
+            s.meeting["group_id"] = req.group_id
+    return {"success": True, "group_id": req.group_id}
 
 
 class RecordingReq(BaseModel):
@@ -1036,10 +1186,10 @@ async def llm_usage(request: Request):
     """Số lần gọi LLM, token vào/ra, chi phí ước tính: toàn bộ, theo cuộc họp, theo việc, theo model."""
     data = await asyncio.to_thread(db.usage_summary)
     if auth.ENABLED:            # bản web: không lộ tên cuộc họp của người khác
-        u, owners = _user(request), await asyncio.to_thread(db.meeting_owners)
+        u, keys = _user(request), await asyncio.to_thread(db.meeting_keys)
         for row in data.get("by_meeting") or []:
             mid = row.get("meeting_id")
-            if mid is not None and not auth.can_access(u, {"owner": owners.get(mid, "")}):
+            if mid is not None and not _can_view(u, *keys.get(mid, ("", None))):
                 row["title"] = "(cuộc họp của người khác)"
     return data
 

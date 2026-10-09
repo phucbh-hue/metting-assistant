@@ -79,15 +79,23 @@ def allowed(user: Dict[str, Any], method: str, path: str) -> bool:
     return is_admin(user) or not path.startswith(ADMIN_PREFIXES)
 
 
-def can_access(user: Optional[Dict[str, Any]], meeting: Optional[Dict[str, Any]]) -> bool:
-    """Bản web: mỗi cuộc họp chỉ người tạo xem được. Cuộc họp tạo trước khi có đăng nhập (chưa có chủ) thuộc về quản
-    trị viên. Chạy trên máy: ai cũng xem được."""
+def can_access(user: Optional[Dict[str, Any]], meeting: Optional[Dict[str, Any]],
+               group: Optional[Dict[str, Any]] = None) -> bool:
+    """Bản web: được xem một cuộc họp nếu là người tạo, hoặc là chủ nhóm / thành viên của nhóm chứa cuộc họp (group).
+    Cuộc họp tạo trước khi có đăng nhập (chưa có chủ, không thuộc nhóm) thuộc về quản trị viên.
+    Chạy trên máy: ai cũng xem được."""
     if not ENABLED:
         return True
-    owner = str((meeting or {}).get("owner") or "").lower()
-    if owner:
-        return bool(user) and str(user.get("email", "")).lower() == owner
-    return is_admin(user)
+    meeting = meeting or {}
+    email = str((user or {}).get("email", "")).lower()
+    owner = str(meeting.get("owner") or "").lower()
+    if owner and email == owner:
+        return True
+    if group and email and (email == str(group.get("owner") or "").lower() or email in (group.get("members") or [])):
+        return True
+    if not owner and not meeting.get("group_id"):
+        return is_admin(user)
+    return False
 
 
 def domain_ok(email: str) -> bool:

@@ -25,7 +25,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from dotenv import load_dotenv
 import numpy as np
@@ -44,7 +44,7 @@ FORCE_MOCK = _DB_ENV in ("mock", "memory", "mongomock")
 FORCE_LOCAL = _DB_ENV in ("local", "file", "offline")
 LOCAL_DB_DIR = Path(os.getenv("LOCAL_DB_DIR") or (Path(__file__).resolve().parent.parent / "data" / "local_db"))
 # Mã số khởi điểm khi lưu trên máy: tách khỏi dải mã của Atlas để đồng bộ lên sau không bị trùng
-LOCAL_ID_BASE = {"meetings": 9000, "voices": 9000, "inferences": 1_000_000, "artifacts": 1_000_000,
+LOCAL_ID_BASE = {"meetings": 9000, "voices": 9000, "groups": 9000, "inferences": 1_000_000, "artifacts": 1_000_000,
                  "interactions": 1_000_000, "segments": 100_000_000}
 
 _client: Optional[pymongo.MongoClient] = None
@@ -230,6 +230,9 @@ def init():
         db["ai_artifacts"].create_index([("meeting_id", 1), ("version", -1)])
         db["mcp_mock_data"].create_index([("collection", 1), ("key", 1)], unique=True)
         db["settings"].create_index("key", unique=True)
+        db["meeting_groups"].create_index("id", unique=True)
+        db["meeting_groups"].create_index("members")
+        db["meetings"].create_index("group_id")
     except Exception as e:
         log.warning("meeting.db init indexes: %s", e)
     log.info("meeting.db: Khởi tạo collections MongoDB hoàn tất (%s)", "Mock" if _is_mock else "Live MongoDB")
@@ -385,17 +388,22 @@ def list_meetings(limit: int = 50) -> List[Dict[str, Any]]:
     return list(_get_db()["meetings"].find({}, {"_id": 0}).sort("started_at", -1).limit(limit))
 
 
-def owner_filter(email: str, include_unowned: bool = False) -> Dict[str, Any]:
-    """Điều kiện lọc cuộc họp của một người (bản web); include_unowned: thêm cuộc họp cũ chưa có chủ (quản trị viên)."""
+def owner_filter(email: str, include_unowned: bool = False, group_ids: Iterable[int] = ()) -> Dict[str, Any]:
+    """Điều kiện lọc cuộc họp một người xem được (bản web): của mình, thuộc các nhóm mình có vai trò (group_ids), và
+    (include_unowned, quản trị viên) cuộc họp cũ chưa có chủ, không thuộc nhóm."""
     conds: List[Dict[str, Any]] = [{"owner": (email or "").strip().lower()}]
     if include_unowned:
-        conds += [{"owner": None}, {"owner": ""}]
+        conds.append({"owner": {"$in": [None, ""]}, "group_id": None})
+    ids = [int(g) for g in group_ids]
+    if ids:
+        conds.append({"group_id": {"$in": ids}})
     return {"$or": conds}
 
 
-def meeting_owners() -> Dict[int, str]:
-    """{id cuộc họp: email người tạo ("" nếu chưa có chủ)}."""
-    return {m["id"]: (m.get("owner") or "") for m in _get_db()["meetings"].find({}, {"_id": 0, "id": 1, "owner": 1})}
+def meeting_keys() -> Dict[int, Tuple[str, Optional[int]]]:
+    """{id cuộc họp: (email người tạo hoặc "", mã nhóm hoặc None)} để kiểm tra quyền xem hàng loạt."""
+    return {m["id"]: (m.get("owner") or "", m.get("group_id"))
+            for m in _get_db()["meetings"].find({}, {"_id": 0, "id": 1, "owner": 1, "group_id": 1})}
 
 
 def list_meetings_with_stats(limit: int = 100, where: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
