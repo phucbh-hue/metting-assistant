@@ -406,7 +406,7 @@ async def meeting_for(rec: Dict[str, Any]) -> int:
         gid = (prefs.get("series_groups") or {}).get(rec.get("series") or rec["event_id"]) or rec.get("group_id")
         mid = await asyncio.to_thread(
             db.create_meeting, rec["title"], description=rec.get("description") or "", agenda=_agenda(rec.get("description")),
-            expected_attendees=_attendee_names(rec), source="meet", owner=rec["owner"])
+            expected_attendees=_attendee_names(rec), source="meet", owner=rec["owner"], meeting_type="Google Meet")
         g = groups.get_group(gid) if gid else None
         if g is not None and groups.role_of(g, rec["owner"]) in ("owner", "member"):
             groups.set_meeting_group(mid, g["id"])

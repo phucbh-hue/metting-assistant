@@ -109,6 +109,10 @@
     .chip-live { background: rgb(var(--live) / .12); color: rgb(var(--live)); border-color: rgb(var(--live) / .3); }
     .chip-accent { background: rgb(var(--accent) / .12); color: rgb(var(--accent)); border-color: rgb(var(--accent) / .3); }
     .chip-warn { background: rgba(255, 193, 69, .12); color: #FFC145; border-color: rgba(255, 193, 69, .3); }
+    .chip-danger { background: rgb(var(--danger) / .12); color: rgb(var(--danger)); border-color: rgb(var(--danger) / .3); }
+    .cal-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; padding: 10px 12px;
+      border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, .03); }
+    @media (max-width: 640px) { .cal-row { grid-template-columns: minmax(0, 1fr); } }
     .notice { border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; font-size: 13.5px; line-height: 1.55; }
     .notice-warn { background: rgba(255, 193, 69, .07); border-color: rgba(255, 193, 69, .35); }
     .notice-info { background: rgb(var(--accent) / .06); border-color: rgb(var(--accent) / .3); }
@@ -517,6 +521,7 @@
           <p id="hub-summary" class="text-muted mb-5"></p>
           <div id="hub-storage"></div>
           <div id="hub-recap"></div>
+          <div id="hub-calendar"></div>
           <div id="hub-live"></div>
           <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
             <div class="seg" role="tablist" aria-label="Lọc cuộc họp">
@@ -933,8 +938,8 @@ async function route() {
   const dq = (location.hash || '').match(/[?&]drive=(ok|err|denied)(?:&msg=([^&]*))?/);
   if (dq) {
     const msg = dq[2] ? decodeURIComponent(dq[2].replace(/\+/g, ' ')) : '';
-    toast(dq[1] === 'ok' ? 'Đã kết nối Google Drive. Biên bản các nhóm anh chị làm chủ sẽ tự lưu vào Drive.'
-      : dq[1] === 'denied' ? 'Anh chị chưa cho phép Google Drive nên chưa kết nối.' : `Chưa kết nối được Google Drive: ${msg}`,
+    toast(dq[1] === 'ok' ? 'Đã kết nối Google. Biên bản tự lưu vào Drive; muốn bot tự vào cuộc họp Google Meet thì bật ở mục Lịch sắp tới.'
+      : dq[1] === 'denied' ? 'Anh chị chưa cho phép nên chưa kết nối Google.' : `Chưa kết nối được Google: ${msg}`,
       dq[1] === 'ok' ? 'ok' : 'err', 8000);
     history.replaceState(null, '', location.pathname + location.search + '#/');
   }
@@ -966,7 +971,7 @@ function renderTopbar() {
         <div class="flex items-center gap-2 text-[12.5px] text-muted min-w-0">
           ${groupOf(m.group_id) ? `<span class="chip hidden md:inline-flex">${esc(groupOf(m.group_id).name)}</span>` : ''}
           <span class="chip hidden md:inline-flex">${esc(m.meeting_type || 'Cuộc họp')}</span>
-          ${live ? `<span class="chip chip-live"><span class="dot-live" style="width:6px;height:6px"></span>Đang diễn ra <span class="num" data-since="${m.started_at}">${fmt.clock(Date.now() / 1000 - m.started_at)}</span></span>`
+          ${live ? `<span class="chip chip-live"><span class="dot-live" style="width:6px;height:6px"></span>Đang diễn ra <span class="num" data-since="${m.started_at}">${fmt.clock(Date.now() / 1000 - m.started_at)}</span></span>${meetChip(S.room)}`
                  : `<span class="truncate">Đã kết thúc ${esc(fmt.date(m.ended_at))}<span class="hidden sm:inline">, dài ${esc(fmt.dur((m.ended_at || 0) - (m.started_at || 0)))}</span></span>${driveChip(m)}`}
         </div>
       </div>
@@ -1001,6 +1006,7 @@ async function loadHub() {
   }
   if (gid !== S.groupId) return;                     // đã chuyển sang nhóm khác trong lúc tải
   renderHub();
+  if (AUTH.required && !gid) loadCalendar();
 }
 /** Tải danh sách nhóm một lần (mở thẳng link phòng họp vẫn biết tên nhóm). */
 async function ensureGroups() {
@@ -1080,6 +1086,7 @@ async function renderStorage(box) {
 function renderHub() {
   renderGroupNav();
   renderRecapNotice();
+  renderCalendar();
   $('#hub-storage').innerHTML = storageNotice(S.storage);
   const st = S.stats;
   if (S.groupId) {
@@ -1133,6 +1140,147 @@ $('#hub-group-select').addEventListener('change', e => {
   if (v === 'new') { e.target.value = S.groupId || ''; return openCreateGroup(); }
   location.hash = v ? `#/g/${v}` : '#/';
 });
+
+/* =====================================================================
+   LỊCH GOOGLE: CUỘC HỌP SẮP TỚI, BOT VÀO GOOGLE MEET (bản web)
+   ===================================================================== */
+const BOT_STATUS = { pending: ['Đang hẹn bot', ''], scheduled: ['Bot sẽ vào', 'chip-accent'], joining: ['Bot đang xin vào', 'chip-warn'],
+  waiting: ['Chờ cho bot vào', 'chip-warn'], in_call: ['Đang chép lời', 'chip-live'], ended: ['Đã xong', ''], failed: ['Bot không vào được', 'chip-danger'] };
+async function loadCalendar(refresh = false) {
+  if (!AUTH.required) return;
+  try { S.calendar = await GET(`/api/calendar${refresh ? '?refresh=true' : ''}`); }
+  catch (e) { S.calendar = { available: true, error: e.message, events: [] }; }
+  if (S.view === 'hub' && !S.groupId) renderCalendar();
+}
+function evTime(ev) {
+  const d = new Date(ev.start * 1000), e = new Date(ev.end * 1000);
+  const two = n => String(n).padStart(2, '0');
+  const hm = x => `${two(x.getHours())}:${two(x.getMinutes())}`;
+  const same = (a, b) => a.toDateString() === b.toDateString();
+  const day = same(d, new Date()) ? 'Hôm nay' : same(d, new Date(Date.now() + 86400000)) ? 'Ngày mai'
+    : `${['CN', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'][d.getDay()]} ${two(d.getDate())}/${two(d.getMonth() + 1)}`;
+  return ev.all_day ? `${day}, cả ngày` : `${day}, ${hm(d)}-${hm(e)}`;
+}
+function evStatus(ev, cal) {
+  if (ev.declined) return ['Đã từ chối', ''];
+  if (!ev.meet_url) return ['Không có link Meet', ''];
+  if (ev.skipped) return ['Đã bỏ qua', ''];
+  if (ev.bot && BOT_STATUS[ev.bot.status]) return BOT_STATUS[ev.bot.status];
+  return cal.autojoin ? ['Bot sẽ vào', 'chip-accent'] : ['Chưa bật bot', ''];
+}
+function renderCalendar() {
+  const box = $('#hub-calendar'); if (!box) return;
+  const cal = S.calendar;
+  if (!AUTH.required || S.groupId || !cal || cal.available === false) { box.innerHTML = ''; return; }
+  const ready = cal.connected && cal.calendar;
+  const head = `<div class="flex flex-wrap items-center justify-between gap-2 mb-2"><h2 class="font-semibold">Lịch sắp tới</h2>
+    <div class="flex items-center gap-3">
+      ${ready ? `<label class="flex items-center gap-2 text-[13px] cursor-pointer" title="${cal.bot_ready ? 'Bot tự vào mọi cuộc họp có link Google Meet trên lịch của anh chị' : 'Server chưa cấu hình bot (báo quản trị viên)'}">
+        <input type="checkbox" data-cal="autojoin" ${cal.autojoin ? 'checked' : ''} ${cal.bot_ready ? '' : 'disabled'}> Bot tự vào cuộc họp Google Meet</label>` : ''}
+      ${ready ? `<button type="button" class="icon-btn" data-cal="refresh" aria-label="Tải lại lịch" title="Tải lại lịch"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>` : ''}
+    </div></div>`;
+  if (!ready) {
+    box.innerHTML = `<section class="mb-6">${head}<div class="notice notice-info"><p>${cal.connected ? 'Anh chị chưa cho phép quyền xem Lịch.' : 'Chưa kết nối Google.'}
+      Vào Cài đặt, mục Google, bấm ${cal.connected ? 'Kết nối lại' : 'Kết nối Google'} để bot tự vào các cuộc họp có link Google Meet trên lịch và chép lời.</p>
+      <button type="button" class="btn btn-ghost btn-sm mt-2" data-act="settings">Mở Cài đặt</button></div></section>`;
+    return;
+  }
+  const now = Date.now() / 1000;
+  const evs = (cal.events || []).filter(e => !e.all_day).slice(0, 8);
+  const groupsOpt = (S.groups || []).filter(g => g.role === 'owner' || g.role === 'member');
+  const rows = evs.map(ev => {
+    const [txt, cls] = evStatus(ev, cal);
+    const usable = ev.meet_url && !ev.declined;
+    const retry = usable && !ev.skipped && ev.bot && (ev.bot.status === 'failed' || ev.bot.status === 'ended') && ev.end > now;
+    const sel = usable ? `<select class="input" data-cal="group" data-eid="${esc(ev.id)}" style="height:30px;font-size:12.5px;width:auto;max-width:180px"
+        aria-label="Nhóm cho cuộc họp ${esc(ev.title)}" title="${ev.series ? 'Áp dụng cho cả chuỗi lặp lại' : 'Nhóm cho cuộc họp tạo từ buổi này'}">
+        <option value="">Không nhóm</option>${groupsOpt.map(g => `<option value="${g.id}" ${ev.group_id === g.id ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select>` : '';
+    return `<li class="cal-row">
+      <div class="min-w-0"><div class="font-medium truncate">${esc(ev.title)}</div>
+        <div class="text-[12px] text-muted">${esc(evTime(ev))}${ev.attendees ? `, ${ev.attendees} người` : ''}${ev.series ? ', lặp lại' : ''}${ev.bot && ev.bot.status_msg && !ev.skipped ? `. ${esc(ev.bot.status_msg)}` : ''}</div></div>
+      <div class="flex flex-wrap items-center gap-2 justify-end">
+        <span class="chip ${cls}">${esc(txt)}</span>${sel}
+        ${ev.bot && ev.bot.meeting_id && ev.bot_mine ? `<a class="btn btn-ghost btn-sm" href="#/m/${ev.bot.meeting_id}">Mở cuộc họp</a>` : ''}
+        ${retry ? `<button type="button" class="btn btn-ghost btn-sm" data-cal="retry" data-eid="${esc(ev.id)}">Mời bot vào lại</button>` : ''}
+        ${usable ? `<button type="button" class="btn btn-ghost btn-sm" data-cal="skip" data-eid="${esc(ev.id)}" data-skip="${ev.skipped ? '0' : '1'}">${ev.skipped ? 'Cho bot vào' : 'Bỏ qua buổi này'}</button>` : ''}
+      </div></li>`;
+  }).join('');
+  box.innerHTML = `<section class="mb-6">${head}
+    ${cal.error ? `<p class="text-[12.5px] mb-2" style="color:#FFC145">${esc(cal.error)}</p>` : ''}
+    ${!cal.bot_ready ? '<p class="text-[12.5px] text-muted mb-2">Server chưa cấu hình bot vào Google Meet (RECALLAI_API_KEY): báo quản trị viên.</p>' : ''}
+    ${rows ? `<ul class="flex flex-col gap-1.5">${rows}</ul>` : '<p class="text-[13px] text-muted">7 ngày tới chưa có cuộc họp nào trên lịch.</p>'}
+    ${cal.autojoin ? '<p class="text-[12px] text-muted mt-2">Bot xin vào lúc bắt đầu, người trong cuộc họp bấm Cho vào (Admit). Bot báo trong khung chat của Meet là cuộc họp được chép lời.</p>' : ''}
+  </section>`;
+  box.onclick = async e => {
+    const b = e.target.closest('[data-cal]'); if (!b || b.tagName === 'SELECT' || b.tagName === 'INPUT') return;
+    const eid = encodeURIComponent(b.dataset.eid || '');
+    b.disabled = true;
+    try {
+      if (b.dataset.cal === 'refresh') return await loadCalendar(true);
+      if (b.dataset.cal === 'skip') S.calendar = await PUT(`/api/calendar/events/${eid}/skip`, { skip: b.dataset.skip === '1' });
+      if (b.dataset.cal === 'retry') { S.calendar = await POST(`/api/calendar/events/${eid}/retry`, {}); toast('Đã mời bot vào lại. Người trong cuộc họp bấm Cho vào khi bot xin vào.'); }
+      renderCalendar();
+    } catch (err) { toast(err.message, 'err'); }
+    finally { b.disabled = false; }
+  };
+  box.onchange = async e => {
+    const el = e.target.closest('[data-cal]'); if (!el) return;
+    try {
+      if (el.dataset.cal === 'autojoin') {
+        S.calendar = await PUT('/api/calendar/autojoin', { enabled: el.checked });
+        toast(el.checked ? 'Đã bật: từ giờ bot tự vào các cuộc họp có link Google Meet trên lịch của anh chị.' : 'Đã tắt: bot không tự vào cuộc họp nữa.');
+      }
+      if (el.dataset.cal === 'group') {
+        S.calendar = await PUT(`/api/calendar/events/${encodeURIComponent(el.dataset.eid)}/group`, { group_id: el.value ? parseInt(el.value, 10) : null });
+        toast('Đã chọn nhóm cho cuộc họp này.');
+      }
+    } catch (err) { toast(err.message, 'err'); }
+    renderCalendar();
+  };
+}
+setInterval(() => {                                           // trạng thái bot đổi theo phút: tự tải lại khi đang xem trang chủ
+  if (AUTH.required && S.view === 'hub' && !S.groupId && document.visibilityState === 'visible') loadCalendar();
+}, 60000);
+
+/* ---------- phòng họp từ Google Meet: trạng thái bot, người trong Meet ---------- */
+function meetChip(R) {
+  const mt = R && R.meet; if (!mt || (!mt.bot && !(mt.people || []).length)) return '';
+  const b = mt.bot || {};
+  const map = { in_call: ['Bot Meet: đang chép lời', 'chip-live'], waiting: ['Bot Meet: chờ cho vào', 'chip-warn'], joining: ['Bot Meet: đang vào', 'chip-warn'],
+    scheduled: ['Bot Meet: sẽ vào', ''], pending: ['Bot Meet: đang hẹn', ''], ended: ['Bot Meet: đã rời', ''], failed: ['Bot Meet: không vào được', 'chip-danger'] };
+  const [txt, cls] = map[b.status] || ['Google Meet', ''];
+  const n = (mt.people || []).length;
+  return `<button type="button" class="chip ${cls} hidden sm:inline-flex" data-act="meet-people" title="${esc(b.status_msg || 'Người trong Google Meet')}">${esc(txt)}${n ? `, ${n} người` : ''}</button>`;
+}
+function openMeetPeople() {
+  if (!S.room) return;
+  openModal(`<h3 class="text-lg font-semibold mb-1">Người trong Google Meet</h3>
+    <p class="text-muted text-[13px] mb-3">Mỗi người trong Meet được chép lời riêng, có tên theo Meet. Máy trong phòng vừa bật mic của ứng dụng vừa vào Meet thì
+      chọn "Bỏ qua" để không chép trùng (ứng dụng tự bỏ qua nếu trùng tên hoặc email với người đang bật mic).</p>
+    <ul id="meet-people" class="flex flex-col gap-1.5"></ul>
+    <div class="flex justify-end mt-4"><button type="button" class="btn btn-ghost" data-act="modal-close">Đóng</button></div>`, { onMount(m) { renderMeetPeople(m, true); } });
+}
+function renderMeetPeople(root = document, force = false) {
+  const ul = $('#meet-people', root); const R = S.room; if (!ul || !R) return;
+  const people = (R.meet && R.meet.people) || [];
+  const sig = JSON.stringify(people.map(p => [p.stream, p.name, p.mode, p.ignored]));
+  if (!force && ul.dataset.sig === sig) return;                // chỉ đổi "đang nói": không vẽ lại ô chọn đang mở
+  ul.dataset.sig = sig;
+  ul.innerHTML = people.length ? people.map(p => `<li class="llm-row" style="grid-template-columns:minmax(0,1fr) auto">
+      <div class="min-w-0"><div class="font-medium truncate">${esc(p.name || 'Chưa rõ tên')}${p.is_host ? ' <span class="chip" style="font-size:11px">chủ phòng</span>' : ''}</div>
+        <div class="text-[12px] text-muted truncate">${esc(p.email || '')}${p.ignored ? (p.mode === 'ignore' ? ' Đang bỏ qua.' : ' Đang bỏ qua: trùng người bật mic trong phòng.') : ''}</div></div>
+      <select class="input" data-meet-mode="${esc(p.stream)}" style="height:30px;font-size:12.5px;width:auto" aria-label="Chép lời của ${esc(p.name || 'người này')}">
+        <option value="auto" ${p.mode === 'auto' ? 'selected' : ''}>Tự động</option>
+        <option value="ignore" ${p.mode === 'ignore' ? 'selected' : ''}>Bỏ qua (máy trong phòng)</option>
+        <option value="listen" ${p.mode === 'listen' ? 'selected' : ''}>Luôn chép</option></select></li>`).join('')
+    : '<li class="text-muted text-[13px]">Chưa có ai trong Meet nói (bot chưa vào, hoặc mọi người đang tắt mic).</li>';
+  $$('[data-meet-mode]', ul).forEach(sel => sel.addEventListener('change', async () => {
+    try {
+      R.meet = await PUT(`/api/meetings/${R.id}/meet-people/${encodeURIComponent(sel.dataset.meetMode)}`, { mode: sel.value });
+      renderMeetPeople(root, true); renderTopbar();
+    } catch (e) { toast(e.message, 'err'); }
+  }));
+}
 
 /* =====================================================================
    NHÓM CUỘC HỌP
@@ -1351,6 +1499,7 @@ function applySnapshot(d) {
   R.artifacts = (d.artifacts || []).slice().sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
   if (d.stage) R.stage = d.stage;
   R.recording = d.recording || { enabled: false, runs: 0, seconds: 0 };
+  R.meet = d.meet || { bot: null, people: [] };
 }
 function renderRoomSkeleton() {
   $('#t-list').innerHTML = '<div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang tải cuộc họp...</div>';
@@ -1432,6 +1581,8 @@ function onEvent(R, ev) {
     case 'suggestion_resolved': R.suggestions.delete(ev.inference_id); renderSuggestions(); break;
     case 'stream_status': onStreamStatus(ev); break;
     case 'recording': R.recording = ev.recording; renderTopbar(); break;
+    case 'meet': R.meet = ev.meet; renderTopbar(); renderMeetPeople(); break;
+    case 'toast': toast(ev.text || '', ev.level || 'info', 7000); break;
     case 'ai_listening': {
       const t = newTurn('', 'voice'); t.listening = true; switchTab('jarvis'); renderJarvis(); break;
     }
@@ -2245,6 +2396,7 @@ function stopMic(silent = false) {
   if (!silent) toast('Đã tắt mic.');
 }
 function onStreamStatus(ev) {
+  if (ev.stream && ev.stream !== 'mic') return;              // luồng của người trong Google Meet: không phải mic này
   if (!MIC.on || !S.room || MIC.mid !== S.room.id) return;
   const map = { live: ['live', 'Đang nghe'], reconnecting: ['reconnecting', 'Dịch vụ nhận dạng mất kết nối, đang nối lại (không mất chữ)...'],
                 connecting: ['connecting', 'Đang kết nối dịch vụ nhận dạng giọng nói...'], error: ['error', ev.message || 'Lỗi dịch vụ nhận dạng'] };
@@ -4260,23 +4412,47 @@ async function renderDriveSettings(box) {
   let st;
   try { st = await GET('/api/google/status'); } catch (e) { box.innerHTML = `<p style="color:rgb(var(--danger))">${esc(e.message)}</p>`; return; }
   if (!st.available) { box.innerHTML = '<p class="text-muted">Server chưa cấu hình kết nối Google (báo quản trị viên).</p>'; return; }
+  const perm = (on, name) => `<span class="chip ${on ? 'chip-accent' : 'chip-warn'}">${name}: ${on ? 'đã cho phép' : 'chưa cho phép'}</span>`;
   box.innerHTML = st.connected
     ? `<div class="flex items-center justify-between gap-3"><div class="min-w-0"><div>Đã kết nối <b>${esc(st.google_email || '')}</b></div>
-        <div class="text-[12px] text-muted">Biên bản và ghi âm các nhóm anh chị làm chủ (và cuộc họp riêng của anh chị) được lưu vào thư mục "Meeting Copilot" trong Drive này.</div></div>
-        <button type="button" class="btn btn-ghost btn-sm shrink-0" data-gd="disconnect">Ngắt kết nối</button></div>`
-    : `<p class="text-muted mb-2">Kết nối Drive để tự lưu biên bản (Google Docs) và ghi âm vào thư mục của từng nhóm. Ứng dụng chỉ thấy các tệp do chính nó tạo trong Drive của anh chị.</p>
-       <button type="button" class="btn btn-primary btn-sm" data-gd="connect">Kết nối Google Drive</button>`;
+        <div class="flex flex-wrap gap-1.5 mt-1">${perm(st.drive, 'Drive')}${perm(st.calendar, 'Lịch')}</div>
+        <div class="text-[12px] text-muted mt-1">Biên bản và ghi âm các nhóm anh chị làm chủ (và cuộc họp riêng của anh chị) được lưu vào thư mục "Meeting Copilot" trong Drive này. Lịch chỉ được đọc, không sửa.</div></div>
+        <button type="button" class="btn btn-ghost btn-sm shrink-0" data-gd="disconnect">Ngắt kết nối</button></div>
+      ${st.drive && st.calendar ? '' : `<p class="text-[12px] text-muted mt-2">Thiếu quyền nào thì bấm Kết nối lại và đánh dấu ô tương ứng trên màn hình của Google.</p>
+        <button type="button" class="btn btn-primary btn-sm mt-1" data-gd="connect">Kết nối lại</button>`}
+      <div data-gd-cal class="mt-3"></div>`
+    : `<p class="text-muted mb-2">Kết nối Google để tự lưu biên bản (Google Docs) và ghi âm vào Drive của từng nhóm, và để bot tự vào các cuộc họp có link Google Meet trên lịch rồi chép lời. Ứng dụng chỉ thấy các tệp do chính nó tạo trong Drive, lịch chỉ được đọc.</p>
+       <button type="button" class="btn btn-primary btn-sm" data-gd="connect">Kết nối Google</button>`;
+  const calBox = $('[data-gd-cal]', box);
+  if (calBox && st.calendar) {
+    try {
+      const cal = await GET('/api/calendar');
+      calBox.innerHTML = `<label class="flex items-start gap-2 cursor-pointer"><input type="checkbox" data-gd="autojoin" style="margin-top:3px" ${cal.autojoin ? 'checked' : ''} ${cal.bot_ready ? '' : 'disabled'}>
+        <span><span class="font-medium">Tự cho bot vào các cuộc họp có link Google Meet trên lịch của tôi</span>
+        <span class="block text-[12px] text-muted">Bot "Trợ lý họp UrBox" xin vào lúc bắt đầu, người trong cuộc họp bấm Cho vào. Mỗi người trong Meet được chép lời riêng, lập biên bản như họp trực tiếp. Bỏ qua từng buổi ở trang chủ, mục Lịch sắp tới. Tắt thì từ giờ bot không tự vào nữa.</span>
+        ${cal.bot_ready ? '' : '<span class="block text-[12px]" style="color:#FFC145">Server chưa cấu hình bot (RECALLAI_API_KEY): báo quản trị viên.</span>'}
+        <span class="block text-[12px] text-muted">Bot báo trong khung chat của Meet là cuộc họp được chép lời. Với khách ngoài công ty, nên báo trước khi họp.</span></span></label>`;
+    } catch (e) { calBox.innerHTML = `<p class="text-[12px] text-muted">${esc(e.message)}</p>`; }
+  }
+  box.onchange = async e => {
+    const c = e.target.closest('[data-gd="autojoin"]'); if (!c) return;
+    try {
+      S.calendar = await PUT('/api/calendar/autojoin', { enabled: c.checked });
+      toast(c.checked ? 'Đã bật: từ giờ bot tự vào các cuộc họp có link Google Meet trên lịch của anh chị.' : 'Đã tắt: bot không tự vào cuộc họp nữa.');
+      renderCalendar();
+    } catch (err) { c.checked = !c.checked; toast(err.message, 'err'); }
+  };
   box.onclick = async e => {
-    const b = e.target.closest('[data-gd]'); if (!b) return;
+    const b = e.target.closest('[data-gd]'); if (!b || b.dataset.gd === 'autojoin') return;
     if (b.dataset.gd === 'connect') {
       try { const r = await POST('/api/google/connect', { return_to: location.origin + location.pathname }); location.href = r.url; }
       catch (err) { toast(err.message, 'err'); }
       return;
     }
-    const ok = await confirmDialog({ title: 'Ngắt kết nối Google Drive?', ok: 'Ngắt kết nối', danger: true,
-      body: 'Các biên bản đã lưu vẫn còn trong Drive. Từ giờ biên bản các nhóm của anh chị không tự lưu lên Drive nữa, cho tới khi kết nối lại.' });
+    const ok = await confirmDialog({ title: 'Ngắt kết nối Google?', ok: 'Ngắt kết nối', danger: true,
+      body: 'Các biên bản đã lưu vẫn còn trong Drive. Từ giờ biên bản các nhóm của anh chị không tự lưu lên Drive và bot không tự vào cuộc họp trên lịch nữa, cho tới khi kết nối lại.' });
     if (!ok) return;
-    try { await POST('/api/google/disconnect', {}); toast('Đã ngắt kết nối Google Drive.'); } catch (err) { toast(err.message, 'err'); }
+    try { await POST('/api/google/disconnect', {}); toast('Đã ngắt kết nối Google.'); } catch (err) { toast(err.message, 'err'); }
   };
 }
 function renderGroupDrive(box, g) {
@@ -4524,7 +4700,7 @@ function openSettings() {
   const acct = AUTH.required && AUTH.user ? `<div class="flex items-center justify-between gap-3 mb-4 pb-4 border-b divider text-[13px]">
       <div class="min-w-0"><div class="font-medium truncate">${esc(AUTH.user.name)}</div><div class="text-muted truncate">${esc(AUTH.user.email)}${AUTH.user.admin ? ' - quản trị viên' : ''}</div></div>
       <button type="button" class="btn btn-ghost" data-act="logout">Đăng xuất</button></div>` : '';
-  const gdrive = AUTH.required ? `<div class="mb-5 pb-4 border-b divider"><h4 class="font-semibold mb-2">Google Drive</h4>
+  const gdrive = AUTH.required ? `<div class="mb-5 pb-4 border-b divider"><h4 class="font-semibold mb-2">Google (Drive và Lịch)</h4>
       <div id="gd-box" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang kiểm tra...</div></div></div>` : '';
   const myllm = AUTH.required ? `<div class="mb-5 pb-4 border-b divider">
       <div class="flex items-center justify-between gap-2 mb-1"><h4 class="font-semibold">Gói AI của tôi</h4><span class="text-[12px] text-muted">Claude.ai hoặc ChatGPT của riêng bạn</span></div>
@@ -5122,8 +5298,10 @@ document.addEventListener('click', async e => {
       if ((R.artifacts || []).some(a => a.kind === 'minutes')) items.push({ id: 'dl-docx', text: 'Tải biên bản (.docx)' });
       if (R.recording && R.recording.runs) items.push({ id: 'dl-mp3', text: 'Tải ghi âm (.mp3)' });
       if (R.recording && R.recording.runs) items.push({ id: 'rec-delete', text: `Xóa bản ghi âm (${fmt.dur(R.recording.seconds || 0)})`, danger: true });
+      if (R.meet && (R.meet.bot || (R.meet.people || []).length)) items.unshift({ id: 'meet-people', text: 'Người trong Google Meet...' });
       items.push({ id: 'delete', text: 'Xóa cuộc họp', danger: true });
       const c = await openMenu(el, items);
+      if (c === 'meet-people') openMeetPeople();
       if (c === 'rec-delete') deleteRecording();
       if (c === 'move') openMoveMeeting(R.id);
       if (c === 'drive-save') saveToDrive(R);
@@ -5141,6 +5319,7 @@ document.addEventListener('click', async e => {
       return renderHub();
     case 'mic-toggle': if (!S.room) return; return (MIC.on && MIC.mid === S.room.id) ? stopMic() : startMic(S.room.id);
     case 'end-meeting': return endMeeting();
+    case 'meet-people': return openMeetPeople();
     case 'rec-toggle': return toggleRecording();
     case 'rename': if (sid) return openRename(sid); return;
     case 'spk-menu': return speakerMenu(el, sid);

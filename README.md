@@ -7,8 +7,105 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng người Việt tự nhiên của Soniox, đọc rõ cả từ tiếng
 Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy, miễn phí), vừa làm vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.17.0 - cập nhật 09/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.18.0 - cập nhật 09/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
+
+---
+
+## Bản 3.18: bot vào Google Meet theo lịch, họp nửa online nửa trực tiếp, gói AI riêng của từng người
+
+Thiết kế: `docs/plans/2026-10-09-calendar-meet-subscriptions-design.md`. Đây là giai đoạn 2/4.
+
+### Bot vào Google Meet theo lịch (bản web)
+- Cài đặt, mục **Google (Drive và Lịch)**: kết nối Google xin thêm quyền đọc lịch (`calendar.events.readonly`, chỉ đọc).
+  - Ai đã kết nối Drive ở bản 3.17 thì bấm **Kết nối lại** để cho thêm quyền Lịch.
+  - Trạng thái từng quyền hiện riêng. Thiếu quyền Drive thì biên bản báo "cần kết nối", Lịch vẫn chạy.
+- Công tắc **Tự cho bot vào các cuộc họp có link Google Meet trên lịch của tôi**:
+  - Bật: từ đó bot vào mọi buổi có link Meet trên lịch của mình.
+  - Tắt: các buổi sau không vào nữa. Bot đang ở trong buổi đang họp vẫn ở lại.
+- Trang chủ có mục **Lịch sắp tới** (7 ngày), mỗi buổi gồm:
+  - giờ, tiêu đề, số người;
+  - trạng thái bot: Bot sẽ vào, Chờ cho bot vào, Đang chép lời, Đã xong, Bot không vào được (kèm lý do);
+  - nút **Bỏ qua buổi này** / **Cho bot vào**, **Mời bot vào lại**, **Mở cuộc họp**;
+  - ô chọn **nhóm** cho cuộc họp sẽ tạo (buổi lặp lại thì áp dụng cho cả chuỗi).
+- Cách chạy:
+  - Mỗi phút server hẹn bot (Recall.ai) cho các buổi bắt đầu trong 30 phút tới. Còn từ 10 phút trở lên thì bot hẹn đúng
+    giờ bắt đầu, muộn hơn thì vào ngay.
+  - Một link Meet ở một giờ chỉ có một bot, dù nhiều người cùng bật. Người hẹn đầu tiên là người tạo cuộc họp. Người đó
+    bỏ qua thì bot chuyển cho người cùng tham dự còn bật.
+  - Buổi bị hủy, đổi giờ, bị từ chối: hủy bot. Đổi giờ thì hẹn lại theo giờ mới. Bỏ qua khi bot đã vào: bot rời ngay.
+  - Bot vào Meet với tư cách **khách**: người trong cuộc họp phải bấm **Cho vào** (Meet chỉ chờ 10 phút). Bot nhắn trong
+    khung chat của Meet rằng cuộc họp được chép lời và tóm tắt.
+  - Cuộc họp chỉ cho người trong tổ chức vào thì bot bị chặn, Lịch sắp tới báo rõ lý do.
+  - Gói tin âm thanh đầu tiên tạo cuộc họp: tiêu đề, người tham dự, chương trình (mô tả sự kiện), nhóm theo chuỗi.
+  - Mỗi người trong Meet có một luồng nhận dạng riêng, hồ sơ người nói lấy đúng tên trong Meet. Người im lặng quá 15
+    giây thì luồng tạm nghỉ (đỡ phí Soniox), nói lại thì mở tiếp, không mất chữ đầu câu.
+  - Bot rời Meet thì cuộc họp kết thúc, lập biên bản, lưu Drive như bản 3.17. Mọi người rời Meet 60 giây thì bot tự rời.
+    Bấm **Kết thúc cuộc họp** trong ứng dụng thì bot cũng rời Meet.
+  - Recall chỉ giữ bản ghi 1 giờ và bị xóa ngay khi bot xong.
+- Chi phí: Recall khoảng 0,5 USD mỗi giờ bot ở trong cuộc họp, cộng Soniox theo thời gian từng người nói.
+- Server khởi động lại giữa cuộc họp: Recall nối lại âm thanh trong khoảng 90 giây. Lâu hơn thì bot vẫn ở trong Meet nhưng
+  không gửi âm thanh nữa, nên chỉ đẩy nhánh `release` khi không có cuộc họp.
+
+### Họp nửa online nửa trực tiếp
+- Một người trong phòng bật mic trên ứng dụng như bình thường. Người online lấy tiếng qua bot.
+- Máy trong phòng mà cũng vào Meet:
+  - Luồng Meet của máy đó tự bị bỏ qua để không chép trùng, nếu trùng email hoặc tên với người đang bật mic.
+  - Không trùng tên thì vào menu phòng họp, **Người trong Google Meet...**, chọn **Bỏ qua (máy trong phòng)**.
+- Tiếng người online phát ra loa trong phòng có thể lọt vào mic:
+  - Khi người online đang nói, câu của mic được giữ 2 giây rồi so với câu Meet cùng lúc. Trùng thì bỏ.
+  - Phòng họp nên dùng loa có khử tiếng vọng hoặc tai nghe.
+- Máy phòng họp có nhiều người cùng vào Meet: mặc định cả máy là một người nói (tên máy trong Meet). Đặt `MEET_DIARIZE=1`
+  để tách người trong luồng đó.
+
+### Gói AI riêng của từng người (bản web)
+- Cài đặt, mục **Gói AI của tôi**: kết nối gói Claude.ai hoặc ChatGPT của chính mình.
+  - Claude.ai: bấm Kết nối, mở đường dẫn, đăng nhập, chép mã trang hiện ra, dán vào ô, bấm Gửi mã.
+  - ChatGPT: bấm Kết nối, mở đường dẫn, đăng nhập rồi nhập mã thiết bị hiện trên ứng dụng.
+- AI trong các cuộc họp do mình tạo chạy bằng gói đã chọn. Chưa kết nối thì dùng API key của công ty.
+- Gói lỗi hoặc hết hạn mức: dùng API key của công ty nếu quản trị viên bật, không thì báo lỗi.
+- Đăng nhập lưu trong thư mục riêng của từng người trên ổ của server (`data/cli-users`). **Ngắt kết nối** xóa đăng nhập đó.
+- Chỉ kết nối gói của chính mình: điều khoản của Anthropic và OpenAI không cho dùng chung tài khoản. Xác nhận với IT /
+  Pháp chế trước khi dùng chính thức.
+- An toàn trên server:
+  - Claude Code chạy không có công cụ nào.
+  - Codex tắt mọi công cụ. Đã thử bằng model giả: với cờ cũ, Codex vẫn được chạy lệnh shell (trên Linux đọc được mọi tệp,
+    kể cả đăng nhập của người khác); giờ không còn công cụ chạy lệnh, ghi tệp bị sandbox chặn.
+  - CLI chỉ nhận các biến môi trường cần thiết, không thấy khóa và bí mật của server.
+- Nguồn AI dùng chung của server (quản trị viên chọn) vẫn chỉ là API key.
+- Image Docker cài thêm Node 22, Claude Code 2.1.288, Codex 0.160.0. Đặt `WITH_SUBSCRIPTION_CLI=0` để bỏ.
+
+### Việc làm một lần
+1. Google Cloud Console, project của OAuth client trên Render:
+   - **Library**: bật **Google Calendar API**.
+   - **OAuth consent screen > Data access**: thêm quyền `.../auth/calendar.events.readonly`.
+2. Render > Environment: đặt `RECALLAI_API_KEY` (key Recall trong `.env` trên máy). `RECALL_REGION` để trống thì server tự
+   dò vùng. `PUBLIC_BASE_URL` đã có (Recall gửi âm thanh về `wss://<địa chỉ này>/ws/recall/...`).
+3. Mỗi người: Cài đặt > Google > **Kết nối lại** (cho thêm quyền Lịch), bật công tắc bot. Muốn dùng gói AI riêng thì
+   Cài đặt > Gói AI của tôi > Kết nối.
+
+### Đã kiểm tra
+- Test mới:
+  - `test_calendar_meet` (19 test, Google và Recall giả):
+    - hẹn bot đúng cấu hình;
+    - vào ngay hay hẹn giờ;
+    - một bot cho mỗi link;
+    - bỏ qua, chuyển bot, tắt công tắc, đổi giờ;
+    - Recall bận thì thử lại;
+    - trạng thái và lý do không vào được;
+    - token sai bị từ chối;
+    - tạo cuộc họp từ gói tin đầu, mỗi người một luồng;
+    - không chép trùng máy trong phòng, chặn tiếng vọng;
+    - bot rời thì kết thúc;
+    - đọc và chuẩn hóa lịch, thiếu quyền, API chưa bật.
+  - `test_user_llm` (9 test): thư mục đăng nhập riêng, gói theo người tạo cuộc họp, Codex không có công cụ, CLI không nhận bí mật.
+- Toàn bộ 358 test đều qua.
+- Chạy thử trên Chromium (lịch và đăng nhập giả):
+  - Lịch sắp tới đủ các trạng thái; bật / tắt công tắc ở trang chủ và Cài đặt; bỏ qua; chọn nhóm cho chuỗi.
+  - Chip bot trong phòng họp, danh sách người trong Meet, đánh dấu máy trong phòng.
+  - Gói AI của tôi: dán mã Claude.ai, mã thiết bị ChatGPT, kiểm tra, ngắt kết nối.
+- **Chưa kiểm tra với dịch vụ thật**: Recall và Google Calendar thật, đăng nhập Claude.ai / ChatGPT trên Render, build
+  Docker (máy này không có Docker). Cần làm 3 bước ở trên trước.
 
 ---
 

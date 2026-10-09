@@ -127,6 +127,19 @@
   tục.
 - Gói AI của người dùng hết hạn mức: dùng API của công ty nếu bật `LLM_API_FALLBACK`, không thì báo lỗi.
 
+## Thay đổi khi làm (09/10/2026)
+
+- Luồng Meet mặc định **không tách người nói**: mỗi luồng là một người, hồ sơ gắn với luồng (không nhận câu của mic,
+  không tự gộp / tự tách). Soniox đôi khi chia một giọng thành 2 nhãn nên tách theo nhãn dễ sai. Máy phòng họp nhiều người
+  vào Meet thì đặt `MEET_DIARIZE=1`.
+- Thêm **chặn tiếng vọng**: tiếng người online phát ra loa lọt vào mic trong phòng. Khi người trong Meet đang nói, câu của
+  mic được giữ 2 giây rồi so với câu Meet cùng lúc; trùng thì bỏ.
+- Bỏ qua buổi đang họp thì bot rời ngay. Tắt công tắc chỉ áp dụng cho các buổi sau.
+- Thêm nút **Mời bot vào lại** (lần trước chưa ai cho vào); cuộc họp còn mở thì bot mới chép tiếp vào đúng cuộc họp đó.
+- Recall: `automatic_leave.everyone_left_timeout` 60 giây (mặc định 2 giây dễ kết thúc nhầm khi chủ phòng rớt mạng).
+- Gói AI trên server: Codex tắt mọi công cụ (`-c features.*=false`) và CLI chỉ nhận biến môi trường tối thiểu. Đã kiểm
+  bằng model giả: với cờ cũ (`-s read-only`), Codex vẫn có `exec_command`, trên Linux đọc được mọi tệp của server.
+
 ## Kiểm tra
 
 - Test với Google Calendar giả và Recall giả (`httpx.MockTransport`):

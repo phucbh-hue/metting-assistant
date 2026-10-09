@@ -45,3 +45,7 @@ services:
         value: claude-sonnet-5-5
       - key: RECORDING_RETENTION_DAYS
         value: "30"
+      - key: RECALLAI_API_KEY                # bot vào Google Meet theo lịch (bản 3.18)
+        sync: false
+      - key: RECALL_REGION                   # để trống: server tự dò vùng của key
+        sync: false
