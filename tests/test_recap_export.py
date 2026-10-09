@@ -98,3 +98,48 @@ class RecordingMp3Tests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RecapDownloadApiTests(unittest.TestCase):
+    """Tải biên bản Word / ghi âm MP3 và danh sách biên bản đã xong (trình duyệt tự lưu về thư mục trên máy)."""
+
+    def setUp(self):
+        from tests.helpers import reset_db
+        reset_db()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.p = mock.patch.object(recording, "ROOT", Path(self.tmp.name))
+        self.p.start()
+
+    def tearDown(self):
+        self.p.stop()
+        self.tmp.cleanup()
+
+    def test_docx_mp3_and_ready_list(self):
+        import docx
+        from fastapi.testclient import TestClient
+        from meeting import app as appmod, db, groups
+        g = groups.create_group("Sprint: Payment", None)
+        mid = db.create_meeting("Review Sprint 40")
+        groups.set_meeting_group(mid, g["id"])
+        db.update_meeting(mid, {"status": "ended", "minutes_status": "done", "ended_at": 1791532800.0,
+                                "started_at": 1791529200.0}, True)
+        aid = db.save_artifact(meeting_id=mid, kind="minutes", title="Biên bản", content=MINUTES, prompt_trigger="t")
+        other = db.create_meeting("Chưa có biên bản")
+        r = recording.Run(mid, "mic", 0.0)
+        r.write((np.sin(np.arange(16000) / 16000 * 2 * np.pi * 300) * 5000).astype("<i2").tobytes())
+        r.close()
+        with TestClient(appmod.app) as c:
+            res = c.get(f"/api/meetings/{mid}/recap.docx")
+            self.assertEqual(res.status_code, 200)
+            self.assertIn("wordprocessingml", res.headers["content-type"])
+            self.assertEqual(len(docx.Document(io.BytesIO(res.content)).tables), 1)
+            mp3 = c.get(f"/api/meetings/{mid}/recording.mp3")
+            self.assertEqual((mp3.status_code, mp3.headers["content-type"]), (200, "audio/mpeg"))
+            self.assertGreater(len(mp3.content), 500)
+            self.assertEqual(c.get(f"/api/meetings/{other}/recap.docx").status_code, 404)
+            self.assertEqual(c.get(f"/api/meetings/{other}/recording.mp3").status_code, 404)
+            items = c.get("/api/recaps/ready").json()["items"]
+        self.assertEqual(len(items), 1)
+        it = items[0]
+        self.assertEqual((it["id"], it["minutes_id"], it["has_recording"]), (mid, aid, True))
+        self.assertEqual((it["group_folder"], it["folder_name"]), ("Sprint- Payment", "09-10-2026 14h00 - Review Sprint 40"))

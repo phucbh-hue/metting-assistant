@@ -34,7 +34,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
 from meeting import (artifacts, auth, cli_llm, db, decks, drive_sync, envfile, google_oauth, groups, live,  # noqa: E402
-                     llm, mcp, recording, tts, voice, websearch)
+                     llm, mcp, recap_export, recording, tts, voice, websearch)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("meeting.app")
@@ -1159,6 +1159,55 @@ async def save_meeting_to_drive(mid: int):
         raise HTTPException(status_code=404, detail="Không tìm thấy cuộc họp")
     drive_sync.schedule(mid)
     return {"scheduled": True, "drive": m.get("drive") or {}}
+
+
+# ------------------------------------------------- biên bản / ghi âm để lưu về máy người dùng ---
+def _attachment(name: str) -> str:
+    from urllib.parse import quote
+    return f"attachment; filename*=UTF-8''{quote(name)}"
+
+
+@app.get("/api/meetings/{mid}/recap.docx")
+async def recap_docx(mid: int):
+    """Biên bản mới nhất dạng Word (trình duyệt ghi vào thư mục trên máy, hoặc tải về)."""
+    minutes = await asyncio.to_thread(drive_sync._latest_minutes, mid)
+    if not minutes:
+        raise HTTPException(status_code=404, detail="Cuộc họp chưa có biên bản")
+    data = await asyncio.to_thread(recap_export.md_to_docx_bytes, minutes["content"])
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    headers={"Content-Disposition": _attachment("Biên bản.docx")})
+
+
+@app.get("/api/meetings/{mid}/recording.mp3")
+async def recording_mp3_file(mid: int):
+    """Ghi âm của cuộc họp (đã có xác nhận mọi người đồng ý lúc bật) dạng MP3."""
+    from starlette.background import BackgroundTask
+    path = await asyncio.to_thread(recap_export.recording_mp3, mid)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Cuộc họp không có ghi âm")
+    return FileResponse(str(path), media_type="audio/mpeg", headers={"Content-Disposition": _attachment("Ghi âm.mp3")},
+                        background=BackgroundTask(recap_export.discard, path))
+
+
+@app.get("/api/recaps/ready")
+def recaps_ready(request: Request, days: int = 30):
+    """Các cuộc họp anh chị xem được, đã kết thúc và có biên bản trong `days` ngày gần đây: trình duyệt dùng để tự lưu
+    (ghi bù) biên bản + ghi âm về thư mục đã chọn trên máy."""
+    since = time.time() - max(1, min(int(days), 365)) * 86400
+    where: Dict[str, Any] = {"status": "ended", "minutes_status": "done", "ended_at": {"$gte": since}}
+    vis = _visible_filter(_user(request))
+    out = []
+    for m in db.find_meetings({"$and": [where, vis]} if vis else where, limit=60):
+        minutes = drive_sync._latest_minutes(m["id"])
+        if not minutes:
+            continue
+        g = groups.get_group(m["group_id"]) if m.get("group_id") else None
+        out.append({"id": m["id"], "title": m.get("title", ""), "minutes_id": minutes.get("id"), "group_id": m.get("group_id"),
+                    "group_name": (g or {}).get("name"),
+                    "group_folder": recap_export.clean_title(g["name"], "Nhóm") if g else drive_sync.PRIVATE_NAME,
+                    "folder_name": recap_export.folder_name(m), "ended_at": m.get("ended_at"),
+                    "has_recording": (recording.info(m["id"]).get("seconds") or 0) > 0})
+    return {"items": out}
 
 
 @app.put("/api/meetings/{mid}/group")

@@ -516,6 +516,7 @@
           <div id="hub-group-head"></div>
           <p id="hub-summary" class="text-muted mb-5"></p>
           <div id="hub-storage"></div>
+          <div id="hub-recap"></div>
           <div id="hub-live"></div>
           <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
             <div class="seg" role="tablist" aria-label="Lọc cuộc họp">
@@ -1078,6 +1079,7 @@ async function renderStorage(box) {
 }
 function renderHub() {
   renderGroupNav();
+  renderRecapNotice();
   $('#hub-storage').innerHTML = storageNotice(S.storage);
   const st = S.stats;
   if (S.groupId) {
@@ -1172,11 +1174,12 @@ async function openGroupSettings(gid) {
       : '<p class="text-[13px] text-muted">Bản chạy trên máy không chia sẻ nhóm cho người khác được.</p>'}
     ${owner ? `<div class="mt-5 pt-4 border-t divider"><h4 class="font-semibold mb-2">Ghi âm trên Google Drive</h4>
         <label class="text-[13px] flex items-center gap-2">Tự xóa sau <input id="gs-days" class="input" type="number" min="1" max="3650" style="width:90px" value="${g.recording_drive_days || ''}" placeholder="30"> ngày</label>
-        <p class="text-[12px] text-muted mt-1">Để trống là theo mặc định của hệ thống. Biên bản không tự xóa.</p></div>
-      <div class="mt-5 pt-4 border-t divider flex flex-wrap justify-between items-center gap-3">
+        <p class="text-[12px] text-muted mt-1">Để trống là theo mặc định của hệ thống. Biên bản không tự xóa.</p></div>` : ''}
+    <div id="gs-drive"></div>
+    <div id="gs-local"></div>
+    ${owner ? `<div class="mt-5 pt-4 border-t divider flex flex-wrap justify-between items-center gap-3">
         <span class="text-[12.5px] text-muted">Xóa nhóm không xóa cuộc họp: các cuộc họp chỉ không thuộc nhóm nào nữa.</span>
         <button type="button" class="btn btn-ghost btn-sm" style="color:rgb(var(--danger))" data-gs="delete">Xóa nhóm</button></div>` : ''}
-    <div id="gs-drive"></div>
     <div class="flex justify-end mt-5"><button type="button" class="btn btn-ghost" data-act="modal-close">Đóng</button></div>`, {
     onMount(m) {
       const renderMembers = () => {
@@ -1206,6 +1209,7 @@ async function openGroupSettings(gid) {
       const days = $('#gs-days', m);
       if (days) days.addEventListener('change', e => save({ recording_drive_days: parseInt(e.target.value, 10) || 0 }, 'Đã lưu số ngày giữ ghi âm.'));
       renderGroupDrive($('#gs-drive', m), g);
+      renderGroupLocal($('#gs-local', m), g);
       m.addEventListener('click', async e => {
         const rm = e.target.closest('[data-gs-rm]');
         if (rm) return save({ members: members.filter(v => v !== rm.dataset.gsRm) }, 'Đã bỏ thành viên khỏi nhóm.');
@@ -1474,6 +1478,7 @@ function onEvent(R, ev) {
       if (ev.status === 'ended' && MIC.on && MIC.mid === R.id) stopMic(true);
       renderTopbar(); renderMicBox(); renderTabs();
       if (ev.minutes_status === 'failed') toast(`Không lập được biên bản tự động. Thử nhờ ${AN()} lập lại.`, 'err');
+      if (ev.minutes_status === 'done') setTimeout(() => recapSync(false), 800);
       break;
     case 'ai_progress': {
       const t = currentTurn();
@@ -3964,18 +3969,25 @@ const clientLib = () => AUTH.required;
 const canPickDir = () => typeof window.showDirectoryPicker === 'function';
 function clibDb() {
   return new Promise((ok, bad) => {
-    const r = indexedDB.open('meeting-copilot', 1);
-    r.onupgradeneeded = () => r.result.createObjectStore('dirs', { keyPath: 'id' });
+    const r = indexedDB.open('meeting-copilot', 2);
+    r.onupgradeneeded = () => {          // dirs: thư mục tài liệu; save-dirs: thư mục lưu biên bản; saved: biên bản đã lưu
+      const d = r.result;
+      for (const [name, key] of [['dirs', 'id'], ['save-dirs', 'id'], ['saved', 'key']]) {
+        if (!d.objectStoreNames.contains(name)) d.createObjectStore(name, { keyPath: key });
+      }
+    };
     r.onsuccess = () => ok(r.result); r.onerror = () => bad(r.error);
   });
 }
-async function clibStore(mode, fn) {
+async function idbStore(name, mode, fn) {
   const dbh = await clibDb();
   return new Promise((ok, bad) => {
-    const tx = dbh.transaction('dirs', mode); const req = fn(tx.objectStore('dirs'));
+    const tx = dbh.transaction(name, mode); const req = fn(tx.objectStore(name));
     tx.oncomplete = () => ok(req ? req.result : undefined); tx.onerror = () => bad(tx.error);
   });
 }
+const clibStore = (mode, fn) => idbStore('dirs', mode, fn);
+function idbAll(name) { return idbStore(name, 'readonly', st => st.getAll()).catch(() => []); }
 function clibAdd(fid, rel, root, ref) {
   const base = rel.split('/').pop(); const m = /\.[^.]+$/.exec(base); const ext = m ? m[0].toLowerCase() : '';
   if (!CLIB_EXTS.includes(ext) || base.startsWith('~$') || base.startsWith('.') || CLIB.files.length >= 4000) return;
@@ -4138,6 +4150,110 @@ async function renderClientLibrarySettings(box) {
     if (S.room) clibSync(S.room);
   };
 }
+/* ---------- Lưu biên bản về thư mục trên máy (Chrome / Edge) ----------
+   Thư mục gốc (Cài đặt) -> <gốc>/<tên nhóm>/<dd-mm-yyyy HHhMM - Tiêu đề>/Biên bản.docx + Ghi âm.mp3, hoặc thư mục riêng của
+   một nhóm (Cài đặt nhóm) -> <thư mục nhóm>/<cuộc họp>/... Biên bản xong lúc ứng dụng đang mở thì ghi ngay; cuộc họp bị lỡ
+   được ghi bù lần mở sau. Mỗi biên bản ghi một lần (nhớ trong IndexedDB theo mã cuộc họp + mã biên bản). */
+const RECAP = { pending: 0, needPerm: false, busy: false };
+async function pickSaveDir(id) {
+  let h;
+  try { h = await window.showDirectoryPicker({ id: 'meeting-recaps', mode: 'readwrite' }); } catch (e) { return false; }
+  await idbStore('save-dirs', 'readwrite', st => st.put({ id, name: h.name, handle: h }));
+  recapSync(true);
+  return true;
+}
+const removeSaveDir = id => idbStore('save-dirs', 'readwrite', st => st.delete(id));
+async function fetchBlob(path) {
+  const r = await apiFetch(path);
+  if (!r.ok) { let d = null; try { d = await r.json(); } catch (e) { /* bỏ qua */ } throw new Error((d && d.detail) || `Không tải được (${r.status})`); }
+  return r.blob();
+}
+async function writeFile(dir, name, blob) {
+  const fh = await dir.getFileHandle(name, { create: true });
+  const w = await fh.createWritable(); await w.write(blob); await w.close();
+}
+async function downloadFile(path, name) {
+  try {
+    const blob = await fetchBlob(path);
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+  } catch (e) { toast(e.message, 'err'); }
+}
+/** Ghi các biên bản chưa lưu về thư mục đã chọn. ask: hỏi quyền ghi (chỉ khi người dùng vừa bấm nút). */
+async function recapSync(ask = false) {
+  if (!canPickDir() || RECAP.busy) return;
+  RECAP.busy = true;
+  try {
+    const dirs = await idbAll('save-dirs');
+    if (!dirs.length) { RECAP.pending = 0; RECAP.needPerm = false; return; }
+    const saved = new Set((await idbAll('saved')).map(x => x.key));
+    let items;
+    try { items = (await GET('/api/recaps/ready')).items || []; } catch (e) { return; }
+    let pending = 0, done = 0, needPerm = false;
+    for (const it of items) {
+      const key = `${it.id}:${it.minutes_id}`;
+      if (saved.has(key)) continue;
+      const target = dirs.find(d => d.id === `group:${it.group_id}`) || dirs.find(d => d.id === 'root');
+      if (!target) continue;
+      let perm = await target.handle.queryPermission({ mode: 'readwrite' }).catch(() => 'denied');
+      if (perm !== 'granted' && ask) perm = await target.handle.requestPermission({ mode: 'readwrite' }).catch(() => 'denied');
+      if (perm !== 'granted') { pending++; needPerm = true; continue; }
+      try {
+        let dir = target.handle;
+        if (target.id === 'root') dir = await dir.getDirectoryHandle(it.group_folder, { create: true });
+        dir = await dir.getDirectoryHandle(it.folder_name, { create: true });
+        await writeFile(dir, 'Biên bản.docx', await fetchBlob(`/api/meetings/${it.id}/recap.docx`));
+        if (it.has_recording) await writeFile(dir, 'Ghi âm.mp3', await fetchBlob(`/api/meetings/${it.id}/recording.mp3`));
+        await idbStore('saved', 'readwrite', st => st.put({ key, at: Date.now() }));
+        done++;
+      } catch (e) { console.warn('Lưu biên bản về máy lỗi:', it.id, e); pending++; }
+    }
+    RECAP.pending = pending; RECAP.needPerm = needPerm;
+    if (done) toast(`Đã lưu ${done} biên bản về thư mục trên máy.`);
+  } finally {
+    RECAP.busy = false;
+    if (S.view === 'hub') renderRecapNotice();
+  }
+}
+function renderRecapNotice() {
+  const box = $('#hub-recap'); if (!box) return;
+  box.innerHTML = RECAP.needPerm && RECAP.pending ? `<div class="notice notice-info mb-5">
+      <p>Có ${RECAP.pending} biên bản chưa lưu về thư mục trên máy: trình duyệt cần anh chị cho phép ghi vào thư mục đã chọn.</p>
+      <button class="btn btn-primary btn-sm mt-2" data-act="recap-allow">Cho phép lưu</button></div>` : '';
+}
+async function renderRecapSettings(box) {
+  if (!box) return;
+  if (!canPickDir()) {
+    box.innerHTML = '<p class="text-muted">Trình duyệt này không cho trang web ghi vào thư mục. Dùng Chrome hoặc Edge, hoặc tải từng biên bản trong menu của cuộc họp.</p>';
+    return;
+  }
+  const root = (await idbAll('save-dirs')).find(d => d.id === 'root');
+  box.innerHTML = `<p class="text-muted mb-2">Biên bản (Word) và ghi âm của mỗi cuộc họp được tự lưu vào <b>thư mục gốc / tên nhóm / ngày giờ - tiêu đề</b> khi biên bản xong (nếu ứng dụng đang mở; bị lỡ thì lưu bù lần mở sau). Có thể chọn thư mục riêng cho từng nhóm trong Cài đặt nhóm.</p>
+    ${root ? `<div class="flex items-center justify-between gap-2"><span>Thư mục gốc: <b>${esc(root.name)}</b></span>
+        <span class="flex gap-2"><button type="button" class="btn btn-ghost btn-sm" data-rs="pick">Đổi</button><button type="button" class="btn btn-ghost btn-sm" data-rs="remove">Bỏ</button></span></div>`
+      : '<button type="button" class="btn btn-ghost btn-sm" data-rs="pick">Chọn thư mục gốc trên máy</button>'}`;
+  box.onclick = async e => {
+    const b = e.target.closest('[data-rs]'); if (!b) return;
+    if (b.dataset.rs === 'pick') await pickSaveDir('root'); else await removeSaveDir('root');
+    renderRecapSettings(box);
+  };
+}
+async function renderGroupLocal(box, g) {
+  if (!box || !canPickDir()) return;
+  const d = (await idbAll('save-dirs')).find(x => x.id === `group:${g.id}`);
+  box.innerHTML = `<div class="mt-5 pt-4 border-t divider"><h4 class="font-semibold mb-1">Thư mục trên máy cho nhóm này</h4>
+    ${d ? `<div class="flex items-center justify-between gap-2 text-[13px]"><span>Đang lưu vào <b>${esc(d.name)}</b></span>
+        <span class="flex gap-2"><button type="button" class="btn btn-ghost btn-sm" data-gl="pick">Đổi</button><button type="button" class="btn btn-ghost btn-sm" data-gl="remove">Bỏ</button></span></div>`
+      : `<p class="text-[13px] text-muted mb-2">Chưa chọn: biên bản của nhóm lưu vào thư mục gốc (Cài đặt, mục Lưu biên bản về máy) / ${esc(g.name)}.</p>
+        <button type="button" class="btn btn-ghost btn-sm" data-gl="pick">Chọn thư mục riêng cho nhóm</button>`}
+    <p class="text-[12px] text-muted mt-1">Chỉ áp dụng trên trình duyệt này. Mỗi cuộc họp một thư mục con theo ngày giờ.</p></div>`;
+  box.onclick = async e => {
+    const b = e.target.closest('[data-gl]'); if (!b) return;
+    if (b.dataset.gl === 'pick') await pickSaveDir(`group:${g.id}`); else await removeSaveDir(`group:${g.id}`);
+    renderGroupLocal(box, g);
+  };
+}
+
 /* ---------- Google Drive (bản web): mỗi người kết nối Drive của mình ---------- */
 async function renderDriveSettings(box) {
   if (!box) return;
@@ -4450,6 +4566,10 @@ function openSettings() {
       <div id="llm-box" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang kiểm tra...</div></div>
     </div>
     <div class="mt-5 pt-4 border-t divider">
+      <h4 class="font-semibold mb-1">Lưu biên bản về máy</h4>
+      <div id="rs-box" class="text-[13px]"></div>
+    </div>
+    <div class="mt-5 pt-4 border-t divider">
       <h4 class="font-semibold mb-1">Thư mục tài liệu</h4>
       <p class="text-[12px] text-muted mb-2">Trợ lý tìm và mở PDF, PowerPoint, Word, Markdown trong các thư mục này ("${esc(a.name)} ơi, mở file báo cáo Q3 trong Downloads"). Chỉ quét tên tệp, nội dung chỉ được đọc khi mở.</p>
       <div id="lib-box" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang tải...</div></div>
@@ -4467,6 +4587,7 @@ function openSettings() {
       renderUsage($('#usage-box', m));
       renderStorage($('#storage-box', m));
       renderDriveSettings($('#gd-box', m));
+      renderRecapSettings($('#rs-box', m));
       renderLlm($('#llm-box', m));
       renderServices($('#svc-box', m));
       renderLibrarySettings($('#lib-box', m));
@@ -4903,6 +5024,7 @@ document.addEventListener('click', async e => {
     case 'hub-group': location.hash = el.dataset.gid ? `#/g/${el.dataset.gid}` : '#/'; return;
     case 'create-group': return openCreateGroup();
     case 'drive-save': return saveToDrive(S.room);
+    case 'recap-allow': return recapSync(true);
     case 'group-settings': return openGroupSettings(parseInt(el.dataset.gid, 10));
     case 'open-meeting': location.hash = `#/m/${mid}`; return;
     case 'nav-room': { const t = S.room ? S.room.id : MIC.mid; if (t) location.hash = `#/m/${t}`; return; }
@@ -4920,12 +5042,16 @@ document.addEventListener('click', async e => {
       const R = S.room; if (!R) return;
       const items = [{ id: 'reanalyze', text: 'Phân tích lại người nói' }, { id: 'move', text: 'Chuyển vào nhóm...' }, { id: 'export', text: 'Xuất Markdown' }, { id: 'export-data', text: 'Xuất dữ liệu phân tích (JSON)' }];
       if (AUTH.required && R.meeting && R.meeting.status === 'ended') items.push({ id: 'drive-save', text: 'Lưu lên Google Drive' });
+      if ((R.artifacts || []).some(a => a.kind === 'minutes')) items.push({ id: 'dl-docx', text: 'Tải biên bản (.docx)' });
+      if (R.recording && R.recording.runs) items.push({ id: 'dl-mp3', text: 'Tải ghi âm (.mp3)' });
       if (R.recording && R.recording.runs) items.push({ id: 'rec-delete', text: `Xóa bản ghi âm (${fmt.dur(R.recording.seconds || 0)})`, danger: true });
       items.push({ id: 'delete', text: 'Xóa cuộc họp', danger: true });
       const c = await openMenu(el, items);
       if (c === 'rec-delete') deleteRecording();
       if (c === 'move') openMoveMeeting(R.id);
       if (c === 'drive-save') saveToDrive(R);
+      if (c === 'dl-docx') downloadFile(`/api/meetings/${R.id}/recap.docx`, `Biên bản - ${R.meeting.title}.docx`);
+      if (c === 'dl-mp3') downloadFile(`/api/meetings/${R.id}/recording.mp3`, `Ghi âm - ${R.meeting.title}.mp3`);
       if (c === 'reanalyze') reanalyzeMeeting();
       if (c === 'export-data') exportMeetingData(S.room.id);
       if (c === 'export') exportMarkdown(R.id);
@@ -5052,6 +5178,7 @@ ensureLogin().then(() => {
   loadHealth();
   route();
   setInterval(loadHealth, 60000);
+  setTimeout(() => recapSync(false), 2500);      // ghi bù biên bản xong lúc ứng dụng đang đóng
 });
 </script>
 </body>

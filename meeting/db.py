@@ -385,6 +385,11 @@ def get_meeting(mid: Any) -> Optional[Dict[str, Any]]:
     return _strip(_get_db()["meetings"].find_one({"id": mid_val}))
 
 
+def find_meetings(where: Dict[str, Any], limit: int = 50, sort: str = "ended_at") -> List[Dict[str, Any]]:
+    """Cuộc họp khớp điều kiện, mới nhất trước (không kèm thống kê)."""
+    return list(_get_db()["meetings"].find(where, {"_id": 0}).sort(sort, -1).limit(limit))
+
+
 def list_meetings(limit: int = 50) -> List[Dict[str, Any]]:
     return list(_get_db()["meetings"].find({}, {"_id": 0}).sort("started_at", -1).limit(limit))
 
