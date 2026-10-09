@@ -7,6 +7,10 @@
 Mỗi lần gọi chạy một tiến trình con trong thư mục tạm trống: không công cụ, không MCP, không đọc cấu hình cá nhân,
 prompt đi qua stdin, chỉ lấy câu trả lời văn bản. Các biến API key bị gỡ khỏi tiến trình con để chắc chắn dùng gói đăng
 ký (không phát sinh tiền API). Gói đăng ký có hạn mức theo giờ / ngày của nhà cung cấp, hết hạn mức thì lời gọi báo lỗi.
+
+`home` (bản web): thư mục đăng nhập riêng của từng người trên server (meeting/user_llm.py). CLI chạy với HOME,
+CLAUDE_CONFIG_DIR, CODEX_HOME trỏ vào đó nên gói của người này không lẫn sang người khác. Không có `home` thì dùng thư
+mục người dùng của máy như trước (bản chạy trên máy).
 """
 import json
 import logging
@@ -146,33 +150,49 @@ def _read_json(p: Path) -> Dict[str, Any]:
         return {}
 
 
-def _login_state(provider: str) -> Dict[str, Any]:
+def _claude_dir(home: Optional[Path] = None) -> Path:
+    if home:
+        return Path(home) / ".claude"
+    return Path(os.getenv("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+
+
+def _codex_dir(home: Optional[Path] = None) -> Path:
+    if home:
+        return Path(home) / ".codex"
+    return Path(os.getenv("CODEX_HOME") or Path.home() / ".codex")
+
+
+def _login_state(provider: str, home: Optional[Path] = None) -> Dict[str, Any]:
     """Đã đăng nhập gói đăng ký chưa (chỉ xem tệp đăng nhập có hay không, không đọc hay trả về token)."""
-    home = Path.home()
+    hdir = Path(home) if home else Path.home()
     if provider == "claude-cli":
-        cdir = Path(os.getenv("CLAUDE_CONFIG_DIR") or home / ".claude")
+        cdir = _claude_dir(home)
         o = _read_json(cdir / ".credentials.json").get("claudeAiOauth") or {}
         if o.get("refreshToken") or o.get("accessToken"):
             return {"logged_in": True, "plan": str(o.get("subscriptionType") or "")}
-        acct = _read_json(home / ".claude.json").get("oauthAccount")   # macOS: token nằm trong Keychain
+        if home:                                  # Linux trên server: token luôn nằm trong .credentials.json
+            return {"logged_in": False, "plan": ""}
+        acct = _read_json(hdir / ".claude.json").get("oauthAccount")   # macOS: token nằm trong Keychain
         return {"logged_in": bool(acct), "plan": ""}
     if provider == "codex-cli":
-        auth = _read_json(Path(os.getenv("CODEX_HOME") or home / ".codex") / "auth.json")
+        auth = _read_json(_codex_dir(home) / "auth.json")
         if auth.get("tokens"):
             return {"logged_in": True, "plan": "ChatGPT"}
         if auth.get("OPENAI_API_KEY"):
             return {"logged_in": False, "plan": "API key (không phải gói ChatGPT)"}
         return {"logged_in": False, "plan": ""}
     if provider == "gemini-cli":
-        g = home / ".gemini"
+        g = hdir / ".gemini"
         return {"logged_in": (g / "oauth_creds.json").exists(), "plan": "Google" if (g / "oauth_creds.json").exists() else ""}
     return {"logged_in": False, "plan": ""}
 
 
-def status() -> List[Dict[str, Any]]:
+def status(home: Optional[Path] = None, providers: Optional[Tuple[str, ...]] = None) -> List[Dict[str, Any]]:
     out = []
     for pid, spec in PROVIDERS.items():
-        st = _login_state(pid)
+        if providers and pid not in providers:
+            continue
+        st = _login_state(pid, home)
         out.append({"id": pid, "kind": "subscription", "label": spec["label"], "tool": spec["tool"],
                     "installed": installed(pid), "logged_in": st["logged_in"], "plan": st["plan"],
                     "plan_hint": spec["plan"], "install": spec["install"], "login": spec["login"],
@@ -223,11 +243,13 @@ def builtin_models(provider: str) -> List[Dict[str, Any]]:
     return []
 
 
-def _claude_models() -> List[Dict[str, Any]]:
+def _claude_models(home: Optional[Path] = None) -> List[Dict[str, Any]]:
     """Bí danh của Claude Code (luôn là bản mới nhất của gói) + model thêm mà tài khoản được dùng (Claude Code ghi trong
     ~/.claude.json sau khi đăng nhập, ví dụ Fable 5.1 với 1 triệu token ngữ cảnh)."""
-    home = Path.home()
-    cfg = Path(os.environ["CLAUDE_CONFIG_DIR"]) / ".claude.json" if os.getenv("CLAUDE_CONFIG_DIR") else home / ".claude.json"
+    if home or os.getenv("CLAUDE_CONFIG_DIR"):
+        cfg = _claude_dir(home) / ".claude.json"
+    else:
+        cfg = Path.home() / ".claude.json"
     extra = []
     for o in _read_json(cfg).get("additionalModelOptionsCache") or []:
         v = str((o or {}).get("value") or "").strip() if isinstance(o, dict) else ""
@@ -238,13 +260,13 @@ def _claude_models() -> List[Dict[str, Any]]:
     return base[:3] + extra + [m for m in base[3:] if m["id"] not in {e["id"] for e in extra}]
 
 
-def _codex_models() -> List[Dict[str, Any]]:
+def _codex_models(home: Optional[Path] = None) -> List[Dict[str, Any]]:
     """Danh mục model của Codex CLI ("codex debug models"); đã đăng nhập thì là danh mục của gói ChatGPT."""
     base = resolve_cmd("codex")
     if not base or os.getenv("CLI_LLM_DISABLED") == "1":
         return []
     with tempfile.TemporaryDirectory(prefix="mcopilot-llm-") as work:
-        r = _run(base + ["debug", "models"], "", work, _env(), 60)
+        r = _run(base + ["debug", "models"], "", work, _env(home=home), 60)
     data = _json_tail(r.stdout.decode("utf-8", "replace")) or {}
     rows = [m for m in data.get("models") or [] if isinstance(m, dict) and m.get("slug") and m.get("visibility", "list") == "list"]
     rows.sort(key=lambda m: (m.get("priority") if isinstance(m.get("priority"), (int, float)) else 999, m["slug"]))
@@ -281,25 +303,31 @@ def _gemini_models() -> List[Dict[str, Any]]:
     return _entries(GEMINI_CLI_ALIASES) + [{"id": m, "label": _gemini_label(m), "note": ""} for m in _list_cache["gemini"]]
 
 
-def list_models(provider: str):
+def list_models(provider: str, home: Optional[Path] = None):
     """(danh sách model, nguồn "cli" | "builtin") để chọn trong Cài đặt."""
     if provider not in PROVIDERS:
         raise ValueError(f"Nguồn AI không hợp lệ: {provider}")
     if not installed(provider):
         return builtin_models(provider), "builtin"
     if provider == "claude-cli":
-        models = _claude_models() if _login_state(provider)["logged_in"] else []
+        models = _claude_models(home) if _login_state(provider, home)["logged_in"] else []
     elif provider == "codex-cli":
-        models = _codex_models()
+        models = _codex_models(home)
     else:
         models = _gemini_models()
     return (models, "cli") if models else (builtin_models(provider), "builtin")
 
 
 # ------------------------------------------------------------ gọi ---
-def _env(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+def _env(extra: Optional[Dict[str, str]] = None, home: Optional[Path] = None) -> Dict[str, str]:
     env = {k: v for k, v in os.environ.items() if k not in _DROP_ENV}
     env.update({"NO_COLOR": "1", "CI": "1"})
+    if home:                                       # thư mục đăng nhập riêng của một người (bản web)
+        h = Path(home)
+        for sub in (".claude", ".codex", ".config"):
+            (h / sub).mkdir(parents=True, exist_ok=True)
+        env.update({"HOME": str(h), "USERPROFILE": str(h), "CLAUDE_CONFIG_DIR": str(h / ".claude"),
+                    "CODEX_HOME": str(h / ".codex"), "XDG_CONFIG_HOME": str(h / ".config")})
     env.update(extra or {})
     return env
 
@@ -343,7 +371,7 @@ def _run(cmd: List[str], stdin: str, cwd: str, env: Dict[str, str], timeout: flo
 
 
 def run(provider: str, system: str, prompt: str, timeout: Optional[float] = None,
-        model: Optional[str] = None) -> Dict[str, Any]:
+        model: Optional[str] = None, home: Optional[Path] = None) -> Dict[str, Any]:
     """Một lượt hỏi - đáp. Trả về {"text", "model", "input", "output", "cache_read", "cache_write", "estimated"}."""
     spec = PROVIDERS.get(provider)
     if spec is None:
@@ -361,15 +389,16 @@ def run(provider: str, system: str, prompt: str, timeout: Optional[float] = None
         wd = Path(work)
         try:
             if provider == "claude-cli":
-                return _claude(base, wd, system, prompt, model, timeout)
+                return _claude(base, wd, system, prompt, model, timeout, home)
             if provider == "codex-cli":
-                return _codex(base, wd, system, prompt, model, timeout)
-            return _gemini(base, wd, system, prompt, model, timeout)
+                return _codex(base, wd, system, prompt, model, timeout, home)
+            return _gemini(base, wd, system, prompt, model, timeout, home)
         except subprocess.TimeoutExpired:
             raise RuntimeError(f"{spec['tool']} không trả lời sau {int(timeout)} giây")
 
 
-def _claude(base: List[str], wd: Path, system: str, prompt: str, model: str, timeout: float) -> Dict[str, Any]:
+def _claude(base: List[str], wd: Path, system: str, prompt: str, model: str, timeout: float,
+            home: Optional[Path] = None) -> Dict[str, Any]:
     sysfile = wd / "system.md"
     sysfile.write_text(system or "Bạn là trợ lý cuộc họp nội bộ.", encoding="utf-8")
     cmd = base + ["-p", "--output-format", "json", "--setting-sources", "", "--safe-mode", "--strict-mcp-config",
@@ -379,7 +408,7 @@ def _claude(base: List[str], wd: Path, system: str, prompt: str, model: str, tim
     effort = os.getenv("CLAUDE_CLI_EFFORT", "medium").strip()
     if effort:
         cmd += ["--effort", effort]
-    r = _run(cmd, prompt, str(wd), _env(), timeout)
+    r = _run(cmd, prompt, str(wd), _env(home=home), timeout)
     out = r.stdout.decode("utf-8", "replace")
     data = _json_tail(out)
     if data is None:
@@ -394,7 +423,8 @@ def _claude(base: List[str], wd: Path, system: str, prompt: str, model: str, tim
             "cache_write": int(u.get("cache_creation_input_tokens") or 0), "estimated": not u}
 
 
-def _codex(base: List[str], wd: Path, system: str, prompt: str, model: str, timeout: float) -> Dict[str, Any]:
+def _codex(base: List[str], wd: Path, system: str, prompt: str, model: str, timeout: float,
+           home: Optional[Path] = None) -> Dict[str, Any]:
     outfile = wd / "last-message.txt"
     cmd = base + ["exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--ignore-rules",
                   "-s", "read-only", "--color", "never", "-C", str(wd), "-o", str(outfile), "--json"]
@@ -405,7 +435,7 @@ def _codex(base: List[str], wd: Path, system: str, prompt: str, model: str, time
         cmd += ["-c", f"model_reasoning_effort={effort}"]
     cmd += ["-"]
     stdin = f"{CODEX_PREAMBLE}\n\n# Hướng dẫn\n{system}\n\n# Yêu cầu\n{prompt}"
-    r = _run(cmd, stdin, str(wd), _env(), timeout)
+    r = _run(cmd, stdin, str(wd), _env(home=home), timeout)
     usage: Dict[str, Any] = {}
     text, err = "", ""
     for line in r.stdout.decode("utf-8", "replace").splitlines():
@@ -432,7 +462,8 @@ def _codex(base: List[str], wd: Path, system: str, prompt: str, model: str, time
             "estimated": not usage}
 
 
-def _gemini(base: List[str], wd: Path, system: str, prompt: str, model: str, timeout: float) -> Dict[str, Any]:
+def _gemini(base: List[str], wd: Path, system: str, prompt: str, model: str, timeout: float,
+            home: Optional[Path] = None) -> Dict[str, Any]:
     sysfile = wd / "system.md"
     sysfile.write_text(system or "Bạn là trợ lý cuộc họp nội bộ.", encoding="utf-8")
     via_cmd = base[0].lower().endswith((".cmd", ".bat"))
@@ -440,7 +471,7 @@ def _gemini(base: List[str], wd: Path, system: str, prompt: str, model: str, tim
     cmd = base + ["-p", tail, "-o", "json", "--approval-mode", "plan", "--skip-trust"]
     if model:
         cmd += ["-m", model]
-    env = _env({"GEMINI_SYSTEM_MD": str(sysfile), **GEMINI_ENV})
+    env = _env({"GEMINI_SYSTEM_MD": str(sysfile), **GEMINI_ENV}, home)
     r = _run(cmd, prompt, str(wd), env, timeout)
     data = _json_tail(r.stdout.decode("utf-8", "replace"))
     if data is None or data.get("error"):
@@ -469,38 +500,43 @@ _jobs: Dict[str, Dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
 
 
-def cred_file(provider: str) -> Path:
+def cred_file(provider: str, home: Optional[Path] = None) -> Path:
     """Tệp lưu đăng nhập của từng CLI (đổi thời điểm sửa = vừa đăng nhập xong)."""
-    home = Path.home()
     if provider == "claude-cli":
-        return Path(os.getenv("CLAUDE_CONFIG_DIR") or home / ".claude") / ".credentials.json"
+        return _claude_dir(home) / ".credentials.json"
     if provider == "codex-cli":
-        return Path(os.getenv("CODEX_HOME") or home / ".codex") / "auth.json"
-    return home / ".gemini" / "oauth_creds.json"
+        return _codex_dir(home) / "auth.json"
+    return (Path(home) if home else Path.home()) / ".gemini" / "oauth_creds.json"
 
 
-def _stamp(provider: str) -> float:
+def _stamp(provider: str, home: Optional[Path] = None) -> float:
     try:
-        return cred_file(provider).stat().st_mtime
+        return cred_file(provider, home).stat().st_mtime
     except OSError:
         return 0.0
 
 
-def login_command(provider: str) -> Tuple[List[str], Dict[str, str], str]:
-    """(lệnh, môi trường, chữ gửi vào stdin) để đăng nhập gói đăng ký bằng CLI chính chủ."""
+def _job_key(provider: str, home: Optional[Path] = None) -> str:
+    return f"{provider}|{home or ''}"
+
+
+def login_command(provider: str, home: Optional[Path] = None) -> Tuple[List[str], Dict[str, str], str]:
+    """(lệnh, môi trường, chữ gửi vào stdin) để đăng nhập gói đăng ký bằng CLI chính chủ.
+    Có `home` (server, không có trình duyệt): Codex đăng nhập bằng mã thiết bị; Claude Code hiện đường dẫn và nhận mã dán vào."""
     spec = PROVIDERS[provider]
     base = resolve_cmd(spec["bin"])
     if not base:
         raise RuntimeError(f"Chưa cài {spec['tool']}. Chạy: pnpm mst-urbox install")
     if provider == "claude-cli":
-        return base + ["auth", "login", "--claudeai"], _env(), ""
+        return base + ["auth", "login", "--claudeai"], _env(home=home), ""
     if provider == "codex-cli":
-        return base + ["login"], _env(), ""
+        return base + ["login"] + (["--device-auth"] if home else []), _env(home=home), ""
     # Gemini CLI không có lệnh đăng nhập riêng: chạy một câu ngắn ở chế độ đăng nhập Google, đồng ý mở trình duyệt ("y")
-    return base + ["-p", "Trả lời đúng một từ: OK", "-o", "json", "--skip-trust"], _env(GEMINI_ENV), "y\n"
+    extra = {**GEMINI_ENV, **({"NO_BROWSER": "true"} if home else {})}
+    return base + ["-p", "Trả lời đúng một từ: OK", "-o", "json", "--skip-trust"], _env(extra, home), "y\n"
 
 
-def start_login(provider: str) -> Dict[str, Any]:
+def start_login(provider: str, home: Optional[Path] = None) -> Dict[str, Any]:
     """Bắt đầu đăng nhập: CLI mở trình duyệt tới trang đăng nhập của Claude / ChatGPT / Google.
 
     Claude Code cần màn hình terminal thật: trên Windows mở cửa sổ đăng nhập riêng, máy khác chạy trong terminal giả lập.
@@ -509,16 +545,17 @@ def start_login(provider: str) -> Dict[str, Any]:
         raise ValueError(f"Nguồn AI không hợp lệ: {provider}")
     if os.getenv("CLI_LLM_DISABLED") == "1":
         raise RuntimeError("Kết nối gói đăng ký đang tắt (CLI_LLM_DISABLED=1)")
+    key = _job_key(provider, home)
     with _jobs_lock:
-        job = _jobs.get(provider)
+        job = _jobs.get(key)
         if job and job["state"] == "running":
-            return login_status(provider)
-        cmd, env, stdin_text = login_command(provider)
+            return login_status(provider, home)
+        cmd, env, stdin_text = login_command(provider, home)
         work = tempfile.mkdtemp(prefix="mcopilot-login-")
-        job = {"provider": provider, "state": "running", "lines": [], "url": "", "code": "", "error": "",
-               "started": time.time(), "stamp": _stamp(provider), "work": work, "rc": None, "master": None,
+        job = {"provider": provider, "home": home, "state": "running", "lines": [], "url": "", "code": "", "error": "",
+               "started": time.time(), "stamp": _stamp(provider, home), "work": work, "rc": None, "master": None,
                "window": False, "proc": None}
-        if provider == "claude-cli" and os.name == "nt":
+        if provider == "claude-cli" and os.name == "nt" and not home:
             job["proc"] = subprocess.Popen(cmd, cwd=work, env=env, creationflags=subprocess.CREATE_NEW_CONSOLE)
             job["window"] = True
         elif provider == "claude-cli":
@@ -537,11 +574,11 @@ def start_login(provider: str) -> Dict[str, Any]:
                     job["proc"].stdin.flush()
                 except OSError:
                     pass
-        _jobs[provider] = job
+        _jobs[key] = job
     if not job["window"]:
         threading.Thread(target=_read_output, args=(job,), name=f"login-{provider}", daemon=True).start()
     threading.Thread(target=_watch_login, args=(job,), name=f"login-watch-{provider}", daemon=True).start()
-    return login_status(provider)
+    return login_status(provider, home)
 
 
 def _add_output(job: Dict[str, Any], text: str) -> None:
@@ -592,10 +629,10 @@ def _finish(job: Dict[str, Any], state: str, error: str = "") -> None:
 
 def _watch_login(job: Dict[str, Any]) -> None:
     """Theo dõi đến khi tệp đăng nhập được ghi mới (xong), CLI báo lỗi, quá 6 phút, hoặc bị hủy."""
-    provider, proc = job["provider"], job["proc"]
+    provider, proc, home = job["provider"], job["proc"], job.get("home")
     while job["state"] == "running":
         time.sleep(WATCH_EVERY_S)
-        fresh = _stamp(provider) > job["stamp"] and _login_state(provider)["logged_in"]
+        fresh = _stamp(provider, home) > job["stamp"] and _login_state(provider, home)["logged_in"]
         rc = proc.poll()
         if fresh:
             if rc is None and provider == "claude-cli" and job["window"]:
@@ -604,9 +641,9 @@ def _watch_login(job: Dict[str, Any]) -> None:
         elif rc is not None:
             job["rc"] = rc
             time.sleep(min(0.5, WATCH_EVERY_S))
-            if _stamp(provider) > job["stamp"] and _login_state(provider)["logged_in"]:
+            if _stamp(provider, home) > job["stamp"] and _login_state(provider, home)["logged_in"]:
                 _finish(job, "done")
-            elif rc == 0 and _login_state(provider)["logged_in"]:
+            elif rc == 0 and _login_state(provider, home)["logged_in"]:
                 _finish(job, "done")
             else:
                 tail = " ".join(job["lines"][-3:])
@@ -622,9 +659,9 @@ def _watch_login(job: Dict[str, Any]) -> None:
             proc.kill()
 
 
-def submit_login_code(provider: str, code: str) -> Dict[str, Any]:
+def submit_login_code(provider: str, code: str, home: Optional[Path] = None) -> Dict[str, Any]:
     """Dán mã xác nhận khi CLI hỏi ("Paste code here if prompted")."""
-    job = _jobs.get(provider)
+    job = _jobs.get(_job_key(provider, home))
     code = (code or "").strip()
     if not job or job["state"] != "running":
         raise RuntimeError("Không có phiên đăng nhập nào đang chờ mã")
@@ -638,23 +675,33 @@ def submit_login_code(provider: str, code: str) -> Dict[str, Any]:
         job["proc"].stdin.flush()
     else:
         raise RuntimeError("Dán mã vào cửa sổ đăng nhập đang mở")
-    return login_status(provider)
+    return login_status(provider, home)
 
 
-def cancel_login(provider: str) -> Dict[str, Any]:
-    job = _jobs.get(provider)
+def cancel_login(provider: str, home: Optional[Path] = None) -> Dict[str, Any]:
+    job = _jobs.get(_job_key(provider, home))
     if job and job["state"] == "running":
         try:
             job["proc"].kill()
         except OSError:
             pass
         _finish(job, "cancelled")
-    return login_status(provider)
+    return login_status(provider, home)
 
 
-def login_status(provider: str) -> Dict[str, Any]:
-    st = _login_state(provider)
-    job = _jobs.get(provider)
+def logout(provider: str, home: Path) -> None:
+    """Xóa đăng nhập gói của một người trên server (bản web): xóa tệp đăng nhập trong thư mục riêng của người đó."""
+    cancel_login(provider, home)
+    f = cred_file(provider, home)
+    try:
+        f.unlink()
+    except OSError:
+        pass
+
+
+def login_status(provider: str, home: Optional[Path] = None) -> Dict[str, Any]:
+    st = _login_state(provider, home)
+    job = _jobs.get(_job_key(provider, home))
     out: Dict[str, Any] = {"provider": provider, "state": "idle", "logged_in": st["logged_in"], "plan": st["plan"],
                            "installed": installed(provider)}
     if job:

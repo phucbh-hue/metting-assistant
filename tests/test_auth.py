@@ -110,7 +110,17 @@ class WebModeApiTests(unittest.TestCase):
         body = {"name": "Bông", "aliases": []}
         self.assertEqual(self.client.put("/api/settings/assistant", json=body, headers=h(user)).status_code, 403)
         self.assertEqual(self.client.put("/api/settings/assistant", json=body, headers=h(admin)).status_code, 200)
-        self.assertEqual(self.client.post("/api/llm/connect/claude-cli", headers=h(user)).status_code, 403)
+        # Gói đăng ký là của từng người: ai cũng kết nối được gói CỦA MÌNH (vào thư mục riêng), không cần quyền quản trị
+        seen = {}
+
+        def fake_start(p, home=None):
+            seen.update(p=p, home=home)
+            return {"provider": p, "state": "running"}
+        with mock.patch.object(appmod.cli_llm, "start_login", fake_start):
+            self.assertEqual(self.client.post("/api/llm/connect/claude-cli", headers=h(user)).status_code, 200)
+        self.assertEqual(seen["home"], appmod.user_llm.home_for("an.nv@urbox.vn"))
+        self.assertEqual(self.client.post("/api/llm/connect/gemini-cli", headers=h(user)).status_code, 400)
+        self.assertEqual(self.client.put("/api/llm/provider", json={"provider": "claude"}, headers=h(user)).status_code, 403)
         # Đổi khóa dịch vụ: không còn dựa vào địa chỉ IP (sau proxy giả được), chỉ quản trị viên
         with mock.patch.object(appmod.envfile, "set_value", return_value={"set": True}) as sv:
             r = self.client.put("/api/settings/secrets", json={"name": "SONIOX_API_KEY", "value": "abc"}, headers=h(admin))

@@ -447,7 +447,7 @@ class GatewaySubscriptionTests(unittest.IsolatedAsyncioTestCase):
         artifacts.set_provider("claude-cli", fallback=False, model="opus")
         seen = {}
 
-        def fake(provider, system, prompt, timeout=None, model=None):
+        def fake(provider, system, prompt, timeout=None, model=None, home=None):
             seen.update(provider=provider, model=model, system=system)
             return {"text": "ok qua gói", "model": "claude-opus-5-5", "input": 10, "output": 3, "cache_read": 0,
                     "cache_write": 0, "estimated": False}
@@ -547,7 +547,7 @@ class DocumentApiTests(TempLibrary, unittest.TestCase):
         self.assertEqual((r["current"], r["api_fallback"]), ("gemini-cli", True))
         self.assertEqual(next(p for p in r["providers"] if p["id"] == "gemini-cli")["model_setting"], "gemini-3-pro")
 
-        def fake(provider, system, prompt, timeout=None, model=None):
+        def fake(provider, system, prompt, timeout=None, model=None, home=None):
             return {"text": "Xin chào!", "model": model, "input": 5, "output": 3, "cache_read": 0, "cache_write": 0, "estimated": False}
         with mock.patch.object(cli_llm, "run", fake):
             t = self.client.post("/api/llm/test", json={"provider": "gemini-cli"}).json()

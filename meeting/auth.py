@@ -59,7 +59,8 @@ PUBLIC_PATHS = {"/", "/vesper", "/config.js", "/favicon.ico", "/healthz", "/api/
                 "/api/google/callback"}      # Google chuyển hướng về đây (kiểm bằng state đã ký, không bằng token)
 PUBLIC_PREFIXES = ("/static/",)
 # Chỉ quản trị viên được ĐỔI (mọi method trừ GET/HEAD) các mục cài đặt dùng chung của server
-ADMIN_PREFIXES = ("/api/settings/", "/api/llm/provider", "/api/llm/connect", "/api/storage/sync")
+# (Kết nối gói đăng ký /api/llm/connect là của từng người trên bản web, không cần quyền quản trị.)
+ADMIN_PREFIXES = ("/api/settings/", "/api/llm/provider", "/api/storage/sync")
 
 
 class AuthError(Exception):

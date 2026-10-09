@@ -49,8 +49,9 @@ def reset_db():
     from meeting import tts
     tts._settings_cache["value"] = None        # nguồn giọng đọc đã chọn ở test trước cũng vậy
     import sys
-    from meeting import groups
-    groups._CACHE.clear()                      # nhóm cũ của test trước (mã nhóm được dùng lại sau khi dựng lại DB)
+    from meeting import artifacts, groups
+    groups._CACHE.clear()
+    artifacts._MEETING_OWNER.clear()                      # nhóm cũ của test trước (mã nhóm được dùng lại sau khi dựng lại DB)
     appmod = sys.modules.get("meeting.app")
     if appmod is not None:
         appmod._MEETING_KEYS.clear()           # id cuộc họp được dùng lại sau khi dựng lại DB

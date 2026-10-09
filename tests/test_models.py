@@ -191,7 +191,7 @@ class ModelApiTests(unittest.TestCase):
     def test_test_endpoint_uses_given_model(self):
         seen = {}
 
-        def fake(provider, system, prompt, timeout=None, model=None):
+        def fake(provider, system, prompt, timeout=None, model=None, home=None):
             seen["model"] = model
             return {"text": "Xin chào", "model": model or "sonnet", "input": 1, "output": 1, "cache_read": 0, "cache_write": 0, "estimated": False}
         with mock.patch.object(cli_llm, "run", fake):

@@ -120,8 +120,8 @@ class LoginTests(unittest.TestCase):
         proc = FakeProc(["Opening authentication page in your browser. Do you want to continue? [Y/n]:",
                          "Attempting to open authentication page in your browser.", "Otherwise navigate to:",
                          "https://accounts.google.com/o/oauth2/v2/auth?client_id=1&scope=x"], rc=0, finish_after=0.3, on_finish=login_ok)
-        with self.popen(proc), mock.patch.object(cli_llm, "cred_file", lambda p: cred), \
-                mock.patch.object(cli_llm, "_login_state", lambda p: {"logged_in": state["in"], "plan": "Google" if state["in"] else ""}):
+        with self.popen(proc), mock.patch.object(cli_llm, "cred_file", lambda p, h=None: cred), \
+                mock.patch.object(cli_llm, "_login_state", lambda p, h=None: {"logged_in": state["in"], "plan": "Google" if state["in"] else ""}):
             cli_llm.start_login("gemini-cli")
             st = self.wait_state("gemini-cli")
         cmd, kw = self.calls[0]
@@ -262,8 +262,8 @@ class SecretsApiTests(unittest.TestCase):
         self.assertEqual(self.client.put("/api/settings/secrets", json={"name": "PATH", "value": "x"}).status_code, 400)
 
     def test_connect_endpoints(self):
-        with mock.patch.object(cli_llm, "start_login", lambda p: {"provider": p, "state": "running", "url": "https://x"}), \
-                mock.patch.object(cli_llm, "cancel_login", lambda p: {"provider": p, "state": "cancelled"}):
+        with mock.patch.object(cli_llm, "start_login", lambda p, h=None: {"provider": p, "state": "running", "url": "https://x"}), \
+                mock.patch.object(cli_llm, "cancel_login", lambda p, h=None: {"provider": p, "state": "cancelled"}):
             self.assertEqual(self.client.post("/api/llm/connect/claude-cli").json()["state"], "running")
             self.assertEqual(self.client.delete("/api/llm/connect/claude-cli").json()["state"], "cancelled")
         self.assertEqual(self.client.post("/api/llm/connect/abc").status_code, 400)

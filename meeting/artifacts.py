@@ -18,7 +18,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from meeting import cli_llm, db, mcp
+from meeting import auth, cli_llm, db, mcp
 
 log = logging.getLogger("meeting.artifacts")
 
@@ -79,9 +79,9 @@ def provider() -> str:
     p = _setting("llm_provider").strip().lower()
     if p not in API_PROVIDERS and p not in cli_llm.PROVIDERS:
         p = PROVIDER if PROVIDER in API_PROVIDERS or PROVIDER in cli_llm.PROVIDERS else "claude"
-    if p in cli_llm.PROVIDERS and os.getenv("LLM_API_ONLY") == "1":
-        # Máy chỉ dùng API key (server web, image Docker): cài đặt chung trên Atlas có chọn gói đăng ký ở máy cá nhân thì
-        # server vẫn chạy bằng API key
+    if p in cli_llm.PROVIDERS and (os.getenv("LLM_API_ONLY") == "1" or auth.ENABLED):
+        # Nguồn AI CHUNG của server web chỉ là API key: gói đăng ký là của từng người (user_subscription), không dùng chung.
+        # Cài đặt chung trên Atlas có chọn gói đăng ký ở máy cá nhân thì server vẫn chạy bằng API key.
         return PROVIDER if PROVIDER in API_PROVIDERS else "claude"
     return p
 
@@ -135,6 +135,9 @@ def set_provider(name: str, fallback: Optional[bool] = None, model: Optional[str
                  models: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Chọn nguồn AI; models = {nguồn: model} lưu model cho nhiều nguồn một lần (chuỗi rỗng = dùng mặc định)."""
     name = _valid_provider(name)
+    if auth.ENABLED and name in cli_llm.PROVIDERS:
+        raise ValueError("Bản web: gói đăng ký là của từng người, kết nối trong Cài đặt, mục Gói AI của tôi. "
+                         "Nguồn AI chung của server chỉ chọn được API key (claude hoặc gemini).")
     picks = {_valid_provider(k): _valid_model(v) for k, v in (models or {}).items() if v is not None}
     if model is not None:
         picks[name] = _valid_model(model)
@@ -160,6 +163,8 @@ def _api_ready() -> bool:
 
 
 def llm_available() -> bool:
+    if user_subscription() is not None:
+        return True
     p = provider()
     if p in cli_llm.PROVIDERS:
         return cli_llm.installed(p) or (api_fallback() and _api_ready())
@@ -197,6 +202,27 @@ PRICES_USD = {"claude-fable-5-1": (10.0, 50.0, 0.025), "claude-fable-5": (10.0, 
 CACHE_WRITE_X = 1.25
 WEB_SEARCH_USD = 0.01           # công cụ web_search của Claude: 10 USD / 1.000 lượt tìm
 CACHE = {"type": "ephemeral"}   # điểm cache 5 phút (mỗi lần đọc làm mới thời hạn)
+
+
+_MEETING_OWNER: Dict[int, str] = {}       # id cuộc họp -> email người tạo (không đổi)
+
+
+def _meeting_owner(mid: int) -> str:
+    if mid not in _MEETING_OWNER:
+        _MEETING_OWNER[mid] = str((db.get_meeting(mid) or {}).get("owner") or "")
+    return _MEETING_OWNER[mid]
+
+
+def user_subscription() -> Optional[Tuple[str, Any]]:
+    """Bản web: (gói, thư mục đăng nhập) của người tạo cuộc họp đang xử lý nếu người đó đã chọn và đăng nhập gói AI
+    riêng; không thì None (dùng API key của công ty)."""
+    if not auth.ENABLED:
+        return None
+    mid = CURRENT_MEETING.get()
+    if mid is None:
+        return None
+    from meeting import user_llm
+    return user_llm.active(_meeting_owner(mid))
 
 
 def set_meeting(meeting_id: Optional[int], purpose: Optional[str] = None) -> None:
@@ -333,13 +359,14 @@ async def _gemini_text(system: Any, prompt: Any, model: Optional[str] = None) ->
     return text
 
 
-async def _cli_text(name: str, system: Any, prompt: Any, model: Optional[str] = None) -> str:
-    """Gọi qua gói đăng ký bằng CLI chính chủ (không prompt cache theo khối, không giới hạn max_tokens)."""
+async def _cli_text(name: str, system: Any, prompt: Any, model: Optional[str] = None, home: Any = None) -> str:
+    """Gọi qua gói đăng ký bằng CLI chính chủ (không prompt cache theo khối, không giới hạn max_tokens).
+    home: thư mục đăng nhập riêng của một người (bản web)."""
     t0 = time.time()
     sys_t, prm_t = _as_text(system), _as_text(prompt)
-    model = model or provider_model(name) or None
+    model = model or (None if home else provider_model(name)) or None
     try:
-        r = await asyncio.to_thread(cli_llm.run, name, sys_t, prm_t, None, model)
+        r = await asyncio.to_thread(cli_llm.run, name, sys_t, prm_t, None, model, home)
     except Exception:
         _record(name, model or cli_llm.model_of(name), len(sys_t + prm_t) // 4, 0, t0, ok=False,
                 estimated=True, free=True)
@@ -350,6 +377,15 @@ async def _cli_text(name: str, system: Any, prompt: Any, model: Optional[str] = 
 
 
 async def _call_llm_raw(system: Any, prompt: Any, max_tokens: int = 4000) -> str:
+    sub = user_subscription()
+    if sub is not None:                           # bản web: gói AI riêng của người tạo cuộc họp
+        name, home = sub
+        try:
+            return await _cli_text(name, system, prompt, home=home)
+        except Exception as e:
+            if not (api_fallback() and _api_ready()):
+                raise
+            log.warning("meeting.artifacts: gói %s của người tạo cuộc họp lỗi (%s), chuyển sang API key", name, e)
     p = provider()
     if p in cli_llm.PROVIDERS:
         try:

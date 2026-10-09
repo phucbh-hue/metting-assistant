@@ -34,7 +34,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
 from meeting import (artifacts, auth, cli_llm, db, decks, drive_sync, envfile, google_oauth, groups, live,  # noqa: E402
-                     llm, mcp, recap_export, recording, tts, voice, websearch)
+                     llm, mcp, recap_export, recording, tts, user_llm, voice, websearch)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("meeting.app")
@@ -729,34 +729,95 @@ def _sub_provider(provider: str) -> str:
     return provider
 
 
+def _sub_target(provider: str, request: Request, change: bool = True) -> Tuple[str, Optional[Path]]:
+    """(gói, thư mục đăng nhập). Bản web: thư mục riêng của chính người gọi (ai cũng chỉ đăng nhập gói của mình).
+    Chạy trên máy: thư mục người dùng của máy, chỉ đổi được từ chính máy đó."""
+    provider = _sub_provider(provider)
+    if auth.ENABLED:
+        if provider not in user_llm.WEB_PROVIDERS:
+            raise HTTPException(status_code=400, detail="Bản web hỗ trợ gói Claude.ai (claude-cli) và ChatGPT (codex-cli)")
+        u = _user(request)
+        if not u:
+            raise HTTPException(status_code=401, detail="Cần đăng nhập")
+        return provider, user_llm.home_for(u["email"])
+    if change:
+        _local_only(request)
+    return provider, None
+
+
 @app.post("/api/llm/connect/{provider}")
 async def llm_connect(provider: str, request: Request):
-    """Nút Kết nối: CLI chính chủ mở trình duyệt để đăng nhập Claude.ai / ChatGPT / Google."""
-    _local_only(request)
+    """Nút Kết nối: CLI chính chủ mở trang đăng nhập Claude.ai / ChatGPT / Google (bản web: hiện đường dẫn + mã)."""
+    name, home = _sub_target(provider, request)
     try:
-        return await asyncio.to_thread(cli_llm.start_login, _sub_provider(provider))
+        return await asyncio.to_thread(cli_llm.start_login, name, home)
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
 
 @app.get("/api/llm/connect/{provider}")
-def llm_connect_status(provider: str):
-    return cli_llm.login_status(_sub_provider(provider))
+def llm_connect_status(provider: str, request: Request):
+    name, home = _sub_target(provider, request, change=False)
+    return cli_llm.login_status(name, home)
 
 
 @app.post("/api/llm/connect/{provider}/code")
 def llm_connect_code(provider: str, req: LoginCodeReq, request: Request):
-    _local_only(request)
+    name, home = _sub_target(provider, request)
     try:
-        return cli_llm.submit_login_code(_sub_provider(provider), req.code)
+        return cli_llm.submit_login_code(name, req.code, home)
     except (RuntimeError, ValueError) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.delete("/api/llm/connect/{provider}")
 def llm_connect_cancel(provider: str, request: Request):
-    _local_only(request)
-    return cli_llm.cancel_login(_sub_provider(provider))
+    name, home = _sub_target(provider, request)
+    return cli_llm.cancel_login(name, home)
+
+
+# ------------------------------------------------------------ gói AI của tôi (bản web) ---
+class MyLlmReq(BaseModel):
+    provider: Optional[str] = None
+
+
+def _my_llm(email: str) -> Dict[str, Any]:
+    return {**user_llm.status(email), "available": auth.ENABLED, "fallback": artifacts.api_fallback(),
+            "company_ready": artifacts._api_ready(), "company_provider": artifacts.provider()}
+
+
+@app.get("/api/me/llm")
+def my_llm(request: Request):
+    """Gói AI riêng của người đang đăng nhập: đã cài / đã đăng nhập từng gói, gói đang chọn cho các cuộc họp của mình."""
+    u = _user(request)
+    if not auth.ENABLED or not u:
+        return {"available": False, "providers": [], "selected": None}
+    return _my_llm(u["email"])
+
+
+@app.put("/api/me/llm")
+def set_my_llm(req: MyLlmReq, request: Request):
+    u = _user(request)
+    if not auth.ENABLED or not u:
+        raise HTTPException(status_code=400, detail="Gói AI riêng chỉ có ở bản web")
+    try:
+        user_llm.choose(u["email"], req.provider or None)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _my_llm(u["email"])
+
+
+@app.post("/api/me/llm/{provider}/logout")
+def logout_my_llm(provider: str, request: Request):
+    """Ngắt kết nối gói của chính mình trên server (xóa tệp đăng nhập trong thư mục riêng)."""
+    name, home = _sub_target(provider, request)
+    if home is None:
+        raise HTTPException(status_code=400, detail="Chỉ có ở bản web")
+    cli_llm.logout(name, home)
+    u = _user(request)
+    if user_llm.chosen(u["email"]) == name:
+        user_llm.choose(u["email"], None)
+    return _my_llm(u["email"])
 
 
 @app.get("/api/llm/models")
@@ -769,7 +830,7 @@ async def llm_models(provider: str, refresh: bool = False):
 
 
 @app.post("/api/llm/test")
-async def test_llm_provider(req: ProviderTestReq):
+async def test_llm_provider(req: ProviderTestReq, request: Request):
     """Gửi một câu hỏi rất ngắn qua nguồn AI để kiểm tra đăng nhập / API key (tốn rất ít hạn mức)."""
     name = (req.provider or artifacts.provider()).strip().lower()
     model = (req.model or "").strip() or None
@@ -780,7 +841,8 @@ async def test_llm_provider(req: ProviderTestReq):
     sys_p, ask = "Trả lời bằng tiếng Việt, đúng một câu ngắn.", "Chào một câu ngắn để kiểm tra kết nối."
     try:
         if name in cli_llm.PROVIDERS:
-            text = await artifacts._cli_text(name, sys_p, ask, model=model)
+            home = user_llm.home_for(_user(request)["email"]) if auth.ENABLED and _user(request) else None
+            text = await artifacts._cli_text(name, sys_p, ask, model=model, home=home)
         elif name == "claude" and os.getenv("ANTHROPIC_API_KEY"):
             text = await artifacts._claude_text(sys_p, ask, 60, model=model)
         elif name == "gemini" and os.getenv("GEMINI_API_KEY"):

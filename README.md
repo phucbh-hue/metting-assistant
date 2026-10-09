@@ -324,10 +324,11 @@ Dữ liệu dùng chung với bản trên máy (cùng Atlas): cuộc họp, mẫ
 ra** ở cả bản trên máy và bản web cùng lúc.
 
 ### Khác với chạy trên máy
-- Gói đăng ký Claude.ai / ChatGPT / Gemini (qua CLI) không có sẵn trong image: server chỉ dùng API key (`LLM_API_ONLY=1`).
-  Bản trên máy chọn gói đăng ký trong Cài đặt (lưu chung trên Atlas) thì server vẫn chạy bằng API key.
+- Nguồn AI chung của server chỉ là API key. Bản trên máy chọn gói đăng ký trong Cài đặt (lưu chung trên Atlas) thì server
+  vẫn chạy bằng API key.
+- Gói Claude.ai / ChatGPT là của từng người (bản 3.18): Cài đặt > Gói AI của tôi. Gemini CLI chưa có trên bản web.
 - Tra cứu web bằng trình duyệt thật tắt mặc định (xem `WITH_BROWSER`).
-- Thư mục tài liệu (mở PowerPoint/PDF để trình bày) là thư mục trên server, không phải máy người dùng.
+- Thư mục tài liệu (mở PowerPoint/PDF để trình bày) là thư mục trên máy người dùng, chọn từ trình duyệt (bản 3.16).
 - Ghi âm lưu trên ổ của server, vẫn tự xóa sau `RECORDING_RETENTION_DAYS` ngày.
 
 ### Đã kiểm tra
