@@ -7,8 +7,74 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng người Việt tự nhiên của Soniox, đọc rõ cả từ tiếng
 Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy, miễn phí), vừa làm vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.18.0 - cập nhật 09/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.19.0 - cập nhật 09/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
+
+---
+
+## Bản 3.19: nhớ xuyên cuộc họp trong nhóm, chế độ BD
+
+Thiết kế: `docs/plans/2026-10-09-group-memory-bd-design.md`. Đây là giai đoạn 3 và 4/4.
+
+### Nhớ xuyên cuộc họp (giai đoạn 3)
+- Biên bản của cuộc họp thuộc nhóm được so với các điều nhóm đã chốt ở tối đa 12 buổi trước: quyết định, con số, hạn chót,
+  người phụ trách, chính sách.
+- Nói khác điều đã chốt thì biên bản có mục **Thay Đổi So Với Các Buổi Trước**, mỗi điểm theo mẫu:
+  > Dạ thưa anh chị, theo như mình đã bàn ở buổi 02/10/2026 (Review voucher Tết) thì là 15/12/2026 chứ không phải
+  > 20/12/2026, anh chị có thể xem xét lại nha ạ.
+- Theo lựa chọn của anh: chỉ ghi trong biên bản, trợ lý không nhắc hay ngắt lời trong lúc họp.
+- Mục này nằm trong biên bản nên có cả trên Google Drive và bản Word.
+- Các buổi họp trước bản này chưa có "điều đã chốt": được rút bù từ biên bản của buổi đó (tối đa 4 buổi mỗi lần, chạy
+  song song).
+- Mỗi biên bản của cuộc họp trong nhóm tốn thêm một lời gọi AI.
+
+### Chế độ BD (giai đoạn 4)
+- Cài đặt nhóm, chủ nhóm bật **Nhóm BD**. Đầu trang nhóm có nhãn "Nhóm BD".
+- **Tài liệu của nhóm** (Cài đặt nhóm):
+  - Chủ nhóm tải lên bảng giá, hồ sơ năng lực, FAQ, chính sách (PDF, Word, PowerPoint, Markdown, .txt).
+  - Server chỉ giữ chữ đã trích, không giữ tệp gốc.
+  - Thành viên xem được danh sách.
+- **Bảng BD**: nút "Bảng BD" trong phòng họp mở một tab riêng. Mở tab đó trên máy của người trong đội, không chiếu lên
+  màn hình chung.
+  - Khách hỏi hoặc băn khoăn thì hiện ngay 2 thẻ gợi ý, chạy **song song**:
+    - **Theo tài liệu**: câu trả lời đội BD nói được ngay, ý chính, nguồn (tài liệu, đoạn).
+    - **Theo các buổi trước**: lần trước mình đã nói, hứa, báo giá gì; điều cần lưu ý (ví dụ giá khác lần trước).
+  - Trợ lý không đọc thành tiếng. Màn hình phòng họp (kênh sự kiện chung) không nhận thẻ gợi ý.
+  - Đánh dấu ai là **Khách**, ai là **Đội mình** để trợ lý chỉ gợi ý cho câu của khách.
+  - Ô **Hỏi nhanh**: gõ câu hỏi, cũng 2 thẻ song song. Nút **Chép câu trả lời** trên mỗi thẻ.
+  - Không gọi AI cho mọi câu: chỉ câu có dấu hỏi, "bao nhiêu", "thế nào", "giá", "phí"... hoặc khách nói dài. Tối đa
+    một lượt mỗi 6 giây, 2 lượt cùng lúc.
+- **Hỏi về các cuộc họp** (chỉ chủ nhóm BD, nút ở đầu trang nhóm):
+  - Ví dụ: "Báo cáo các câu phàn nàn của khách", "Khách đang gặp vấn đề gì?", "Mình đã hứa gì với khách?".
+  - Trợ lý chọn tối đa 8 cuộc họp liên quan (luôn kèm 2 buổi gần nhất), đọc song song (tối đa 4 cùng lúc), cộng tài
+    liệu của nhóm, rồi tổng hợp thành câu trả lời hoặc báo cáo có bảng. Mỗi ý ghi nguồn [M1], bấm vào nguồn mở đúng cuộc họp.
+  - Chạy nền, trang hiện "Đang đọc 3/8 cuộc họp...". Lưu 50 tin gần nhất, xóa được lịch sử.
+- Tìm kiếm trong tài liệu và các cuộc họp dùng BM25 tự viết (không gửi dữ liệu đi đâu để tạo vector). Bỏ dấu khi so, nên
+  lời nói nhận dạng sai dấu vẫn khớp tài liệu.
+- Gói AI riêng: Bảng BD dùng gói của người tạo cuộc họp. Hỏi về các cuộc họp dùng gói của chủ nhóm. Chưa kết nối thì
+  dùng API key của công ty.
+- Chi phí ước tính với API key (Claude Sonnet 5.5):
+  - Bảng BD: khoảng 0,5-1 USD mỗi giờ họp có nhiều câu hỏi.
+  - Một câu hỏi về các cuộc họp: khoảng 0,1-0,3 USD.
+
+### Đã kiểm tra
+- 13 test mới (`test_group_memory_bd`, AI giả):
+  - tìm kiếm có và không có dấu;
+  - tải và xóa tài liệu, chỉ chủ nhóm, không giữ tệp gốc, xóa nhóm thì xóa tài liệu;
+  - mục thay đổi trong biên bản: chỉ so với buổi trước cùng nhóm, rút bù buổi cũ, bỏ thay đổi không đối chiếu được,
+    cuộc họp ngoài nhóm không đổi;
+  - Bảng BD: 2 lời gọi chạy song song, chỉ lên kênh riêng, câu xã giao không gọi AI, câu của đội mình bỏ qua, hỏi nhanh;
+  - kênh riêng chặn nhóm không bật BD và người ngoài nhóm;
+  - hỏi về các cuộc họp: chọn đúng cuộc họp, đọc song song tối đa 4, nguồn đúng, dùng gói của chủ nhóm, chỉ chủ nhóm.
+- Toàn bộ 371 test đều qua.
+- Chạy thử trên Chromium (AI giả):
+  - bật BD, tải tài liệu;
+  - báo cáo phàn nàn có bảng và nguồn;
+  - Bảng BD tự gợi ý khi khách hỏi, đánh dấu vai trò, hỏi nhanh;
+  - màn hình phòng họp không có nội dung gợi ý;
+  - thành viên không thấy khung hỏi của chủ nhóm.
+- **Chưa kiểm tra với AI thật**: chất lượng gợi ý và báo cáo phụ thuộc tài liệu nhóm tải lên. Cần thử ở cuộc họp BD thật
+  đầu tiên.
 
 ---
 

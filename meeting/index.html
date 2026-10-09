@@ -113,6 +113,15 @@
     .cal-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; padding: 10px 12px;
       border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, .03); }
     @media (max-width: 640px) { .cal-row { grid-template-columns: minmax(0, 1fr); } }
+    .bd-grid { display: grid; grid-template-columns: minmax(250px, 330px) minmax(0, 1fr); }
+    @media (max-width: 860px) { .bd-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 38%) minmax(0, 1fr); } }
+    .bd-card { border: 1px solid var(--line-strong); border-radius: 14px; padding: 12px 14px; background: rgba(255, 255, 255, .035); }
+    .bd-card.fresh { animation: bdIn .6s ease-out; border-color: rgb(var(--accent) / .55); }
+    @keyframes bdIn { from { transform: translateY(-6px); opacity: 0; } to { transform: none; opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .bd-card.fresh { animation: none; } }
+    .bd-answer { font-size: 15.5px; line-height: 1.55; margin-top: 6px; }
+    .chat-q { align-self: flex-end; max-width: 85%; background: rgb(var(--accent) / .14); border: 1px solid rgb(var(--accent) / .3);
+      border-radius: 14px; padding: 8px 12px; white-space: pre-wrap; }
     .notice { border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; font-size: 13.5px; line-height: 1.55; }
     .notice-warn { background: rgba(255, 193, 69, .07); border-color: rgba(255, 193, 69, .35); }
     .notice-info { background: rgb(var(--accent) / .06); border-color: rgb(var(--accent) / .3); }
@@ -121,7 +130,7 @@
     .notice ol { margin: 6px 0 0 18px; list-style: decimal; }
     .seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: rgba(0,0,0,.25); border: 1px solid var(--line); }
     .seg button { height: 28px; padding: 0 12px; border-radius: 7px; font-size: 12.5px; font-weight: 500; color: rgb(var(--muted)); }
-    .seg button[aria-selected="true"], .seg button[aria-checked="true"] { background: rgba(255,255,255,.1); color: rgb(var(--ink)); }
+    .seg button[aria-selected="true"], .seg button[aria-checked="true"], .seg button[aria-pressed="true"] { background: rgba(255,255,255,.1); color: rgb(var(--ink)); }
     .dot-live { width: 8px; height: 8px; border-radius: 99px; background: rgb(var(--live)); box-shadow: 0 0 0 0 rgb(var(--live) / .6); animation: pulse 1.6s infinite; }
     @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgb(var(--live) / .55); } 70% { box-shadow: 0 0 0 7px rgb(var(--live) / 0); } 100% { box-shadow: 0 0 0 0 rgb(var(--live) / 0); } }
 
@@ -633,6 +642,40 @@
           <ul id="voice-list" class="flex flex-col gap-1"></ul>
         </div>
       </section>
+
+      <!-- ============ VIEW: BẢNG BD (gợi ý cho đội kinh doanh, mở trên máy riêng, không chiếu lên màn hình chung) ============ -->
+      <section id="view-bd" class="h-full hidden overflow-hidden">
+        <div class="h-full flex flex-col max-w-7xl mx-auto px-3 md:px-5 py-3 gap-3">
+          <div id="bd-head"></div>
+          <div class="bd-grid flex-1 min-h-0 gap-3">
+            <aside class="panel flex flex-col min-h-0" aria-label="Người nói và lời nói">
+              <div class="p-3 border-b divider"><h2 class="font-semibold mb-1">Ai là khách?</h2>
+                <p class="text-[12px] text-muted mb-2">Đánh dấu để trợ lý chỉ gợi ý cho câu của khách.</p>
+                <ul id="bd-speakers" class="flex flex-col gap-1.5"></ul></div>
+              <div id="bd-transcript" class="flex-1 min-h-0 overflow-y-auto p-3 text-[13px] flex flex-col gap-1.5" aria-live="polite"></div>
+            </aside>
+            <section class="panel flex flex-col min-h-0" aria-label="Gợi ý cho đội BD">
+              <div id="bd-cards" class="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-2.5" aria-live="polite"></div>
+              <form id="bd-ask" class="p-3 border-t divider flex gap-2">
+                <input id="bd-ask-in" class="input" maxlength="500" autocomplete="off" placeholder="Hỏi nhanh, ví dụ: Phí tích hợp API bao nhiêu?" aria-label="Hỏi nhanh trợ lý BD">
+                <button class="btn btn-primary shrink-0" type="submit">Hỏi</button>
+              </form>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ VIEW: CHỦ NHÓM HỎI VỀ CÁC CUỘC HỌP CỦA NHÓM ============ -->
+      <section id="view-chat" class="h-full hidden overflow-hidden">
+        <div class="h-full flex flex-col max-w-4xl mx-auto px-3 md:px-5 py-4 gap-3">
+          <div id="chat-head"></div>
+          <div id="chat-list" class="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 pr-1" aria-live="polite"></div>
+          <form id="chat-form" class="flex gap-2">
+            <textarea id="chat-in" class="input" rows="2" maxlength="2000" style="height:auto;resize:vertical" placeholder="Ví dụ: Báo cáo các câu phàn nàn của khách" aria-label="Câu hỏi về các cuộc họp của nhóm"></textarea>
+            <button class="btn btn-primary shrink-0 self-end" type="submit">Gửi</button>
+          </form>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -927,6 +970,8 @@ function showView(name) {
   S.view = name;
   $('#view-hub').classList.toggle('hidden', name !== 'hub');
   $('#view-voices').classList.toggle('hidden', name !== 'voices');
+  $('#view-bd').classList.toggle('hidden', name !== 'bd');
+  $('#view-chat').classList.toggle('hidden', name !== 'chat');
   const room = $('#view-room');
   room.classList.toggle('hidden', name !== 'room');
   room.classList.toggle('flex', name === 'room');
@@ -944,6 +989,11 @@ async function route() {
     history.replaceState(null, '', location.pathname + location.search + '#/');
   }
   const h = location.hash || '#/';
+  const bdm = h.match(/^#\/m\/(\d+)\/bd/), gc = h.match(/^#\/g\/(\d+)\/chat/);
+  if (!bdm) closeBD();
+  if (!gc) closeChat();
+  if (bdm) { ensureGroups(); return openBD(parseInt(bdm[1], 10)); }
+  if (gc) { await ensureGroups(); return openGroupChat(parseInt(gc[1], 10)); }
   const m = h.match(/^#\/m\/(\d+)/);
   if (m) { ensureGroups(); return openRoom(parseInt(m[1], 10)); }
   if (h.startsWith('#/voices')) { showView('voices'); return loadVoices(); }
@@ -977,12 +1027,13 @@ function renderTopbar() {
       </div>
       ${live ? `<button class="btn btn-ghost btn-sm shrink-0 ml-1 ${S.room.recording && S.room.recording.enabled ? 'rec-on' : ''}" data-act="rec-toggle"
           title="${S.room.recording && S.room.recording.enabled ? 'Đang lưu âm thanh cuộc họp trên máy này. Bấm để dừng.' : 'Lưu âm thanh cuộc họp trên máy này (cần mọi người đồng ý)'}">${S.room.recording && S.room.recording.enabled ? '<span class="rec-dot"></span>Đang ghi âm' : 'Ghi âm: tắt'}</button>` : ''}
+      ${(groupOf(m.group_id) || {}).bd_mode ? `<a class="btn btn-ghost btn-sm shrink-0 ml-1" href="#/m/${m.id}/bd" target="_blank" rel="noopener" title="Mở bảng gợi ý cho đội BD ở tab riêng. Đừng chiếu tab đó lên màn hình chung.">Bảng BD</a>` : ''}
       ${live ? `<button class="btn btn-ghost btn-sm shrink-0 ml-1" data-act="end-meeting"><span class="sm:hidden">Kết thúc</span><span class="hidden sm:inline">Kết thúc cuộc họp</span></button>` : ''}
       <button class="icon-btn shrink-0" data-act="room-menu" aria-label="Tùy chọn cuộc họp" title="Tùy chọn cuộc họp">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
       </button>`;
   } else {
-    const title = S.view === 'voices' ? 'Hồ sơ giọng nói' : 'Cuộc họp';
+    const title = S.view === 'voices' ? 'Hồ sơ giọng nói' : S.view === 'bd' ? 'Bảng BD' : S.view === 'chat' ? 'Hỏi về các cuộc họp' : 'Cuộc họp';
     left.innerHTML = `<h1 class="text-[20px] font-semibold tracking-tight">${title}</h1>`;
   }
   const roomBtn = $('[data-nav="room"]');
@@ -1029,9 +1080,10 @@ function renderGroupNav() {
     `<option value="${g.id}" ${cur === g.id ? 'selected' : ''}>${esc(g.name)}${g.role === 'member' ? ' (được chia sẻ)' : ''}</option>`).join('')}<option value="new">+ Tạo nhóm...</option>`;
   const g = groupOf(cur);
   $('#hub-group-head').innerHTML = g ? `<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-      <div class="min-w-0"><h2 class="text-lg font-semibold truncate">${esc(g.name)}</h2>
+      <div class="min-w-0"><h2 class="text-lg font-semibold truncate">${esc(g.name)}${g.bd_mode ? ' <span class="chip chip-accent align-middle" style="font-size:11px">Nhóm BD</span>' : ''}</h2>
         <p class="text-[13px] text-muted">${AUTH.required ? `${g.role === 'owner' ? 'Anh chị là chủ nhóm' : `Chủ nhóm: ${esc(g.owner || '')}`}, ${(g.members || []).length + 1} người` : 'Nhóm cuộc họp'}</p></div>
       <div class="flex flex-wrap gap-2">${g.drive && g.drive.folder_url ? `<a class="btn btn-ghost btn-sm" href="${esc(g.drive.folder_url)}" target="_blank" rel="noopener noreferrer">Thư mục Drive</a>` : ''}
+        ${g.bd_mode && g.role === 'owner' ? `<a class="btn btn-ghost btn-sm" href="#/g/${g.id}/chat">Hỏi về các cuộc họp</a>` : ''}
         <button type="button" class="btn btn-ghost btn-sm" data-act="group-settings" data-gid="${g.id}">${g.role === 'owner' ? 'Cài đặt nhóm' : 'Thành viên'}</button>
         <button type="button" class="btn btn-primary btn-sm" data-act="create-meeting">Tạo cuộc họp trong nhóm</button></div></div>` : '';
 }
@@ -1283,6 +1335,238 @@ function renderMeetPeople(root = document, force = false) {
 }
 
 /* =====================================================================
+   CHẾ ĐỘ BD: TÀI LIỆU CỦA NHÓM, BẢNG BD, CHỦ NHÓM HỎI VỀ CÁC CUỘC HỌP (bản 3.19)
+   ===================================================================== */
+async function renderGroupKb(box, g) {
+  if (!box) return;
+  const owner = g.role === 'owner';
+  if (!owner && !g.bd_mode) { box.innerHTML = ''; return; }
+  let r;
+  try { r = await GET(`/api/groups/${g.id}/docs`); } catch (e) { box.innerHTML = `<p class="text-[12.5px] text-muted mt-4">${esc(e.message)}</p>`; return; }
+  const docs = r.docs || [];
+  box.innerHTML = `<div class="mt-5 pt-4 border-t divider"><h4 class="font-semibold mb-1">Tài liệu của nhóm (kho tri thức BD)</h4>
+    <p class="text-[12px] text-muted mb-2">Bảng giá, hồ sơ năng lực, FAQ, chính sách... Trợ lý BD gợi ý trả lời từ các tài liệu này và các cuộc họp trước của nhóm. Chỉ giữ chữ trong tài liệu, tệp gốc không lưu trên server.</p>
+    <ul class="flex flex-col gap-1 mb-2 text-[13px]">${docs.map(d => `<li class="flex items-center justify-between gap-2">
+        <span class="min-w-0"><span class="truncate block" title="${esc(d.name)}">${esc(d.name)}</span><span class="text-[11.5px] text-muted">${esc(fmtSize(d.size))}, ${d.n_chunks} đoạn, ${esc(fmt.date(d.uploaded_at))}</span></span>
+        ${r.can_edit ? `<button type="button" class="icon-btn" data-kb-rm="${d.id}" aria-label="Xóa ${esc(d.name)}" title="Xóa tài liệu"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>` : ''}</li>`).join('')
+      || '<li class="text-muted">Chưa có tài liệu nào.</li>'}</ul>
+    ${r.can_edit ? `<label class="btn btn-ghost btn-sm cursor-pointer">Tải tài liệu lên<input type="file" data-kb-up class="hidden" multiple accept="${esc((r.exts || []).join(','))}"></label>
+      <span class="text-[11.5px] text-muted ml-1">PDF, Word, PowerPoint, Markdown, .txt; tối đa 25 MB mỗi tệp, ${r.max_docs} tài liệu.</span>` : ''}</div>`;
+  const up = $('[data-kb-up]', box);
+  if (up) up.addEventListener('change', async () => {
+    const files = [...up.files]; up.value = '';
+    for (const f of files) {
+      toast(`Đang đọc ${f.name}...`, 'info', 2500);
+      const fd = new FormData(); fd.append('file', f, f.name);
+      try { const d = await POST(`/api/groups/${g.id}/docs`, fd); toast(`Đã thêm ${d.name} (${d.n_chunks} đoạn).`); }
+      catch (e) { toast(`${f.name}: ${e.message}`, 'err', 7000); }
+    }
+    renderGroupKb(box, g);
+  });
+  box.onclick = async e => {
+    const b = e.target.closest('[data-kb-rm]'); if (!b) return;
+    try { await DEL(`/api/groups/${g.id}/docs/${b.dataset.kbRm}`); toast('Đã xóa tài liệu.'); } catch (err) { toast(err.message, 'err'); }
+    renderGroupKb(box, g);
+  };
+}
+
+/* ---------- Bảng BD của một cuộc họp (#/m/<id>/bd) ---------- */
+const BD = { mid: null, closed: true, ws: null, bws: null, meeting: null, segs: [], speakers: new Map(), cards: [], roles: {}, busy: 0, group: null, fresh: null };
+function closeBD() {
+  BD.closed = true;
+  [BD.ws, BD.bws].forEach(w => { try { if (w) w.close(); } catch (e) { /* bỏ qua */ } });
+  BD.ws = BD.bws = null;
+  clearInterval(BD.ping);
+}
+async function openBD(mid) {
+  if (!BD.closed && BD.mid === mid) { showView('bd'); return; }
+  closeBD();
+  Object.assign(BD, { mid, closed: false, meeting: null, segs: [], speakers: new Map(), cards: [], roles: {}, busy: 0, group: null });
+  showView('bd');
+  $('#bd-head').innerHTML = '<div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang mở bảng BD...</div>';
+  $('#bd-cards').innerHTML = ''; $('#bd-transcript').innerHTML = ''; $('#bd-speakers').innerHTML = '';
+  let info;
+  try { info = await GET(`/api/meetings/${mid}/bd`); } catch (e) { toast(e.message, 'err'); location.hash = '#/'; return; }
+  if (BD.mid !== mid || BD.closed) return;
+  if (!info.enabled) {
+    $('#bd-head').innerHTML = `<div class="notice notice-info">Nhóm của cuộc họp này chưa bật chế độ BD. Chủ nhóm bật trong Cài đặt nhóm, mục Chế độ BD.
+      <a class="link ml-1" href="#/m/${mid}">Về phòng họp</a></div>`;
+    return;
+  }
+  BD.cards = info.cards || []; BD.roles = info.roles || {}; BD.group = info.group || {};
+  renderBD();
+  connectBD(mid);
+}
+function connectBD(mid) {
+  const open = (path, onEv) => {
+    const ws = new WebSocket(wsUrl(path));
+    ws.onmessage = e => { try { onEv(JSON.parse(e.data)); } catch (err) { console.error(err); } };
+    ws.onclose = () => { if (!BD.closed && BD.mid === mid) setTimeout(() => { if (!BD.closed && BD.mid === mid) reopen(path, onEv); }, 2000); };
+    return ws;
+  };
+  const reopen = (path, onEv) => { if (path.endsWith('/bd')) BD.bws = open(path, onEv); else BD.ws = open(path, onEv); };
+  BD.ws = open(`/ws/meeting/${mid}/events`, ev => {
+    if (ev.type === 'init') {
+      BD.meeting = ev.meeting; BD.segs = (ev.segments || []).filter(x => hasWords(x.text));
+      BD.speakers = new Map((ev.speakers || []).map(x => [x.sid, x])); renderBD();
+    } else if (ev.type === 'segment') { if (hasWords(ev.segment.text)) { BD.segs.push(ev.segment); renderBDTranscript(); } }
+    else if (ev.type === 'segments_relabeled') {
+      const by = new Map(BD.segs.map(x => [x.seq, x])); ev.items.forEach(it => { const x = by.get(it.seq); if (x) Object.assign(x, it); });
+      renderBDTranscript();
+    } else if (ev.type === 'speakers') { BD.speakers = new Map(ev.speakers.map(x => [x.sid, x])); renderBDSpeakers(); renderBDTranscript(); }
+    else if (ev.type === 'meeting_status') { BD.meeting = ev.meeting || BD.meeting; renderBDHead(); }
+  });
+  BD.bws = open(`/ws/meeting/${mid}/bd`, ev => {
+    if (ev.type === 'bd_init') { BD.cards = ev.cards || []; BD.roles = ev.roles || {}; BD.busy = ev.busy || 0; renderBD(); }
+    else if (ev.type === 'bd_card') { BD.cards.unshift(ev.card); BD.fresh = ev.card.id; renderBDCards(); }
+    else if (ev.type === 'bd_roles') { BD.roles = ev.roles || {}; renderBDSpeakers(); renderBDTranscript(); }
+    else if (ev.type === 'bd_status') { BD.busy = ev.busy || 0; renderBDHead(); }
+    else if (ev.type === 'bd_error' || ev.type === 'error') toast(ev.text || 'Lỗi bảng BD', 'err', 6000);
+  });
+  clearInterval(BD.ping);
+  BD.ping = setInterval(() => [BD.ws, BD.bws].forEach(w => { if (w && w.readyState === 1) w.send('{"type":"ping"}'); }), 25000);
+}
+function renderBD() { renderBDHead(); renderBDSpeakers(); renderBDTranscript(); renderBDCards(); }
+function renderBDHead() {
+  const m = BD.meeting || {}; const live = m.status && m.status !== 'ended';
+  $('#bd-head').innerHTML = `<div class="flex flex-wrap items-center justify-between gap-2">
+    <div class="min-w-0"><div class="flex items-center gap-2 min-w-0"><a class="icon-btn shrink-0" href="#/m/${BD.mid}" aria-label="Về phòng họp" title="Về phòng họp"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></a>
+      <h2 class="text-lg font-semibold truncate">${esc(m.title || 'Cuộc họp')}</h2>
+      ${m.status ? (live ? '<span class="chip chip-live shrink-0">Đang diễn ra</span>' : '<span class="chip shrink-0">Đã kết thúc</span>') : ''}</div>
+      <p class="text-[12px] text-muted">${esc((BD.group || {}).name || '')}${(BD.group || {}).doc_count ? `, ${BD.group.doc_count} tài liệu` : ', nhóm chưa có tài liệu (Cài đặt nhóm)'}. Bảng này chỉ dành cho đội BD: đừng chiếu lên màn hình chung.</p></div>
+    <span class="text-[12.5px] text-muted flex items-center gap-1.5">${BD.busy ? '<span class="spinner"></span>Đang gợi ý...' : 'Trợ lý đang nghe, có câu hỏi của khách là gợi ý ngay'}</span></div>`;
+}
+const BD_ROLE = { client: 'Khách', team: 'Đội mình' };
+function renderBDSpeakers() {
+  const ul = $('#bd-speakers'); if (!ul) return;
+  const list = [...BD.speakers.values()].filter(x => x.n_segments > 0 || BD.roles[String(x.sid)]);
+  ul.innerHTML = list.length ? list.map(x => {
+    const r = BD.roles[String(x.sid)] || '';
+    return `<li class="flex items-center justify-between gap-2"><span class="truncate text-[13px]">${esc(x.label)}</span>
+      <span class="seg shrink-0" role="group" aria-label="Vai trò của ${esc(x.label)}">${['client', 'team'].map(k =>
+        `<button type="button" data-bd-role="${k}" data-sid="${x.sid}" aria-pressed="${r === k}" style="font-size:12px;padding:3px 8px">${BD_ROLE[k]}</button>`).join('')}</span></li>`;
+  }).join('') : '<li class="text-[12.5px] text-muted">Chưa có ai nói.</li>';
+}
+function renderBDTranscript() {
+  const box = $('#bd-transcript'); if (!box) return;
+  const near = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  const name = x => (BD.speakers.get(x.speaker_key) || {}).label || x.speaker_label || 'Không rõ';
+  box.innerHTML = BD.segs.slice(-60).map(x => {
+    const r = BD.roles[String(x.speaker_key)];
+    return `<div><span class="text-muted num">${fmt.clock(x.t_start || 0)}</span> <b style="${r === 'client' ? 'color:#FFC145' : ''}">${esc(name(x))}${r ? ` (${BD_ROLE[r]})` : ''}</b>: ${esc(x.text)}</div>`;
+  }).join('') || '<p class="text-muted">Lời nói trong cuộc họp hiện ở đây.</p>';
+  if (near) box.scrollTop = box.scrollHeight;
+}
+function renderBDCards() {
+  const box = $('#bd-cards'); if (!box) return;
+  const kind = c => c.kind === 'kb' ? 'Theo tài liệu' : 'Theo các buổi trước';
+  const conf = { cao: 'chip-accent', 'vừa': '', 'thấp': 'chip-warn' };
+  box.innerHTML = BD.cards.map(c => `<article class="bd-card ${c.id === BD.fresh ? 'fresh' : ''}">
+      <div class="flex flex-wrap items-center gap-1.5 text-[12px]"><span class="chip">${kind(c)}</span>${c.auto ? '' : '<span class="chip chip-accent">Hỏi nhanh</span>'}
+        ${c.confidence ? `<span class="chip ${conf[c.confidence] || ''}">độ chắc: ${esc(c.confidence)}</span>` : ''}
+        <span class="text-muted num">${esc(new Date((c.at || 0) * 1000).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }))}</span>
+        <button type="button" class="link text-[12px] ml-auto" data-bd-copy="${esc(c.id)}">Chép câu trả lời</button></div>
+      <div class="font-medium mt-1.5">${c.auto ? 'Khách hỏi: ' : ''}${esc(c.question)}</div>
+      <p class="bd-answer">${esc(c.answer)}</p>
+      ${(c.points || []).length ? `<ul class="text-[13px] mt-1.5 flex flex-col gap-0.5" style="list-style:disc;padding-left:18px">${c.points.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+      ${(c.sources || []).length ? `<div class="flex flex-wrap gap-1.5 mt-2 text-[11.5px]">${c.sources.map(x => x.meeting_id
+        ? `<a class="chip" href="#/m/${x.meeting_id}" target="_blank" rel="noopener" title="Mở cuộc họp đó">${esc(x.title || '')}${x.ref ? ` - ${esc(x.ref)}` : ''}</a>`
+        : `<span class="chip" title="Tài liệu của nhóm">${esc(x.title || '')}${x.ref ? ` - ${esc(x.ref)}` : ''}</span>`).join('')}</div>` : ''}
+    </article>`).join('') || `<div class="text-muted text-[13.5px] p-2">Khi khách hỏi hoặc băn khoăn, gợi ý trả lời hiện ở đây: một thẻ theo tài liệu của nhóm, một thẻ theo các cuộc họp trước.
+      Gõ câu hỏi ở ô bên dưới để hỏi nhanh.</div>`;
+  BD.fresh = null;
+}
+document.addEventListener('click', async e => {
+  const role = e.target.closest('[data-bd-role]');
+  if (role) {
+    const sid = role.dataset.sid, k = role.dataset.bdRole;
+    const next = BD.roles[sid] === k ? '' : k;
+    try { BD.roles = (await PUT(`/api/meetings/${BD.mid}/bd/roles/${sid}`, { role: next })).roles || {}; renderBDSpeakers(); renderBDTranscript(); }
+    catch (err) { toast(err.message, 'err'); }
+    return;
+  }
+  const cp = e.target.closest('[data-bd-copy]');
+  if (cp) {
+    const c = BD.cards.find(x => x.id === cp.dataset.bdCopy); if (!c) return;
+    try { await navigator.clipboard.writeText(c.answer); toast('Đã chép câu trả lời.'); } catch (err) { toast('Trình duyệt không cho chép, hãy bôi đen để chép.', 'info'); }
+  }
+});
+$('#bd-ask').addEventListener('submit', async e => {
+  e.preventDefault();
+  const inp = $('#bd-ask-in'); const q = inp.value.trim(); if (!q || !BD.mid) return;
+  try { await POST(`/api/meetings/${BD.mid}/bd/ask`, { question: q }); inp.value = ''; BD.busy = Math.max(1, BD.busy); renderBDHead(); }
+  catch (err) { toast(err.message, 'err'); }
+});
+
+/* ---------- Chủ nhóm hỏi về các cuộc họp của nhóm (#/g/<id>/chat) ---------- */
+const CHAT = { gid: null, timer: null, msgs: [] };
+const CHAT_SAMPLES = ['Báo cáo các câu phàn nàn của khách', 'Khách đang gặp vấn đề gì?', 'Mình đã hứa hoặc cam kết gì với khách?',
+  'Tổng hợp các yêu cầu khách đưa ra', 'Các rủi ro cần theo dõi'];
+function closeChat() { clearTimeout(CHAT.timer); CHAT.gid = null; }
+async function openGroupChat(gid) {
+  closeChat();
+  CHAT.gid = gid; CHAT.msgs = [];
+  showView('chat');
+  const g = groupOf(gid) || { name: 'Nhóm' };
+  $('#chat-head').innerHTML = `<div class="flex flex-wrap items-start justify-between gap-2">
+    <div class="min-w-0"><div class="flex items-center gap-2"><a class="icon-btn shrink-0" href="#/g/${gid}" aria-label="Về nhóm" title="Về nhóm"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></a>
+      <h2 class="text-lg font-semibold truncate">Hỏi về các cuộc họp: ${esc(g.name)}</h2></div>
+      <p class="text-[12.5px] text-muted">Trợ lý đọc song song các cuộc họp liên quan (tối đa 8) cùng tài liệu của nhóm rồi tổng hợp, ghi nguồn từng ý. Chỉ chủ nhóm dùng được.</p></div>
+    <button type="button" class="btn btn-ghost btn-sm" data-chat="clear">Xóa lịch sử</button></div>`;
+  $('#chat-list').innerHTML = '<div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang tải...</div>';
+  await loadChat();
+}
+async function loadChat() {
+  const gid = CHAT.gid; if (!gid) return;
+  clearTimeout(CHAT.timer);
+  try { CHAT.msgs = (await GET(`/api/groups/${gid}/chat`)).messages || []; }
+  catch (e) { if (CHAT.gid === gid) $('#chat-list').innerHTML = `<div class="notice notice-info">${esc(e.message)}</div>`; return; }
+  if (CHAT.gid !== gid) return;
+  renderChat();
+  if (CHAT.msgs.some(x => x.status === 'pending')) CHAT.timer = setTimeout(loadChat, 1500);
+}
+function renderChat() {
+  const box = $('#chat-list'); if (!box) return;
+  const pending = CHAT.msgs.some(x => x.status === 'pending');
+  box.innerHTML = CHAT.msgs.map(x => {
+    if (x.role === 'user') return `<div class="chat-q">${esc(x.text)}</div>`;
+    if (x.status === 'pending') return `<div class="panel p-4 flex items-center gap-2 text-muted"><span class="spinner"></span>${esc(x.progress || 'Đang trả lời...')}</div>`;
+    if (x.status === 'error') return `<div class="panel p-4" style="color:rgb(var(--danger))">${esc(x.text)}</div>`;
+    const src = (x.sources || []).map(s0 => s0.meeting_id
+      ? `<a class="chip" href="#/m/${s0.meeting_id}">[${esc(s0.code)}] ${esc(s0.title)}${s0.date ? `, ${esc(s0.date)}` : ''}</a>`
+      : `<span class="chip">[${esc(s0.code)}] ${esc(s0.title)}${s0.ref ? ` - ${esc(s0.ref)}` : ''}</span>`).join('');
+    return `<article class="panel p-4"><div class="md">${renderMd(x.text)}</div>
+      ${src ? `<div class="flex flex-wrap gap-1.5 mt-3 text-[11.5px]"><span class="text-muted mr-1">Nguồn:</span>${src}</div>` : ''}
+      <div class="text-[11.5px] text-muted mt-2">${x.read ? `Đã đọc ${x.read} cuộc họp. ` : ''}<button type="button" class="link" data-chat-copy="${esc(x.id)}">Chép</button></div></article>`;
+  }).join('') || `<div class="text-muted text-[13.5px]">Hỏi bất cứ điều gì về các cuộc họp của nhóm, ví dụ:
+      <div class="flex flex-wrap gap-1.5 mt-2">${CHAT_SAMPLES.map(q => `<button type="button" class="chip" data-chat-sample="${esc(q)}">${esc(q)}</button>`).join('')}</div></div>`;
+  $('#chat-form button[type=submit]').disabled = pending;
+  box.scrollTop = box.scrollHeight;
+}
+async function sendChat(q) {
+  q = (q || '').trim(); if (!q || !CHAT.gid) return;
+  try { CHAT.msgs = (await POST(`/api/groups/${CHAT.gid}/chat`, { question: q })).messages || []; $('#chat-in').value = ''; renderChat(); CHAT.timer = setTimeout(loadChat, 1200); }
+  catch (e) { toast(e.message, 'err'); }
+}
+$('#chat-form').addEventListener('submit', e => { e.preventDefault(); sendChat($('#chat-in').value); });
+$('#chat-in').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat($('#chat-in').value); } });
+$('#view-chat').addEventListener('click', async e => {
+  const sm = e.target.closest('[data-chat-sample]');
+  if (sm) return sendChat(sm.dataset.chatSample);
+  const cp = e.target.closest('[data-chat-copy]');
+  if (cp) {
+    const x = CHAT.msgs.find(v => v.id === cp.dataset.chatCopy);
+    try { await navigator.clipboard.writeText((x || {}).text || ''); toast('Đã chép câu trả lời.'); } catch (err) { toast('Trình duyệt không cho chép.', 'info'); }
+    return;
+  }
+  if (e.target.closest('[data-chat="clear"]')) {
+    const ok = await confirmDialog({ title: 'Xóa lịch sử hỏi đáp?', ok: 'Xóa', danger: true, body: 'Các câu hỏi và câu trả lời trong khung này bị xóa. Cuộc họp và biên bản không bị ảnh hưởng.' });
+    if (!ok) return;
+    try { await DEL(`/api/groups/${CHAT.gid}/chat`); CHAT.msgs = []; renderChat(); } catch (err) { toast(err.message, 'err'); }
+  }
+});
+
+/* =====================================================================
    NHÓM CUỘC HỌP
    ===================================================================== */
 function openCreateGroup() {
@@ -1320,6 +1604,13 @@ async function openGroupSettings(gid) {
         <button class="btn btn-ghost btn-sm shrink-0" style="height:38px" type="submit">Thêm</button></form>
         <p class="text-[12px] text-muted mt-1">Thành viên xem được mọi cuộc họp và biên bản của nhóm, tạo và tham gia cuộc họp trong nhóm. Chỉ chủ nhóm quản lý thành viên.</p>` : ''}`
       : '<p class="text-[13px] text-muted">Bản chạy trên máy không chia sẻ nhóm cho người khác được.</p>'}
+    ${owner ? `<div class="mt-5 pt-4 border-t divider"><h4 class="font-semibold mb-2">Chế độ BD</h4>
+        <label class="flex items-start gap-2 cursor-pointer text-[13px]"><input type="checkbox" id="gs-bd" ${g.bd_mode ? 'checked' : ''} style="margin-top:3px">
+          <span><span class="font-medium">Nhóm BD: gợi ý cho đội kinh doanh khi họp với khách</span>
+          <span class="block text-[12px] text-muted">Mỗi cuộc họp trong nhóm có Bảng BD riêng, mở trên máy của người trong nhóm (không lên màn hình trình chiếu, trợ lý không đọc thành tiếng):
+            gợi ý trả lời từ tài liệu của nhóm và các cuộc họp trước, hỏi nhanh. Chủ nhóm hỏi và lấy báo cáo trên toàn bộ cuộc họp của nhóm.</span></span></label></div>`
+      : (g.bd_mode ? '<p class="text-[12.5px] text-muted mt-4">Nhóm BD: mỗi cuộc họp trong nhóm có Bảng BD riêng (nút Bảng BD trong phòng họp).</p>' : '')}
+    <div id="gs-kb"></div>
     ${owner ? `<div class="mt-5 pt-4 border-t divider"><h4 class="font-semibold mb-2">Ghi âm trên Google Drive</h4>
         <label class="text-[13px] flex items-center gap-2">Tự xóa sau <input id="gs-days" class="input" type="number" min="1" max="3650" style="width:90px" value="${g.recording_drive_days || ''}" placeholder="30"> ngày</label>
         <p class="text-[12px] text-muted mt-1">Để trống là theo mặc định của hệ thống. Biên bản không tự xóa.</p></div>` : ''}
@@ -1356,6 +1647,12 @@ async function openGroupSettings(gid) {
       });
       const days = $('#gs-days', m);
       if (days) days.addEventListener('change', e => save({ recording_drive_days: parseInt(e.target.value, 10) || 0 }, 'Đã lưu số ngày giữ ghi âm.'));
+      const bdBox = $('#gs-bd', m);
+      if (bdBox) bdBox.addEventListener('change', async e => {
+        if (!(await save({ bd_mode: e.target.checked }, e.target.checked ? 'Đã bật chế độ BD cho nhóm.' : 'Đã tắt chế độ BD.'))) e.target.checked = !e.target.checked;
+        renderGroupKb($('#gs-kb', m), g);
+      });
+      renderGroupKb($('#gs-kb', m), g);
       renderGroupDrive($('#gs-drive', m), g);
       renderGroupLocal($('#gs-local', m), g);
       m.addEventListener('click', async e => {
