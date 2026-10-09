@@ -2106,6 +2106,8 @@ class MeetingSession:
             status = "done"
             await self.emit({"type": "artifact_created", "artifact": art})
             await self.stage_action("show", artifact_id=art["id"])
+            from meeting import drive_sync
+            drive_sync.schedule(self.id)                 # bản web: lưu biên bản + ghi âm lên Drive của nhóm (chạy nền)
         except Exception as e:
             log.warning("meeting.live: lập biên bản lỗi: %s", e)
             await self.emit({"type": "error", "text": f"Không lập được biên bản tự động: {e}"})

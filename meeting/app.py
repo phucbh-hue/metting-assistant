@@ -33,8 +33,8 @@ from fastapi.responses import FileResponse, RedirectResponse, Response, Streamin
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
-from meeting import (artifacts, auth, cli_llm, db, decks, envfile, google_oauth, groups, live, llm, mcp,  # noqa: E402
-                     recording, tts, voice, websearch)
+from meeting import (artifacts, auth, cli_llm, db, decks, drive_sync, envfile, google_oauth, groups, live,  # noqa: E402
+                     llm, mcp, recording, tts, voice, websearch)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("meeting.app")
@@ -51,6 +51,16 @@ DEFAULT_VOCAB = ["UrBox", "Kubernetes", "PostgreSQL", "Redis", "webhook", "idemp
                  "merchant", "sprint", "DevOps", "latency", "schema", "microservices"]
 
 
+async def _drive_purge_loop():
+    """Ghi âm trên Google Drive tự xóa theo hạn của nhóm (Nghị định 13): kiểm tra mỗi 12 giờ."""
+    while True:
+        try:
+            await drive_sync.purge_recordings()
+        except Exception as e:
+            log.warning("meeting.app: dọn ghi âm trên Drive lỗi: %s", e)
+        await asyncio.sleep(12 * 3600)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     await asyncio.to_thread(db.init)
@@ -59,8 +69,11 @@ async def lifespan(_app: FastAPI):
     await asyncio.to_thread(recording.purge_expired)     # bản ghi âm quá hạn lưu (RECORDING_RETENTION_DAYS)
     if tts.model_present():
         asyncio.get_running_loop().run_in_executor(None, tts.preload)   # nạp giọng đọc ở nền
+    purge = asyncio.create_task(_drive_purge_loop()) if drive_sync.enabled() else None
     log.info("meeting.app: Server khởi động hoàn tất")
     yield
+    if purge is not None:
+        purge.cancel()
     for s in list(live.SESSIONS.values()):
         try:
             for st in list(s.streams.values()):
@@ -977,6 +990,8 @@ async def delete_meeting_record(mid: int, request: Request):
         await s.close()
     await asyncio.to_thread(recording.delete, mid)
     await asyncio.to_thread(decks.delete_uploads, mid)
+    if drive_sync.enabled():
+        await drive_sync.delete_audio(mid)      # giọng nói: xóa cả bản trên Drive; biên bản trên Drive vẫn giữ
     _MEETING_KEYS.pop(mid, None)
     return {"success": await asyncio.to_thread(db.delete_meeting, mid)}
 
@@ -1073,10 +1088,12 @@ class MeetingGroupReq(BaseModel):
 
 def _group_public(g: Dict[str, Any], email: Optional[str]) -> Dict[str, Any]:
     drive = g.get("drive") or {}
+    info = {k: drive.get(k) for k in ("folder_url",) if drive.get(k)}
+    if drive_sync.enabled() and g.get("owner"):
+        info["keeper_connected"] = google_oauth.status(g["owner"])["connected"]
     return {"id": g["id"], "name": g["name"], "owner": g.get("owner"), "members": g.get("members") or [],
             "role": groups.role_of(g, email), "meeting_count": g.get("meeting_count"),
-            "recording_drive_days": g.get("recording_drive_days"), "created_at": g.get("created_at"),
-            "drive": {k: drive.get(k) for k in ("folder_url", "status", "error") if drive.get(k)}}
+            "recording_drive_days": g.get("recording_drive_days"), "created_at": g.get("created_at"), "drive": info}
 
 
 def _group_for(gid: int, request: Request, need_owner: bool = False) -> Dict[str, Any]:
@@ -1112,13 +1129,16 @@ def get_group(gid: int, request: Request):
 
 
 @app.patch("/api/groups/{gid}")
-def patch_group(gid: int, req: GroupPatch, request: Request):
-    g = _group_for(gid, request, need_owner=True)
+async def patch_group(gid: int, req: GroupPatch, request: Request):
+    g = await asyncio.to_thread(_group_for, gid, request, True)
     try:
-        g = groups.update_group(g["id"], name=req.name, members=req.members, recording_drive_days=req.recording_drive_days)
+        g = await asyncio.to_thread(groups.update_group, g["id"], req.name, req.members, req.recording_drive_days)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return _group_public({**g, "meeting_count": len(groups.group_meeting_ids(g["id"]))}, (_user(request) or {}).get("email"))
+    if req.members is not None:
+        drive_sync.schedule_sharing(g["id"])     # chia sẻ / gỡ chia sẻ thư mục nhóm trên Drive
+    n = len(await asyncio.to_thread(groups.group_meeting_ids, g["id"]))
+    return _group_public({**g, "meeting_count": n}, (_user(request) or {}).get("email"))
 
 
 @app.delete("/api/groups/{gid}")
@@ -1127,6 +1147,18 @@ def delete_group(gid: int, request: Request):
     for mid in groups.group_meeting_ids(g["id"]):
         _MEETING_KEYS.pop(mid, None)
     return {"success": groups.delete_group(g["id"])}
+
+
+@app.post("/api/meetings/{mid}/drive-save")
+async def save_meeting_to_drive(mid: int):
+    """Lưu (lại) biên bản và ghi âm của cuộc họp lên Google Drive của nhóm, chạy nền; kết quả qua sự kiện drive_status."""
+    if not drive_sync.enabled():
+        raise HTTPException(status_code=400, detail="Lưu lên Google Drive chỉ có ở bản web và khi server đã cấu hình Google")
+    m = await asyncio.to_thread(db.get_meeting, mid)
+    if not m:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc họp")
+    drive_sync.schedule(mid)
+    return {"scheduled": True, "drive": m.get("drive") or {}}
 
 
 @app.put("/api/meetings/{mid}/group")
@@ -1176,7 +1208,10 @@ async def delete_meeting_recording(mid: int):
     s = live.SESSIONS.get(mid)
     if s is not None and s.recording_on():
         await s.set_recording(False)
-    return {"success": await asyncio.to_thread(recording.delete, mid)}
+    ok = await asyncio.to_thread(recording.delete, mid)
+    if drive_sync.enabled():
+        ok = await drive_sync.delete_audio(mid) or ok      # bản trên Google Drive của nhóm cũng xóa
+    return {"success": ok}
 
 
 @app.post("/api/meetings/{mid}/archive")
