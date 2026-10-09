@@ -59,6 +59,19 @@ _DROP_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", 
 
 CODEX_PREAMBLE = ("Bạn đang được dùng như một mô hình ngôn ngữ: chỉ trả lời bằng văn bản đúng theo hướng dẫn bên dưới. "
                   "Không chạy lệnh, không đọc hay sửa tệp, không hỏi lại.")
+# Codex là agent: ở đây chỉ cần trả lời văn bản nên tắt mọi công cụ (chạy lệnh, xem ảnh, agent con, plugin, trình duyệt...).
+# Sandbox read-only trên Linux vẫn cho lệnh ĐỌC mọi tệp: đã thử 09/10/2026 bằng model giả, còn exec_command thì nội dung
+# bị cài lệnh (trang web, tài liệu) đọc được .env và đăng nhập của người khác trên server. Ghi tệp (apply_patch) thì
+# sandbox read-only đã chặn. "-c features.x=false" bỏ qua tên lạ nên dùng được với mọi phiên bản Codex.
+CODEX_NO_TOOLS = ("shell_tool", "unified_exec", "view_image", "goals", "multi_agent", "sleep_tool", "apps", "plugins",
+                  "remote_plugin", "browser_use", "browser_use_external", "computer_use", "image_generation",
+                  "in_app_browser", "skill_search", "skill_mcp_dependency_install", "tool_suggest", "hooks")
+# Bản web: tiến trình CLI của một người chỉ nhận các biến cần để chạy, không nhận bí mật của server (AUTH_SECRET,
+# MONGODB_URL, khóa Google / Soniox / Recall...).
+# So khớp không phân biệt hoa thường (http_proxy, SystemRoot).
+_KEEP_ENV = ("PATH", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "COMSPEC",
+             "PATHEXT", "WINDIR", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR",
+             "NODE_EXTRA_CA_CERTS", "DISABLE_AUTOUPDATER")
 
 
 def model_of(provider: str) -> str:
@@ -320,7 +333,10 @@ def list_models(provider: str, home: Optional[Path] = None):
 
 # ------------------------------------------------------------ gọi ---
 def _env(extra: Optional[Dict[str, str]] = None, home: Optional[Path] = None) -> Dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if k not in _DROP_ENV}
+    if home:
+        env = {k: v for k, v in os.environ.items() if k.upper() in _KEEP_ENV}
+    else:
+        env = {k: v for k, v in os.environ.items() if k not in _DROP_ENV}
     env.update({"NO_COLOR": "1", "CI": "1"})
     if home:                                       # thư mục đăng nhập riêng của một người (bản web)
         h = Path(home)
@@ -428,6 +444,10 @@ def _codex(base: List[str], wd: Path, system: str, prompt: str, model: str, time
     outfile = wd / "last-message.txt"
     cmd = base + ["exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--ignore-rules",
                   "-s", "read-only", "--color", "never", "-C", str(wd), "-o", str(outfile), "--json"]
+    for feature in CODEX_NO_TOOLS:
+        cmd += ["-c", f"features.{feature}=false"]
+    if home:
+        cmd += ["-c", 'cli_auth_credentials_store="file"']
     if model:
         cmd += ["-m", model]
     effort = os.getenv("CODEX_EFFORT", "medium").strip()
@@ -529,8 +549,9 @@ def login_command(provider: str, home: Optional[Path] = None) -> Tuple[List[str]
         raise RuntimeError(f"Chưa cài {spec['tool']}. Chạy: pnpm mst-urbox install")
     if provider == "claude-cli":
         return base + ["auth", "login", "--claudeai"], _env(home=home), ""
-    if provider == "codex-cli":
-        return base + ["login"] + (["--device-auth"] if home else []), _env(home=home), ""
+    if provider == "codex-cli":                    # server: lưu đăng nhập vào tệp trong thư mục riêng, không vào keyring
+        extra = ["--device-auth", "-c", 'cli_auth_credentials_store="file"'] if home else []
+        return base + ["login"] + extra, _env(home=home), ""
     # Gemini CLI không có lệnh đăng nhập riêng: chạy một câu ngắn ở chế độ đăng nhập Google, đồng ý mở trình duyệt ("y")
     extra = {**GEMINI_ENV, **({"NO_BROWSER": "true"} if home else {})}
     return base + ["-p", "Trả lời đúng một từ: OK", "-o", "json", "--skip-trust"], _env(extra, home), "y\n"
@@ -561,6 +582,7 @@ def start_login(provider: str, home: Optional[Path] = None) -> Dict[str, Any]:
         elif provider == "claude-cli":
             import pty
             master, slave = pty.openpty()
+            _wide_tty(slave)
             job["proc"] = subprocess.Popen(cmd, stdin=slave, stdout=slave, stderr=slave, cwd=work, env=env, close_fds=True)
             os.close(slave)
             job["master"] = master
@@ -579,6 +601,17 @@ def start_login(provider: str, home: Optional[Path] = None) -> Dict[str, Any]:
         threading.Thread(target=_read_output, args=(job,), name=f"login-{provider}", daemon=True).start()
     threading.Thread(target=_watch_login, args=(job,), name=f"login-watch-{provider}", daemon=True).start()
     return login_status(provider, home)
+
+
+def _wide_tty(fd: int) -> None:
+    """Terminal giả lập rộng 1000 cột: CLI không ngắt dòng giữa đường dẫn đăng nhập dài (mặc định 80 cột)."""
+    try:
+        import fcntl
+        import struct
+        import termios
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 1000, 0, 0))
+    except Exception:                              # không đặt được thì vẫn chạy, chỉ có thể bị ngắt dòng
+        pass
 
 
 def _add_output(job: Dict[str, Any], text: str) -> None:

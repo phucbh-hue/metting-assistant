@@ -4526,7 +4526,10 @@ function openSettings() {
       <button type="button" class="btn btn-ghost" data-act="logout">Đăng xuất</button></div>` : '';
   const gdrive = AUTH.required ? `<div class="mb-5 pb-4 border-b divider"><h4 class="font-semibold mb-2">Google Drive</h4>
       <div id="gd-box" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang kiểm tra...</div></div></div>` : '';
-  openModal(`${acct}${gdrive}
+  const myllm = AUTH.required ? `<div class="mb-5 pb-4 border-b divider">
+      <div class="flex items-center justify-between gap-2 mb-1"><h4 class="font-semibold">Gói AI của tôi</h4><span class="text-[12px] text-muted">Claude.ai hoặc ChatGPT của riêng bạn</span></div>
+      <div id="myllm-box" data-llm-scope="me" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang kiểm tra...</div></div></div>` : '';
+  openModal(`${acct}${gdrive}${myllm}
     <h3 class="text-lg font-semibold mb-1">Cài đặt trợ lý</h3>
     <p class="text-muted text-[13px] mb-4">Đặt tên để gọi trợ lý trong cuộc họp thay cho "Jarvis".</p>
     <form id="as-form" class="flex flex-col gap-4">
@@ -4562,8 +4565,8 @@ function openSettings() {
       <div id="svc-box" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang tải...</div></div>
     </div>
     <div class="mt-5 pt-4 border-t divider">
-      <div class="flex items-center justify-between gap-2 mb-2"><h4 class="font-semibold">Nguồn AI</h4><span class="text-[12px] text-muted">API key hoặc gói đăng ký</span></div>
-      <div id="llm-box" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang kiểm tra...</div></div>
+      <div class="flex items-center justify-between gap-2 mb-2"><h4 class="font-semibold">Nguồn AI${AUTH.required ? ' dùng chung' : ''}</h4><span class="text-[12px] text-muted">${AUTH.required ? 'API key của công ty, quản trị viên chọn' : 'API key hoặc gói đăng ký'}</span></div>
+      <div id="llm-box" data-llm-scope="server" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang kiểm tra...</div></div>
     </div>
     <div class="mt-5 pt-4 border-t divider">
       <h4 class="font-semibold mb-1">Lưu biên bản về máy</h4>
@@ -4589,6 +4592,7 @@ function openSettings() {
       renderDriveSettings($('#gd-box', m));
       renderRecapSettings($('#rs-box', m));
       renderLlm($('#llm-box', m));
+      renderMyLlm($('#myllm-box', m));
       renderServices($('#svc-box', m));
       renderLibrarySettings($('#lib-box', m));
       renderTts($('#tts-box', m));
@@ -4684,9 +4688,9 @@ async function renderLlm(box) {
             ${p.kind === 'api' ? '' : `<button type="button" class="btn ${p.logged_in ? 'btn-ghost' : 'btn-primary'} btn-sm" data-act="llm-connect" data-pid="${esc(p.id)}" ${p.installed ? '' : 'disabled'} title="Đăng nhập tài khoản ${esc(p.label)} trên trình duyệt">${p.logged_in ? 'Kết nối lại' : 'Kết nối'}</button>`}
             <button type="button" class="btn btn-ghost btn-sm" data-act="llm-test" data-pid="${esc(p.id)}" ${p.installed && p.logged_in ? '' : 'disabled'}>Kiểm tra</button></div>
         </div>`; }).join('')}</div>
-      <label class="flex items-center gap-2 text-[13px] mt-1"><input type="checkbox" id="llm-fallback" ${r.api_fallback ? 'checked' : ''}> Gói đăng ký lỗi hoặc hết hạn mức thì gọi tiếp bằng API key (có tính phí)</label>
+      <label class="flex items-center gap-2 text-[13px] mt-1"><input type="checkbox" id="llm-fallback" ${r.api_fallback ? 'checked' : ''}> ${AUTH.required ? 'Gói AI riêng của một người lỗi hoặc hết hạn mức thì gọi tiếp bằng API key của công ty (có tính phí)' : 'Gói đăng ký lỗi hoặc hết hạn mức thì gọi tiếp bằng API key (có tính phí)'}</label>
       <div class="flex items-center justify-between gap-2"><p class="text-[12px] text-muted" id="llm-msg">${r.ready ? '' : 'Nguồn đang chọn chưa sẵn sàng.'}</p><button class="btn btn-primary btn-sm" type="submit">Lưu nguồn AI</button></div>
-      <p class="text-[12px] text-muted">Gói đăng ký Claude.ai, ChatGPT, Gemini dành cho cá nhân người đăng ký và có hạn mức theo giờ / ngày. Dùng chung cho nhiều người hoặc chạy liên tục cả ngày nên dùng API key theo điều khoản của nhà cung cấp. Gói cá nhân có thể dùng nội dung để cải thiện mô hình nếu chưa tắt trong cài đặt quyền riêng tư; nội dung cuộc họp nội bộ nên đi qua gói doanh nghiệp (Team, Business, Enterprise) hoặc API key. Đây là thông tin tham khảo, vui lòng xác nhận với bộ phận IT / Pháp chế trước khi dùng chính thức.</p>
+      ${AUTH.required ? '<p class="text-[12px] text-muted">Gói Claude.ai / ChatGPT là của từng người: mỗi người tự kết nối ở mục Gói AI của tôi phía trên.</p>' : `<p class="text-[12px] text-muted">Gói đăng ký Claude.ai, ChatGPT, Gemini dành cho cá nhân người đăng ký và có hạn mức theo giờ / ngày. Dùng chung cho nhiều người hoặc chạy liên tục cả ngày nên dùng API key theo điều khoản của nhà cung cấp. Gói cá nhân có thể dùng nội dung để cải thiện mô hình nếu chưa tắt trong cài đặt quyền riêng tư; nội dung cuộc họp nội bộ nên đi qua gói doanh nghiệp (Team, Business, Enterprise) hoặc API key. Đây là thông tin tham khảo, vui lòng xác nhận với bộ phận IT / Pháp chế trước khi dùng chính thức.</p>`}
     </form>`;
     $$('input[name="llm-p"]', box).forEach(inp => inp.addEventListener('change', () => $$('[data-llm-row]', box).forEach(row => row.classList.toggle('on', row.dataset.llmRow === inp.value))));
     $$('[data-llm-key]', box).forEach(inp => inp.addEventListener('keydown', e => {      // Enter ở ô key: lưu key, không lưu cả form
@@ -4774,10 +4778,28 @@ async function saveProviderKey(pid, el) {
 const LOGIN_POLL = {};
 function renderLogin(pid, st, box) {
   const el = $(`[data-llm-login="${pid}"]`, box); if (!el) return;
+  const sig = JSON.stringify(st ? [st.state, st.url, st.code, st.can_paste, st.error, st.plan] : null);
+  if (el.dataset.sig === sig) return;                  // hỏi lại mỗi 1,5 giây: không vẽ lại để giữ mã đang dán dở
+  el.dataset.sig = sig;
   const name = PROVIDER_NAMES[pid] || pid;
   if (!st || st.state === 'idle') { el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
-  if (st.state === 'running') {
+  if (st.state === 'running' && box.dataset.llmScope === 'me') {
+    /* bản web: CLI chạy trên server, không tự mở trình duyệt được. Người dùng mở đường dẫn trên máy mình;
+       Claude.ai đưa mã để dán lại, ChatGPT nhận mã thiết bị hiện ở đây. */
+    const claude = pid === 'claude-cli', site = claude ? 'Claude.ai' : pid === 'codex-cli' ? 'ChatGPT' : name;
+    const steps = claude
+      ? ['Đăng nhập tài khoản Claude của bạn rồi bấm Authorize (Cho phép).', 'Trang hiện một mã: chép mã, dán vào ô dưới rồi bấm Gửi mã.']
+      : ['Đăng nhập tài khoản ChatGPT của bạn, nhập mã ở trên rồi xác nhận.', 'Xong thì quay lại đây, trang này tự cập nhật.'];
+    el.innerHTML = (st.url ? `<ol class="flex flex-col gap-1 pl-4" style="list-style:decimal">
+        <li><a class="link" href="${esc(st.url)}" target="_blank" rel="noopener noreferrer">Mở trang đăng nhập ${esc(site)}</a>${!claude && st.code ? `, mã: <b class="num" style="letter-spacing:.08em">${esc(st.code)}</b>` : ''}</li>
+        ${steps.map(x => `<li>${esc(x)}</li>`).join('')}</ol>
+      ${claude && st.can_paste ? `<div class="flex gap-2 mt-1.5"><input class="input" data-login-code="${pid}" style="height:30px;font-size:12.5px" placeholder="Dán mã từ trang đăng nhập" autocomplete="off" aria-label="Mã đăng nhập ${esc(name)}">
+        <button type="button" class="btn btn-ghost btn-sm shrink-0" data-act="llm-login-code" data-pid="${pid}">Gửi mã</button></div>` : ''}`
+      : '<p>Đang lấy đường dẫn đăng nhập...</p>')
+      + `<div class="flex items-center gap-3 mt-1.5"><span class="flex items-center gap-1.5 text-muted text-[12px]"><span class="spinner"></span>Đang chờ đăng nhập (tối đa 6 phút)</span>
+        <button type="button" class="link text-[12px]" data-act="llm-login-cancel" data-pid="${pid}">Hủy</button></div>`;
+  } else if (st.state === 'running') {
     el.innerHTML = `<div class="flex items-center gap-2"><span class="spinner"></span><span>${st.window
         ? 'Đã mở cửa sổ đăng nhập và trình duyệt. Đăng nhập tài khoản trên trình duyệt, xong quay lại đây.'
         : 'Đang chờ đăng nhập trên trình duyệt...'}</span></div>
@@ -4800,27 +4822,82 @@ function pollLogin(pid, box) {
     try { st = await GET(`/api/llm/connect/${pid}`); } catch (e) { return pollLogin(pid, box); }
     renderLogin(pid, st, box);
     if (st.state === 'running') return pollLogin(pid, box);
-    if (st.state === 'done') await useProvider(pid, box, `Đã kết nối ${PROVIDER_NAMES[pid] || pid} và chọn làm nguồn AI.`);
+    if (st.state === 'done') {
+      if (box.dataset.llmScope === 'me') await chooseMyLlm(pid, box, `Đã kết nối ${PROVIDER_NAMES[pid] || pid}. Cuộc họp do bạn tạo sẽ dùng gói này.`);
+      else await useProvider(pid, box, `Đã kết nối ${PROVIDER_NAMES[pid] || pid} và chọn làm nguồn AI.`);
+    }
   }, 1500);
 }
 async function resumeLogin(pid, box) {                    // mở lại Cài đặt khi đang đăng nhập dở: hiện tiếp tiến trình
   try { const st = await GET(`/api/llm/connect/${pid}`); if (st.state === 'running') { renderLogin(pid, st, box); pollLogin(pid, box); } } catch (e) { /* bỏ qua */ }
 }
 async function connectProvider(pid, btn) {
-  const box = btn.closest('#llm-box');
+  const box = btn.closest('[data-llm-scope]');
   btn.disabled = true;
   try { const st = await POST(`/api/llm/connect/${pid}`); renderLogin(pid, st, box); pollLogin(pid, box); }
   catch (e) { toast(e.message, 'err', 7000); }
   finally { btn.disabled = false; }
 }
 async function sendLoginCode(pid, btn) {
-  const box = btn.closest('#llm-box'); const inp = $(`[data-login-code="${pid}"]`, box);
+  const box = btn.closest('[data-llm-scope]'); const inp = $(`[data-login-code="${pid}"]`, box);
   const code = (inp && inp.value || '').trim(); if (!code) return;
   try { renderLogin(pid, await POST(`/api/llm/connect/${pid}/code`, { code }), box); } catch (e) { toast(e.message, 'err'); }
 }
 async function cancelLogin(pid, btn) {
-  const box = btn.closest('#llm-box');
+  const box = btn.closest('[data-llm-scope]');
   try { renderLogin(pid, await api('DELETE', `/api/llm/connect/${pid}`), box); } catch (e) { toast(e.message, 'err'); }
+}
+/* ---------- gói AI của tôi (bản web): mỗi người kết nối gói Claude.ai / ChatGPT CỦA MÌNH ---------- */
+async function renderMyLlm(box) {
+  if (!box) return;
+  let r;
+  try { r = await GET('/api/me/llm'); } catch (e) { box.innerHTML = `<p style="color:rgb(var(--danger))">${esc(e.message)}</p>`; return; }
+  if (!document.contains(box)) return;
+  const items = r.providers || [], sel = r.selected || '';
+  const chosen = items.find(p => p.id === sel);
+  const company = `API key của công ty${r.company_ready ? ` (${PROVIDER_NAMES[r.company_provider] || r.company_provider})` : ' (chưa cấu hình)'}`;
+  const chip = p => !p.installed ? ['Server chưa cài', ''] : p.logged_in ? [`Đã kết nối${p.plan ? ` (${p.plan})` : ''}`, 'chip-accent'] : ['Chưa kết nối', 'chip-warn'];
+  const detail = p => !p.installed ? `Server chưa cài ${p.tool}, báo quản trị viên.`
+    : p.logged_in ? `Dùng hạn mức gói của bạn. Cần ${p.plan_hint}.` : `Cần ${p.plan_hint}. Bấm Kết nối rồi làm theo hướng dẫn.`;
+  box.innerHTML = `
+    <p class="text-[12px] text-muted mb-2">AI trong các cuộc họp do bạn tạo (biên bản, trả lời câu hỏi, slide, sơ đồ...) chạy bằng nguồn chọn ở đây. Gói đăng ký dùng hạn mức của gói, công ty không trả phí API.</p>
+    <div role="radiogroup" aria-label="Gói AI của tôi" class="flex flex-col gap-1.5">
+      <div class="llm-row ${sel ? '' : 'on'}">
+        <input type="radio" name="my-llm" id="my-llm-none" value="" ${sel ? '' : 'checked'} style="margin-top:3px">
+        <div class="min-w-0"><label for="my-llm-none" class="block font-medium cursor-pointer">${esc(company)}</label>
+          <p class="text-[12px] text-muted">Mặc định, công ty trả phí theo token.</p></div><div></div>
+      </div>
+      ${items.map(p => { const [txt, cls] = chip(p); const id = `my-llm-${p.id}`;
+        return `<div class="llm-row ${sel === p.id ? 'on' : ''}">
+          <input type="radio" name="my-llm" id="${id}" value="${esc(p.id)}" ${sel === p.id ? 'checked' : ''} ${p.logged_in ? '' : 'disabled'} style="margin-top:3px">
+          <div class="min-w-0"><label for="${id}" class="block font-medium cursor-pointer">${esc(PROVIDER_NAMES[p.id] || p.label)}</label>
+            <p class="text-[12px] text-muted">${esc(detail(p))}</p>
+            <div class="login-box hidden mt-2" data-llm-login="${esc(p.id)}" aria-live="polite"></div></div>
+          <div class="flex flex-col items-end gap-1.5"><span class="chip ${cls}">${esc(txt)}</span>
+            <button type="button" class="btn ${p.logged_in ? 'btn-ghost' : 'btn-primary'} btn-sm" data-act="llm-connect" data-pid="${esc(p.id)}" ${p.installed ? '' : 'disabled'}>${p.logged_in ? 'Kết nối lại' : 'Kết nối'}</button>
+            ${p.logged_in ? `<button type="button" class="btn btn-ghost btn-sm" data-act="llm-test" data-pid="${esc(p.id)}">Kiểm tra</button>
+            <button type="button" class="link text-[12px]" data-act="my-llm-logout" data-pid="${esc(p.id)}">Ngắt kết nối</button>` : ''}</div>
+        </div>`; }).join('')}
+    </div>
+    ${chosen && !chosen.logged_in ? '<p class="text-[12px] mt-1" style="color:#FFC145">Gói đang chọn chưa đăng nhập: cuộc họp của bạn tạm dùng API key của công ty.</p>' : ''}
+    <p class="text-[12px] text-muted mt-2">${r.fallback ? 'Gói lỗi hoặc hết hạn mức thì trợ lý gọi tiếp bằng API key của công ty.' : 'Gói lỗi hoặc hết hạn mức thì trợ lý báo lỗi, không tự chuyển sang API key của công ty.'}</p>
+    <p class="text-[12px] text-muted mt-1">Chỉ kết nối gói của chính bạn, không dùng chung tài khoản với người khác (điều khoản của Anthropic và OpenAI). Đăng nhập lưu trong thư mục riêng của bạn trên server, chỉ dùng cho cuộc họp do bạn tạo; bấm Ngắt kết nối để xóa. Gói cá nhân có thể dùng nội dung để cải thiện mô hình nếu chưa tắt trong cài đặt quyền riêng tư của gói. Đây là thông tin tham khảo, vui lòng xác nhận với IT / Pháp chế trước khi dùng cho nội dung nội bộ.</p>`;
+  $$('input[name="my-llm"]', box).forEach(inp => inp.addEventListener('change', () => chooseMyLlm(inp.value || null, box)));
+  items.forEach(it => { if (it.login_job && it.login_job.state === 'running') { renderLogin(it.id, it.login_job, box); pollLogin(it.id, box); } });
+}
+async function chooseMyLlm(pid, box, msg) {
+  try {
+    await PUT('/api/me/llm', { provider: pid });
+    toast(msg || (pid ? `Cuộc họp do bạn tạo sẽ dùng gói ${PROVIDER_NAMES[pid] || pid}.` : 'Cuộc họp do bạn tạo sẽ dùng API key của công ty.'), 'ok', 5000);
+  } catch (e) { toast(e.message, 'err'); }
+  renderMyLlm(box);
+}
+async function logoutMyLlm(pid, btn) {
+  const box = btn.closest('[data-llm-scope]');
+  btn.disabled = true;
+  try { await POST(`/api/me/llm/${pid}/logout`); toast(`Đã ngắt kết nối ${PROVIDER_NAMES[pid] || pid} và xóa đăng nhập trên server.`); }
+  catch (e) { toast(e.message, 'err'); }
+  renderMyLlm(box);
 }
 /* ---------- khóa dịch vụ khác: Soniox (nhận dạng giọng nói), MongoDB (lưu trữ) ---------- */
 async function renderServices(box) {
@@ -4853,7 +4930,7 @@ async function saveService(key, el) {
   } catch (e) { toast(e.message, 'err', 6000); }
 }
 async function testProvider(pid, btn) {
-  const box = btn ? btn.closest('#llm-box') : null;
+  const box = btn ? btn.closest('[data-llm-scope]') : null;
   const m = box ? pickedModel(pid, box) : null;
   if (btn) { btn.disabled = true; btn.textContent = 'Đang thử...'; }
   try {
@@ -5140,6 +5217,7 @@ document.addEventListener('click', async e => {
     case 'llm-connect': return connectProvider(el.dataset.pid, el);
     case 'llm-login-code': return sendLoginCode(el.dataset.pid, el);
     case 'llm-login-cancel': return cancelLogin(el.dataset.pid, el);
+    case 'my-llm-logout': return logoutMyLlm(el.dataset.pid, el);
     case 'svc-save': return saveService(el.dataset.key, el);
     case 'llm-models-refresh': return loadModels(el.dataset.pid, el.closest('#llm-box'), true);
     case 'lib-remove': { const box = el.closest('#lib-box'); const d = el.dataset.dir;

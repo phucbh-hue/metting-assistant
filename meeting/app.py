@@ -670,7 +670,7 @@ def _providers_info() -> Dict[str, Any]:
             "logged_in": bool(os.getenv("GEMINI_API_KEY")), "login": "Đặt GEMINI_API_KEY trong tệp .env"}]
     keys = envfile.status()
     api[0]["key_masked"], api[1]["key_masked"] = keys["ANTHROPIC_API_KEY"]["masked"], keys["GEMINI_API_KEY"]["masked"]
-    subs = cli_llm.status()
+    subs = [] if auth.ENABLED else cli_llm.status()     # bản web: gói đăng ký nằm ở Gói AI của tôi (từng người)
     for it in api + subs:
         it["model_setting"] = artifacts.provider_model(it["id"])
         it["model_default"] = artifacts.default_model(it["id"])

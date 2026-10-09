@@ -34,10 +34,19 @@ class CliHomeTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_each_home_has_its_own_login(self):
-        env = cli_llm._env(home=self.a)
+        secrets = {"AUTH_SECRET": "s", "MONGODB_URL": "mongodb+srv://u:p@x", "GOOGLE_OAUTH_CLIENT_SECRET": "g",
+                   "RECALLAI_API_KEY": "r", "ANTHROPIC_API_KEY": "sk-ant-x", "PATH": os.environ.get("PATH", "/usr/bin")}
+        with mock.patch.dict(os.environ, secrets):
+            env = cli_llm._env(home=self.a)
+            local = cli_llm._env()
         self.assertEqual((env["HOME"], env["CLAUDE_CONFIG_DIR"], env["CODEX_HOME"]),
                          (str(self.a), str(self.a / ".claude"), str(self.a / ".codex")))
-        self.assertNotIn("ANTHROPIC_API_KEY", env)
+        # bản web: CLI của một người không nhận bí mật của server (nội dung bị cài lệnh không lấy được qua biến môi trường)
+        for k in ("AUTH_SECRET", "MONGODB_URL", "GOOGLE_OAUTH_CLIENT_SECRET", "RECALLAI_API_KEY", "ANTHROPIC_API_KEY"):
+            self.assertNotIn(k, env)
+        self.assertEqual(env["PATH"], secrets["PATH"])
+        self.assertIn("MONGODB_URL", local)                 # trên máy cá nhân: như cũ (chỉ bỏ khóa API)
+        self.assertNotIn("ANTHROPIC_API_KEY", local)
         login_claude(self.a)
         self.assertEqual(cli_llm._login_state("claude-cli", self.a), {"logged_in": True, "plan": "max"})
         self.assertFalse(cli_llm._login_state("claude-cli", self.b)["logged_in"])      # người khác chưa đăng nhập
@@ -49,10 +58,31 @@ class CliHomeTests(unittest.TestCase):
     def test_server_login_uses_device_code_for_codex(self):
         with mock.patch.object(cli_llm, "resolve_cmd", lambda name: [f"/bin/{name}"]):
             cmd, env, _ = cli_llm.login_command("codex-cli", self.a)
-            self.assertEqual(cmd, ["/bin/codex", "login", "--device-auth"])
+            self.assertEqual(cmd, ["/bin/codex", "login", "--device-auth", "-c", 'cli_auth_credentials_store="file"'])
             self.assertEqual(env["CODEX_HOME"], str(self.a / ".codex"))
             self.assertEqual(cli_llm.login_command("codex-cli")[0], ["/bin/codex", "login"])     # trên máy: như cũ
             self.assertEqual(cli_llm.login_command("claude-cli", self.a)[0], ["/bin/claude", "auth", "login", "--claudeai"])
+
+    def test_codex_runs_without_tools(self):
+        """Codex chỉ trả lời văn bản: không còn công cụ chạy lệnh (đã thử bằng model giả: còn exec_command thì đọc được
+        tệp bất kỳ trên server dù sandbox read-only)."""
+        seen = []
+
+        def fake_run(cmd, stdin, cwd, env, timeout):
+            seen.append(cmd)
+            ev = {"type": "item.completed", "item": {"type": "agent_message", "text": "OK"}}
+            return mock.Mock(stdout=json.dumps(ev).encode(), stderr=b"", returncode=0)
+        with mock.patch.object(cli_llm, "_run", fake_run), mock.patch.object(cli_llm, "resolve_cmd", lambda n: ["/bin/codex"]),                 mock.patch.dict(os.environ, {"CLI_LLM_DISABLED": "0"}):
+            self.assertEqual(cli_llm.run("codex-cli", "hệ thống", "câu hỏi", home=self.a)["text"], "OK")
+            cli_llm.run("codex-cli", "hệ thống", "câu hỏi")
+        server, local = seen
+        for cmd in (server, local):
+            flags = {cmd[i + 1] for i, a in enumerate(cmd[:-1]) if a == "-c"}
+            for f in ("shell_tool", "unified_exec", "multi_agent", "apps", "plugins", "view_image"):
+                self.assertIn(f"features.{f}=false", flags)
+            self.assertEqual(cmd[cmd.index("-s") + 1], "read-only")
+        self.assertIn('cli_auth_credentials_store="file"', server)
+        self.assertNotIn('cli_auth_credentials_store="file"', local)
 
     def test_logout_removes_only_that_persons_login(self):
         login_claude(self.a)
