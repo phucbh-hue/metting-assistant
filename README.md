@@ -36,14 +36,21 @@ Thiết kế: `docs/plans/2026-10-09-group-memory-bd-design.md`. Đây là giai 
   - Thành viên xem được danh sách.
 - **Bảng BD**: nút "Bảng BD" trong phòng họp mở một tab riêng. Mở tab đó trên máy của người trong đội, không chiếu lên
   màn hình chung.
-  - Khách hỏi hoặc băn khoăn thì hiện ngay 2 thẻ gợi ý, chạy **song song**:
-    - **Theo tài liệu**: câu trả lời đội BD nói được ngay, ý chính, nguồn (tài liệu, đoạn).
-    - **Theo các buổi trước**: lần trước mình đã nói, hứa, báo giá gì; điều cần lưu ý (ví dụ giá khác lần trước).
-  - Trợ lý không đọc thành tiếng. Màn hình phòng họp (kênh sự kiện chung) không nhận thẻ gợi ý.
-  - Đánh dấu ai là **Khách**, ai là **Đội mình** để trợ lý chỉ gợi ý cho câu của khách.
-  - Ô **Hỏi nhanh**: gõ câu hỏi, cũng 2 thẻ song song. Nút **Chép câu trả lời** trên mỗi thẻ.
-  - Không gọi AI cho mọi câu: chỉ câu có dấu hỏi, "bao nhiêu", "thế nào", "giá", "phí"... hoặc khách nói dài. Tối đa
-    một lượt mỗi 6 giây, 2 lượt cùng lúc.
+  - Bảng là một **khung chat**:
+    - **Khách hỏi** trong cuộc họp: trợ lý tự nhận ra câu hỏi, câu hỏi hiện ngay trên khung chat, câu trả lời tới sau
+      vài giây.
+    - **Đội BD gõ** câu hỏi vào khung chat. Câu hỏi nối tiếp ("còn gói doanh nghiệp thì sao?") hiểu theo vài lượt trước.
+    - Câu khách nói mà trợ lý bỏ sót: bấm **Hỏi AI** ngay ở câu đó bên phần lời nói.
+  - Mỗi câu hỏi **một câu trả lời** gộp tài liệu của nhóm và các cuộc họp trước:
+    - **Đánh dấu nguồn** ngay sau ý: K1 (tài liệu, di chuột xem tên và đoạn), M1 (cuộc họp trước, bấm để mở).
+    - **Ghi chú cho đội mình**: lần trước đã nói, hứa, báo giá gì; chỗ khác với tài liệu; điều nên hỏi thêm khách.
+    - Độ chắc của câu trả lời, nút **Chép câu trả lời** (chép không kèm dấu nguồn).
+  - Bên phần lời nói, câu nào đã được trả lời thì có dấu "đã trả lời", bấm vào để xem câu trả lời.
+  - Đánh dấu ai là **Khách**, ai là **Đội mình** để trợ lý chỉ tự trả lời câu của khách.
+  - Trợ lý không đọc thành tiếng. Màn hình phòng họp (kênh sự kiện chung) không nhận nội dung của khung chat.
+  - Không gọi AI cho mọi câu: chỉ câu có dấu hỏi, "bao nhiêu", "thế nào", "giá", "phí"... hoặc khách nói dài; trợ lý
+    tự bỏ lời chào, câu xác nhận. Tự nhận ra tối đa một câu hỏi mỗi 6 giây, 2 câu cùng lúc; các câu đội BD hỏi chạy
+    song song, không giới hạn.
 - **Hỏi về các cuộc họp** (chỉ chủ nhóm BD, nút ở đầu trang nhóm):
   - Ví dụ: "Báo cáo các câu phàn nàn của khách", "Khách đang gặp vấn đề gì?", "Mình đã hứa gì với khách?".
   - Trợ lý chọn tối đa 8 cuộc họp liên quan (luôn kèm 2 buổi gần nhất), đọc song song (tối đa 4 cùng lúc), cộng tài
@@ -58,19 +65,22 @@ Thiết kế: `docs/plans/2026-10-09-group-memory-bd-design.md`. Đây là giai 
   - Một câu hỏi về các cuộc họp: khoảng 0,1-0,3 USD.
 
 ### Đã kiểm tra
-- 13 test mới (`test_group_memory_bd`, AI giả):
+- 14 test mới (`test_group_memory_bd`, AI giả):
   - tìm kiếm có và không có dấu;
   - tải và xóa tài liệu, chỉ chủ nhóm, không giữ tệp gốc, xóa nhóm thì xóa tài liệu;
   - mục thay đổi trong biên bản: chỉ so với buổi trước cùng nhóm, rút bù buổi cũ, bỏ thay đổi không đối chiếu được,
     cuộc họp ngoài nhóm không đổi;
-  - Bảng BD: 2 lời gọi chạy song song, chỉ lên kênh riêng, câu xã giao không gọi AI, câu của đội mình bỏ qua, hỏi nhanh;
+  - Bảng BD dạng khung chat: khách hỏi thì câu hỏi hiện ngay rồi tới câu trả lời gộp tài liệu và các buổi trước có
+    dấu nguồn, chỉ lên kênh riêng; câu xã giao không gọi AI; câu trợ lý thấy không phải câu hỏi thì gỡ khỏi khung chat;
+    câu của đội mình bỏ qua; câu hỏi nối tiếp có ngữ cảnh; "Hỏi AI" cho câu bỏ sót; nhiều câu hỏi chạy song song;
   - kênh riêng chặn nhóm không bật BD và người ngoài nhóm;
   - hỏi về các cuộc họp: chọn đúng cuộc họp, đọc song song tối đa 4, nguồn đúng, dùng gói của chủ nhóm, chỉ chủ nhóm.
-- Toàn bộ 371 test đều qua.
+- Toàn bộ 372 test đều qua.
 - Chạy thử trên Chromium (AI giả):
   - bật BD, tải tài liệu;
   - báo cáo phàn nàn có bảng và nguồn;
-  - Bảng BD tự gợi ý khi khách hỏi, đánh dấu vai trò, hỏi nhanh;
+  - Bảng BD: khách hỏi thì câu hỏi hiện ngay, câu trả lời có dấu nguồn K / M, lời nói được đánh dấu "đã trả lời",
+    đội BD hỏi trên khung chat, "Hỏi AI" cho câu bỏ sót; giao diện điện thoại;
   - màn hình phòng họp không có nội dung gợi ý;
   - thành viên không thấy khung hỏi của chủ nhóm.
 - **Chưa kiểm tra với AI thật**: chất lượng gợi ý và báo cáo phụ thuộc tài liệu nhóm tải lên. Cần thử ở cuộc họp BD thật

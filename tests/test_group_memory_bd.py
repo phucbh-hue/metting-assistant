@@ -1,5 +1,6 @@
 """Giai đoạn 3 và 4 (bản 3.19): nhớ xuyên cuộc họp trong nhóm (mục "Thay đổi so với các buổi trước" trong biên bản), tài
-liệu của nhóm, tìm kiếm BM25, bảng gợi ý BD (song song, kênh riêng), trò chuyện của chủ nhóm (đọc song song các cuộc họp).
+liệu của nhóm, tìm kiếm BM25, bảng BD dạng khung chat (tự nhận câu hỏi của khách, trả lời gộp tài liệu + các buổi trước
+có đánh dấu nguồn, kênh riêng), trò chuyện của chủ nhóm (đọc song song các cuộc họp).
 AI là bản giả: không gọi Claude / Gemini thật."""
 import asyncio
 import io
@@ -234,19 +235,17 @@ class BDSessionTests(unittest.TestCase):
         for p in self.patches:
             p.stop()
 
-    def fake(self):
-        def kb(prompt):
-            self.assertIn("Phí tích hợp API: 5.000.000đ", prompt)
-            return json.dumps({"question": "Phí tích hợp API bao nhiêu?", "answer": "Dạ phí tích hợp API là 5.000.000đ một lần ạ.",
-                               "points": ["Thu một lần"], "refs": ["K1"], "confidence": "cao"}, ensure_ascii=False)
+    def fake(self, question="Phí tích hợp API bao nhiêu?", delay=0.05):
+        def reply(prompt):
+            self.assertIn("Phí tích hợp API: 5.000.000đ", prompt)          # nguồn tài liệu [K..]
+            self.assertIn("4.000.000đ", prompt)                              # nguồn cuộc họp trước [M..]
+            return json.dumps({"question": question,
+                               "answer": "Dạ phí tích hợp API bên em là 5.000.000đ một lần ạ [K1].",
+                               "notes": ["Buổi trước anh Bình đã báo 4.000.000đ [M1], nên giải thích phần chênh lệch."],
+                               "confidence": "cao"}, ensure_ascii=False)
+        return FakeLLM({"Bạn là trợ lý ngồi cạnh đội kinh doanh (BD)": reply}, delay=delay)
 
-        def hist(prompt):
-            self.assertIn("4.000.000đ", prompt)
-            return json.dumps({"question": "Phí tích hợp API bao nhiêu?", "answer": "Lưu ý: buổi trước bên mình báo 4.000.000đ.",
-                               "points": [], "refs": ["M1"], "confidence": "vừa"}, ensure_ascii=False)
-        return FakeLLM({"Nguồn: TÀI LIỆU CỦA NHÓM": kb, "Nguồn: CÁC CUỘC HỌP TRƯỚC": hist}, delay=0.05)
-
-    def test_customer_question_gets_two_parallel_cards_on_the_private_channel_only(self):
+    def test_customer_question_is_answered_in_the_chat_from_documents_and_earlier_meetings(self):
         fake = self.fake()
 
         async def go():
@@ -262,31 +261,58 @@ class BDSessionTests(unittest.TestCase):
                 await s.on_segment_finalized(4.0, 7.0, "2", "Vậy phí tích hợp API bên em là bao nhiêu?", stream="mic")
                 await s.drain()
                 for _ in range(100):
-                    if len(fake.calls) >= 2 and a.inflight == 0:
-                        break
                     await asyncio.sleep(0.02)
-            cards, events = [], []
+                    if fake.calls and a.inflight == 0 and not a._tasks - {a._timer}:
+                        break
+                await a.drain()
+            events = []
             while not q.empty():
-                ev = q.get_nowait()
-                if ev["type"] == "bd_card":
-                    cards.append(ev["card"])
+                events.append(q.get_nowait())
+            room_types = []
             while not room.empty():
-                events.append(room.get_nowait()["type"])
-            return n_after_ok, cards, events
-        n_after_ok, cards, events = asyncio.run(go())
+                room_types.append(room.get_nowait()["type"])
+            return n_after_ok, events, room_types, s
+        n_after_ok, events, room_types, s = asyncio.run(go())
         self.assertEqual(n_after_ok, 0)                                         # "Dạ vâng": không gọi AI
-        self.assertEqual(fake.max_active, 2)                                    # 2 lời gọi chạy song song
-        self.assertEqual(sorted(c["kind"] for c in cards), ["history", "kb"])
-        kb = next(c for c in cards if c["kind"] == "kb")
-        self.assertEqual(kb["sources"][0]["title"], "bang-gia.md")
-        hist = next(c for c in cards if c["kind"] == "history")
-        self.assertEqual(hist["sources"][0]["meeting_id"], self.prev)
-        self.assertNotIn("bd_card", events)                                     # màn hình trình chiếu không nhận gợi ý
-        self.assertEqual(len(bd.load_cards(self.mid)), 2)
+        self.assertEqual(len(fake.calls), 1)                                    # một câu hỏi, một câu trả lời gộp
+        turns = [e["turn"] for e in events if e["type"] == "bd_turn"]
+        self.assertEqual([t["status"] for t in turns], ["pending", "done"])     # câu hỏi hiện ngay, trả lời tới sau
+        self.assertEqual(turns[0]["question"], "Vậy phí tích hợp API bên em là bao nhiêu?")
+        done = turns[-1]
+        self.assertEqual((done["source"], done["question"]), ("auto", "Phí tích hợp API bao nhiêu?"))
+        self.assertEqual(done["seq"], s.segments[-1]["seq"])                    # đánh dấu câu trong lời nói
+        self.assertIn("[K1]", done["answer"])
+        self.assertEqual([x["code"] for x in done["sources"]], ["K1", "M1"])
+        self.assertEqual(done["sources"][0]["title"], "bang-gia.md")
+        self.assertEqual(done["sources"][1]["meeting_id"], self.prev)
+        self.assertIn("[M1]", done["notes"][0])
+        self.assertNotIn("bd_turn", room_types)                                 # màn hình trình chiếu không nhận gì
+        self.assertEqual([t["status"] for t in bd.load_turns(self.mid)], ["done"])
         self.assertEqual({c["purpose"] for c in fake.calls}, {"BD gợi ý"})
 
-    def test_team_lines_are_ignored_and_quick_ask_answers_the_typed_question(self):
-        fake = self.fake()
+    def test_not_a_real_question_is_removed_from_the_chat(self):
+        fake = self.fake(question="")
+
+        async def go():
+            s = await live.get_session(self.mid)
+            a = bd.assistant(s)
+            q = await a.subscribe()
+            with mock.patch.object(artifacts, "_call_llm", fake):
+                await s.on_segment_finalized(1.0, 3.0, "1", "Bên em có phí tích hợp API riêng đúng không, em nhớ là vậy", stream="mic")
+                await s.drain()
+                for _ in range(100):
+                    await asyncio.sleep(0.02)
+                    if fake.calls and a.inflight == 0:
+                        break
+                await a.drain()
+            return [q.get_nowait() for _ in range(q.qsize())]
+        events = asyncio.run(go())
+        statuses = [e["turn"]["status"] for e in events if e["type"] == "bd_turn"]
+        self.assertEqual(statuses, ["pending", "none"])
+        self.assertEqual(bd.load_turns(self.mid), [])
+
+    def test_team_lines_ignored_follow_up_questions_and_marked_lines(self):
+        fake = self.fake(delay=0.3)
 
         async def go():
             s = await live.get_session(self.mid)
@@ -294,19 +320,28 @@ class BDSessionTests(unittest.TestCase):
             with mock.patch.object(artifacts, "_call_llm", fake), mock.patch.object(bd, "DEBOUNCE_S", 30):
                 await s.on_segment_finalized(1.0, 3.0, "1", "Bên em có hỗ trợ không ạ?", stream="mic")
                 await s.drain()
-                sid = s.segments[-1]["speaker_key"]
-                await a.set_role(sid, "team")
+                seg = s.segments[-1]
+                await a.set_role(seg["speaker_key"], "team")
                 a.last_seq = 0
-                await a.check()                                                 # câu của đội mình: không gợi ý
+                await a.check()                                                 # câu của đội mình: không tự trả lời
                 await asyncio.sleep(0.05)
                 team_calls = len(fake.calls)
-                cards = await a.ask("Phí tích hợp API bao nhiêu?", "binh@urbox.vn")
+                first = await a.ask("Phí tích hợp API bao nhiêu?", "binh@urbox.vn")
+                await a.drain()
+                both = [await a.ask("Còn hỗ trợ ngoài giờ thì sao?", "binh@urbox.vn"),
+                        await a.mark(seg["seq"], "an@urbox.vn")]              # hai câu hỏi chạy song song
+                await a.drain()
                 a.close()
-            return team_calls, cards, s
-        team_calls, cards, s = asyncio.run(go())
+            return team_calls, first, both
+        team_calls, first, both = asyncio.run(go())
         self.assertEqual(team_calls, 0)
-        self.assertEqual({c["question"] for c in cards}, {"Phí tích hợp API bao nhiêu?"})
-        self.assertTrue(all(not c["auto"] and c["by"] == "binh@urbox.vn" for c in cards))
+        self.assertEqual((first["source"], first["by"]), ("typed", "binh@urbox.vn"))
+        follow = fake.calls[1]["prompt"]
+        self.assertIn("HỘI THOẠI TRƯỚC TRÊN KHUNG CHAT", follow)               # hiểu câu hỏi nối tiếp
+        self.assertIn("Phí tích hợp API bao nhiêu?", follow)
+        self.assertEqual(fake.max_active, 2)
+        self.assertEqual((both[1]["source"], both[1]["question"]), ("marked", "Bên em có hỗ trợ không ạ?"))
+        self.assertEqual([t["source"] for t in bd.load_turns(self.mid)], ["typed", "typed", "marked"])
         self.assertEqual(list(db.get_meeting(self.mid)["bd"]["roles"].values()), ["team"])
 
     def test_group_without_bd_mode_has_no_assistant(self):
@@ -327,7 +362,7 @@ class BDApiTests(unittest.TestCase):
         self.client.__enter__()
         self.g = groups.create_group("BD Vinmart", "an@urbox.vn")
         groups.update_group(self.g["id"], members=["binh@urbox.vn"], bd_mode=True)
-        self.mid = meeting("Họp Vinmart", self.g["id"], T0, ended=False)
+        self.mid = meeting("Họp Vinmart", self.g["id"], T0, ended=False, lines=[("Khách", "Phí tích hợp bao nhiêu?")])
         plain = groups.create_group("Sprint", "an@urbox.vn")
         self.plain = meeting("Họp sprint", plain["id"], T0, ended=False)
 
@@ -339,7 +374,7 @@ class BDApiTests(unittest.TestCase):
         from starlette.websockets import WebSocketDisconnect
         r = self.client.get(f"/api/meetings/{self.mid}/bd", headers=hdr("binh@urbox.vn")).json()
         self.assertTrue(r["enabled"])
-        self.assertEqual(r["group"]["name"], "BD Vinmart")
+        self.assertEqual((r["group"]["name"], r["turns"]), ("BD Vinmart", []))
         self.assertFalse(self.client.get(f"/api/meetings/{self.plain}/bd", headers=hdr("an@urbox.vn")).json()["enabled"])
         self.assertEqual(self.client.get(f"/api/meetings/{self.mid}/bd", headers=hdr("la@urbox.vn")).status_code, 404)
         tok = lambda e: hdr(e)["Authorization"][7:]
@@ -356,10 +391,21 @@ class BDApiTests(unittest.TestCase):
         self.assertEqual(r.json()["roles"], {"3": "client"})
         self.assertEqual(self.client.put(f"/api/meetings/{self.mid}/bd/roles/3", json={"role": "boss"},
                                          headers=hdr("binh@urbox.vn")).status_code, 400)
-        with mock.patch.object(bd.BDAssistant, "ask_soon") as soon:
-            self.assertEqual(self.client.post(f"/api/meetings/{self.mid}/bd/ask", json={"question": "Phí bao nhiêu?"},
-                                              headers=hdr("binh@urbox.vn")).status_code, 200)
-        soon.assert_called_once_with("Phí bao nhiêu?", "binh@urbox.vn")
+
+        async def no_answer(self_, turn):
+            return None
+        with mock.patch.object(bd.BDAssistant, "_answer", no_answer):
+            r = self.client.post(f"/api/meetings/{self.mid}/bd/ask", json={"question": "Phí bao nhiêu?"},
+                                 headers=hdr("binh@urbox.vn"))
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertEqual((r.json()["turn"]["status"], r.json()["turn"]["by"]), ("pending", "binh@urbox.vn"))
+            self.assertEqual(self.client.post(f"/api/meetings/{self.mid}/bd/mark", json={"seq": 99},
+                                              headers=hdr("binh@urbox.vn")).status_code, 404)
+            r = self.client.post(f"/api/meetings/{self.mid}/bd/mark", json={"seq": 1}, headers=hdr("binh@urbox.vn"))
+            self.assertEqual((r.json()["turn"]["source"], r.json()["turn"]["question"]), ("marked", "Phí tích hợp bao nhiêu?"))
+        self.assertEqual(len(self.client.get(f"/api/meetings/{self.mid}/bd", headers=hdr("an@urbox.vn")).json()["turns"]), 2)
+        db.delete_meeting(self.mid)
+        self.assertEqual(db._get_db()["bd_turns"].count_documents({}), 0)       # xóa cuộc họp xóa luôn khung chat BD
 
 
 class GroupChatTests(unittest.TestCase):

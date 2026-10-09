@@ -114,12 +114,29 @@
       border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, .03); }
     @media (max-width: 640px) { .cal-row { grid-template-columns: minmax(0, 1fr); } }
     .bd-grid { display: grid; grid-template-columns: minmax(250px, 330px) minmax(0, 1fr); }
-    @media (max-width: 860px) { .bd-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 38%) minmax(0, 1fr); } }
+    @media (max-width: 860px) {
+      .bd-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 30%) minmax(0, 1fr); }
+      #bd-speakers { max-height: 76px; overflow-y: auto; }
+    }
     .bd-card { border: 1px solid var(--line-strong); border-radius: 14px; padding: 12px 14px; background: rgba(255, 255, 255, .035); }
     .bd-card.fresh { animation: bdIn .6s ease-out; border-color: rgb(var(--accent) / .55); }
     @keyframes bdIn { from { transform: translateY(-6px); opacity: 0; } to { transform: none; opacity: 1; } }
     @media (prefers-reduced-motion: reduce) { .bd-card.fresh { animation: none; } }
-    .bd-answer { font-size: 15.5px; line-height: 1.55; margin-top: 6px; }
+    .bd-answer { font-size: 15.5px; line-height: 1.6; }
+    .bd-q { align-self: flex-end; max-width: 88%; background: rgb(var(--accent) / .14); border: 1px solid rgb(var(--accent) / .3);
+      border-radius: 14px 14px 4px 14px; padding: 8px 12px; }
+    .bd-q.auto { background: rgba(255, 193, 69, .1); border-color: rgba(255, 193, 69, .35); }
+    .bd-a { align-self: flex-start; width: 100%; max-width: 100%; border: 1px solid var(--line-strong); border-radius: 14px 14px 14px 4px;
+      padding: 10px 14px; background: rgba(255, 255, 255, .035); }
+    .bd-a.fresh { animation: bdIn .6s ease-out; border-color: rgb(var(--accent) / .55); }
+    .cite { display: inline-block; font-size: 10.5px; line-height: 1; padding: 2px 5px; margin: 0 1px; border-radius: 6px; font-weight: 600;
+      background: rgb(var(--accent) / .16); color: rgb(var(--accent)); vertical-align: 1px; text-decoration: none; cursor: help; }
+    a.cite { cursor: pointer; }
+    .bd-line { padding: 2px 4px; border-radius: 8px; }
+    .bd-line.asked { background: rgb(var(--accent) / .09); cursor: pointer; }
+    .bd-line .bd-ask-line { opacity: 0; }
+    .bd-line:hover .bd-ask-line, .bd-line:focus-within .bd-ask-line { opacity: 1; }
+    @media (hover: none) { .bd-line .bd-ask-line { opacity: 1; } }
     .chat-q { align-self: flex-end; max-width: 85%; background: rgb(var(--accent) / .14); border: 1px solid rgb(var(--accent) / .3);
       border-radius: 14px; padding: 8px 12px; white-space: pre-wrap; }
     .notice { border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; font-size: 13.5px; line-height: 1.55; }
@@ -650,15 +667,17 @@
           <div class="bd-grid flex-1 min-h-0 gap-3">
             <aside class="panel flex flex-col min-h-0" aria-label="Người nói và lời nói">
               <div class="p-3 border-b divider"><h2 class="font-semibold mb-1">Ai là khách?</h2>
-                <p class="text-[12px] text-muted mb-2">Đánh dấu để trợ lý chỉ gợi ý cho câu của khách.</p>
+                <p class="text-[12px] text-muted mb-2 hidden sm:block">Đánh dấu để trợ lý chỉ tự trả lời câu của khách.</p>
                 <ul id="bd-speakers" class="flex flex-col gap-1.5"></ul></div>
               <div id="bd-transcript" class="flex-1 min-h-0 overflow-y-auto p-3 text-[13px] flex flex-col gap-1.5" aria-live="polite"></div>
             </aside>
-            <section class="panel flex flex-col min-h-0" aria-label="Gợi ý cho đội BD">
-              <div id="bd-cards" class="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-2.5" aria-live="polite"></div>
+            <section class="panel flex flex-col min-h-0" aria-label="Khung chat của đội BD">
+              <div class="px-4 pt-3 pb-2 border-b divider flex flex-wrap items-center justify-between gap-2">
+                <h2 class="font-semibold">Trợ lý BD</h2><span class="text-[12px] text-muted">Khách hỏi là tự trả lời từ tài liệu và các buổi trước. Chỉ đội mình thấy.</span></div>
+              <div id="bd-chat" class="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-2.5" aria-live="polite"></div>
               <form id="bd-ask" class="p-3 border-t divider flex gap-2">
-                <input id="bd-ask-in" class="input" maxlength="500" autocomplete="off" placeholder="Hỏi nhanh, ví dụ: Phí tích hợp API bao nhiêu?" aria-label="Hỏi nhanh trợ lý BD">
-                <button class="btn btn-primary shrink-0" type="submit">Hỏi</button>
+                <input id="bd-ask-in" class="input" maxlength="500" autocomplete="off" placeholder="Hỏi trợ lý, ví dụ: Phí tích hợp API bao nhiêu?" aria-label="Hỏi trợ lý BD">
+                <button class="btn btn-primary shrink-0" type="submit">Gửi</button>
               </form>
             </section>
           </div>
@@ -1370,8 +1389,8 @@ async function renderGroupKb(box, g) {
   };
 }
 
-/* ---------- Bảng BD của một cuộc họp (#/m/<id>/bd) ---------- */
-const BD = { mid: null, closed: true, ws: null, bws: null, meeting: null, segs: [], speakers: new Map(), cards: [], roles: {}, busy: 0, group: null, fresh: null };
+/* ---------- Bảng BD của một cuộc họp (#/m/<id>/bd): khung chat, khách hỏi là tự trả lời ---------- */
+const BD = { mid: null, closed: true, ws: null, bws: null, meeting: null, segs: [], speakers: new Map(), turns: [], roles: {}, busy: 0, group: null, fresh: null };
 function closeBD() {
   BD.closed = true;
   [BD.ws, BD.bws].forEach(w => { try { if (w) w.close(); } catch (e) { /* bỏ qua */ } });
@@ -1381,10 +1400,10 @@ function closeBD() {
 async function openBD(mid) {
   if (!BD.closed && BD.mid === mid) { showView('bd'); return; }
   closeBD();
-  Object.assign(BD, { mid, closed: false, meeting: null, segs: [], speakers: new Map(), cards: [], roles: {}, busy: 0, group: null });
+  Object.assign(BD, { mid, closed: false, meeting: null, segs: [], speakers: new Map(), turns: [], roles: {}, busy: 0, group: null });
   showView('bd');
   $('#bd-head').innerHTML = '<div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang mở bảng BD...</div>';
-  $('#bd-cards').innerHTML = ''; $('#bd-transcript').innerHTML = ''; $('#bd-speakers').innerHTML = '';
+  $('#bd-chat').innerHTML = ''; $('#bd-transcript').innerHTML = ''; $('#bd-speakers').innerHTML = '';
   let info;
   try { info = await GET(`/api/meetings/${mid}/bd`); } catch (e) { toast(e.message, 'err'); location.hash = '#/'; return; }
   if (BD.mid !== mid || BD.closed) return;
@@ -1393,7 +1412,7 @@ async function openBD(mid) {
       <a class="link ml-1" href="#/m/${mid}">Về phòng họp</a></div>`;
     return;
   }
-  BD.cards = info.cards || []; BD.roles = info.roles || {}; BD.group = info.group || {};
+  BD.turns = info.turns || []; BD.roles = info.roles || {}; BD.group = info.group || {};
   renderBD();
   connectBD(mid);
 }
@@ -1417,16 +1436,24 @@ function connectBD(mid) {
     else if (ev.type === 'meeting_status') { BD.meeting = ev.meeting || BD.meeting; renderBDHead(); }
   });
   BD.bws = open(`/ws/meeting/${mid}/bd`, ev => {
-    if (ev.type === 'bd_init') { BD.cards = ev.cards || []; BD.roles = ev.roles || {}; BD.busy = ev.busy || 0; renderBD(); }
-    else if (ev.type === 'bd_card') { BD.cards.unshift(ev.card); BD.fresh = ev.card.id; renderBDCards(); }
+    if (ev.type === 'bd_init') { BD.turns = ev.turns || []; BD.roles = ev.roles || {}; BD.busy = ev.busy || 0; renderBD(); }
+    else if (ev.type === 'bd_turn') { upsertTurn(ev.turn); }
     else if (ev.type === 'bd_roles') { BD.roles = ev.roles || {}; renderBDSpeakers(); renderBDTranscript(); }
     else if (ev.type === 'bd_status') { BD.busy = ev.busy || 0; renderBDHead(); }
-    else if (ev.type === 'bd_error' || ev.type === 'error') toast(ev.text || 'Lỗi bảng BD', 'err', 6000);
+    else if (ev.type === 'error') toast(ev.text || 'Lỗi bảng BD', 'err', 6000);
   });
   clearInterval(BD.ping);
   BD.ping = setInterval(() => [BD.ws, BD.bws].forEach(w => { if (w && w.readyState === 1) w.send('{"type":"ping"}'); }), 25000);
 }
-function renderBD() { renderBDHead(); renderBDSpeakers(); renderBDTranscript(); renderBDCards(); }
+function upsertTurn(t) {
+  const i = BD.turns.findIndex(x => x.id === t.id);
+  if (t.status === 'none') { if (i >= 0) BD.turns.splice(i, 1); }       // trợ lý thấy không phải câu hỏi: gỡ khỏi khung chat
+  else if (i >= 0) BD.turns[i] = t;
+  else BD.turns.push(t);
+  if (t.status === 'done') BD.fresh = t.id;
+  renderBDChat(); renderBDTranscript();
+}
+function renderBD() { renderBDHead(); renderBDSpeakers(); renderBDTranscript(); renderBDChat(); }
 function renderBDHead() {
   const m = BD.meeting || {}; const live = m.status && m.status !== 'ended';
   $('#bd-head').innerHTML = `<div class="flex flex-wrap items-center justify-between gap-2">
@@ -1434,7 +1461,7 @@ function renderBDHead() {
       <h2 class="text-lg font-semibold truncate">${esc(m.title || 'Cuộc họp')}</h2>
       ${m.status ? (live ? '<span class="chip chip-live shrink-0">Đang diễn ra</span>' : '<span class="chip shrink-0">Đã kết thúc</span>') : ''}</div>
       <p class="text-[12px] text-muted">${esc((BD.group || {}).name || '')}${(BD.group || {}).doc_count ? `, ${BD.group.doc_count} tài liệu` : ', nhóm chưa có tài liệu (Cài đặt nhóm)'}. Bảng này chỉ dành cho đội BD: đừng chiếu lên màn hình chung.</p></div>
-    <span class="text-[12.5px] text-muted flex items-center gap-1.5">${BD.busy ? '<span class="spinner"></span>Đang gợi ý...' : 'Trợ lý đang nghe, có câu hỏi của khách là gợi ý ngay'}</span></div>`;
+    <span class="text-[12.5px] text-muted flex items-center gap-1.5">${BD.busy ? `<span class="spinner"></span>Đang trả lời ${BD.busy} câu hỏi...` : 'Trợ lý đang nghe'}</span></div>`;
 }
 const BD_ROLE = { client: 'Khách', team: 'Đội mình' };
 function renderBDSpeakers() {
@@ -1451,30 +1478,53 @@ function renderBDTranscript() {
   const box = $('#bd-transcript'); if (!box) return;
   const near = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
   const name = x => (BD.speakers.get(x.speaker_key) || {}).label || x.speaker_label || 'Không rõ';
+  const asked = new Map(BD.turns.filter(t => t.seq != null).map(t => [t.seq, t]));
   box.innerHTML = BD.segs.slice(-60).map(x => {
-    const r = BD.roles[String(x.speaker_key)];
-    return `<div><span class="text-muted num">${fmt.clock(x.t_start || 0)}</span> <b style="${r === 'client' ? 'color:#FFC145' : ''}">${esc(name(x))}${r ? ` (${BD_ROLE[r]})` : ''}</b>: ${esc(x.text)}</div>`;
+    const r = BD.roles[String(x.speaker_key)], t = asked.get(x.seq);
+    const mark = t ? `<span class="chip ${t.status === 'done' ? 'chip-accent' : ''}" style="font-size:10.5px;padding:1px 6px">${t.status === 'pending' ? 'đang trả lời' : t.status === 'error' ? 'lỗi' : 'đã trả lời'}</span>` : '';
+    const ask = !t && r !== 'team' ? `<button type="button" class="link text-[11.5px] bd-ask-line" data-bd-mark="${x.seq}" title="Trợ lý trả lời câu này">Hỏi AI</button>` : '';
+    return `<div class="bd-line ${t ? 'asked' : ''}" ${t ? `data-bd-goto="${esc(t.id)}" title="Xem câu trả lời"` : ''}><span class="text-muted num">${fmt.clock(x.t_start || 0)}</span>
+      <b style="${r === 'client' ? 'color:#FFC145' : ''}">${esc(name(x))}${r ? ` (${BD_ROLE[r]})` : ''}</b>: ${esc(x.text)} ${mark}${ask}</div>`;
   }).join('') || '<p class="text-muted">Lời nói trong cuộc họp hiện ở đây.</p>';
   if (near) box.scrollTop = box.scrollHeight;
 }
-function renderBDCards() {
-  const box = $('#bd-cards'); if (!box) return;
-  const kind = c => c.kind === 'kb' ? 'Theo tài liệu' : 'Theo các buổi trước';
+/** Chữ của câu trả lời: thoát HTML rồi đổi [K1] / [M2] thành dấu nguồn (di chuột xem tên, bấm M mở cuộc họp đó). */
+function bdCited(text, sources) {
+  const by = new Map((sources || []).map(x => [x.code, x]));
+  return esc(text || '').replace(/\[\s*([KM]\d{1,2})\s*\]/g, (all, code) => {
+    const x = by.get(code); if (!x) return '';
+    const title = `${x.title || ''}${x.ref ? ` - ${x.ref}` : ''}`;
+    return x.meeting_id ? `<a class="cite" href="#/m/${x.meeting_id}" target="_blank" rel="noopener" title="${esc(title)}">${code}</a>`
+      : `<span class="cite" title="${esc(title)}">${code}</span>`;
+  });
+}
+function renderBDChat() {
+  const box = $('#bd-chat'); if (!box) return;
+  const near = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  const at = t => esc(new Date((t.at || 0) * 1000).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
+  const who = t => t.source === 'auto' ? `Khách hỏi${t.speaker ? ` (${esc(t.speaker)})` : ''}` : t.source === 'marked' ? 'Hỏi AI về câu trong lời nói' : `${t.by ? esc(t.by.split('@')[0]) : 'Đội BD'} hỏi`;
   const conf = { cao: 'chip-accent', 'vừa': '', 'thấp': 'chip-warn' };
-  box.innerHTML = BD.cards.map(c => `<article class="bd-card ${c.id === BD.fresh ? 'fresh' : ''}">
-      <div class="flex flex-wrap items-center gap-1.5 text-[12px]"><span class="chip">${kind(c)}</span>${c.auto ? '' : '<span class="chip chip-accent">Hỏi nhanh</span>'}
-        ${c.confidence ? `<span class="chip ${conf[c.confidence] || ''}">độ chắc: ${esc(c.confidence)}</span>` : ''}
-        <span class="text-muted num">${esc(new Date((c.at || 0) * 1000).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }))}</span>
-        <button type="button" class="link text-[12px] ml-auto" data-bd-copy="${esc(c.id)}">Chép câu trả lời</button></div>
-      <div class="font-medium mt-1.5">${c.auto ? 'Khách hỏi: ' : ''}${esc(c.question)}</div>
-      <p class="bd-answer">${esc(c.answer)}</p>
-      ${(c.points || []).length ? `<ul class="text-[13px] mt-1.5 flex flex-col gap-0.5" style="list-style:disc;padding-left:18px">${c.points.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
-      ${(c.sources || []).length ? `<div class="flex flex-wrap gap-1.5 mt-2 text-[11.5px]">${c.sources.map(x => x.meeting_id
-        ? `<a class="chip" href="#/m/${x.meeting_id}" target="_blank" rel="noopener" title="Mở cuộc họp đó">${esc(x.title || '')}${x.ref ? ` - ${esc(x.ref)}` : ''}</a>`
-        : `<span class="chip" title="Tài liệu của nhóm">${esc(x.title || '')}${x.ref ? ` - ${esc(x.ref)}` : ''}</span>`).join('')}</div>` : ''}
-    </article>`).join('') || `<div class="text-muted text-[13.5px] p-2">Khi khách hỏi hoặc băn khoăn, gợi ý trả lời hiện ở đây: một thẻ theo tài liệu của nhóm, một thẻ theo các cuộc họp trước.
-      Gõ câu hỏi ở ô bên dưới để hỏi nhanh.</div>`;
+  box.innerHTML = BD.turns.map(t => {
+    const q = `<div class="bd-q ${t.source === 'auto' ? 'auto' : ''}" id="bd-turn-${esc(t.id)}"><div class="text-[11.5px] text-muted mb-0.5">${who(t)}, ${at(t)}${t.source === 'auto' ? ' - trợ lý tự nhận ra' : ''}</div>
+      <div class="font-medium">${esc(t.question || t.asked || '')}</div></div>`;
+    let a;
+    if (t.status === 'pending') a = '<div class="bd-a flex items-center gap-2 text-muted text-[13px]"><span class="spinner"></span>Đang tìm trong tài liệu và các buổi trước...</div>';
+    else if (t.status === 'error') a = `<div class="bd-a text-[13px]" style="color:rgb(var(--danger))">${esc(t.answer || 'Chưa trả lời được')}</div>`;
+    else {
+      const legend = (t.sources || []).map(x => `<span><b>${esc(x.code)}</b> ${x.meeting_id ? `<a class="link" href="#/m/${x.meeting_id}" target="_blank" rel="noopener">${esc(x.title || '')}</a>` : esc(x.title || '')}${x.ref ? `, ${esc(x.ref)}` : ''}</span>`).join('');
+      a = `<div class="bd-a ${t.id === BD.fresh ? 'fresh' : ''}">
+        <p class="bd-answer">${bdCited(t.answer, t.sources)}</p>
+        ${(t.notes || []).length ? `<div class="mt-2 text-[13px]"><div class="text-[11.5px] text-muted mb-0.5">Ghi chú cho đội mình</div>
+          <ul class="flex flex-col gap-0.5" style="list-style:disc;padding-left:18px">${t.notes.map(n => `<li>${bdCited(n, t.sources)}</li>`).join('')}</ul></div>` : ''}
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11.5px] text-muted">
+          ${t.confidence ? `<span class="chip ${conf[t.confidence] || ''}" style="font-size:10.5px">độ chắc: ${esc(t.confidence)}</span>` : ''}
+          ${legend}<button type="button" class="link ml-auto" data-bd-copy="${esc(t.id)}">Chép câu trả lời</button></div></div>`;
+    }
+    return q + a;
+  }).join('') || `<div class="text-muted text-[13.5px] p-2">Khi khách hỏi hoặc băn khoăn, trợ lý tự nhận ra câu hỏi và trả lời ngay ở đây, lấy từ tài liệu của nhóm
+      và các cuộc họp trước, có đánh dấu nguồn (K: tài liệu, M: cuộc họp trước). Câu nào trợ lý bỏ sót thì bấm "Hỏi AI" ở câu đó bên trái, hoặc gõ câu hỏi bên dưới.</div>`;
   BD.fresh = null;
+  if (near || BD.turns.length <= 1) box.scrollTop = box.scrollHeight;
 }
 document.addEventListener('click', async e => {
   const role = e.target.closest('[data-bd-role]');
@@ -1485,16 +1535,26 @@ document.addEventListener('click', async e => {
     catch (err) { toast(err.message, 'err'); }
     return;
   }
+  const mk = e.target.closest('[data-bd-mark]');
+  if (mk) {
+    e.stopPropagation();
+    try { const r = await POST(`/api/meetings/${BD.mid}/bd/mark`, { seq: parseInt(mk.dataset.bdMark, 10) }); if (r.turn) upsertTurn(r.turn); }
+    catch (err) { toast(err.message, 'err'); }
+    return;
+  }
+  const go = e.target.closest('[data-bd-goto]');
+  if (go) { const el = document.getElementById(`bd-turn-${go.dataset.bdGoto}`); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
   const cp = e.target.closest('[data-bd-copy]');
   if (cp) {
-    const c = BD.cards.find(x => x.id === cp.dataset.bdCopy); if (!c) return;
-    try { await navigator.clipboard.writeText(c.answer); toast('Đã chép câu trả lời.'); } catch (err) { toast('Trình duyệt không cho chép, hãy bôi đen để chép.', 'info'); }
+    const t = BD.turns.find(x => x.id === cp.dataset.bdCopy); if (!t) return;
+    const plain = String(t.answer || '').replace(/\s*\[\s*[KM]\d{1,2}\s*\]/g, '');
+    try { await navigator.clipboard.writeText(plain); toast('Đã chép câu trả lời.'); } catch (err) { toast('Trình duyệt không cho chép, hãy bôi đen để chép.', 'info'); }
   }
 });
 $('#bd-ask').addEventListener('submit', async e => {
   e.preventDefault();
   const inp = $('#bd-ask-in'); const q = inp.value.trim(); if (!q || !BD.mid) return;
-  try { await POST(`/api/meetings/${BD.mid}/bd/ask`, { question: q }); inp.value = ''; BD.busy = Math.max(1, BD.busy); renderBDHead(); }
+  try { const r = await POST(`/api/meetings/${BD.mid}/bd/ask`, { question: q }); inp.value = ''; if (r.turn) upsertTurn(r.turn); }
   catch (err) { toast(err.message, 'err'); }
 });
 

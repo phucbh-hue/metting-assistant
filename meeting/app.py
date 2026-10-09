@@ -1444,6 +1444,10 @@ class BDRoleReq(BaseModel):
     role: str = ""
 
 
+class BDMarkReq(BaseModel):
+    seq: int
+
+
 async def _bd_of(mid: int) -> "bd.BDAssistant":
     s = await _session_or_404(mid)
     a = bd.assistant(s)
@@ -1459,18 +1463,28 @@ async def meeting_bd(mid: int):
     if a is None:
         return {"enabled": False}
     g = groups.get_group(s.meeting.get("group_id")) or {}
-    return {"enabled": True, "cards": await asyncio.to_thread(bd.load_cards, mid), "roles": a.roles, "busy": a.inflight,
+    return {"enabled": True, "turns": await asyncio.to_thread(bd.load_turns, mid), "roles": a.roles, "busy": a.inflight,
             "group": {"id": g.get("id"), "name": g.get("name"), "doc_count": group_kb.signature(g["id"])[0] if g else 0}}
 
 
 @app.post("/api/meetings/{mid}/bd/ask")
 async def meeting_bd_ask(mid: int, req: BDAskReq, request: Request):
-    """Hỏi nhanh trên bảng BD: 2 lời gọi song song (tài liệu, các buổi trước), kết quả qua kênh /ws/meeting/<id>/bd."""
+    """Đội BD hỏi trên khung chat: câu hỏi hiện ngay, câu trả lời (tài liệu + các buổi trước) tới qua kênh
+    /ws/meeting/<id>/bd."""
     a = await _bd_of(mid)
     if not req.question.strip():
         raise HTTPException(status_code=400, detail="Câu hỏi trống")
-    a.ask_soon(req.question, (_user(request) or {}).get("email"))
-    return {"ok": True}
+    return {"turn": await a.ask(req.question, (_user(request) or {}).get("email"))}
+
+
+@app.post("/api/meetings/{mid}/bd/mark")
+async def meeting_bd_mark(mid: int, req: BDMarkReq, request: Request):
+    """Đánh dấu một câu trong lời nói để trợ lý trả lời (trợ lý bỏ sót câu hỏi đó)."""
+    a = await _bd_of(mid)
+    try:
+        return {"turn": await a.mark(req.seq, (_user(request) or {}).get("email"))}
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e).strip("'\""))
 
 
 @app.put("/api/meetings/{mid}/bd/roles/{sid}")
@@ -2087,8 +2101,8 @@ async def ws_audio(ws: WebSocket, mid: int):
 
 @app.websocket("/ws/meeting/{mid}/bd")
 async def ws_bd(ws: WebSocket, mid: int):
-    """Kênh riêng của bảng BD: thẻ gợi ý, vai trò Khách / Đội mình. Kênh sự kiện chung (màn hình trình chiếu) không có các
-    thẻ này. Người không xem được cuộc họp đã bị chặn ở MeetingAccessMiddleware."""
+    """Kênh riêng của bảng BD: các lượt hỏi đáp trên khung chat, vai trò Khách / Đội mình. Kênh sự kiện chung (màn hình
+    trình chiếu) không có các nội dung này. Người không xem được cuộc họp đã bị chặn ở MeetingAccessMiddleware."""
     await ws.accept()
     s = await live.get_session(mid)
     a = bd.assistant(s) if s is not None else None
@@ -2098,7 +2112,7 @@ async def ws_bd(ws: WebSocket, mid: int):
         return
     q = await a.subscribe()
     try:
-        await ws.send_text(_dumps({"type": "bd_init", "cards": await asyncio.to_thread(bd.load_cards, mid),
+        await ws.send_text(_dumps({"type": "bd_init", "turns": await asyncio.to_thread(bd.load_turns, mid),
                                    "roles": a.roles, "busy": a.inflight}))
 
         async def sender():

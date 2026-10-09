@@ -470,7 +470,8 @@ def update_meeting(mid: int, updates: Dict[str, Any], internal: bool = False) ->
 def delete_meeting(mid: int) -> bool:
     """Xóa hoàn toàn cuộc họp và toàn bộ dữ liệu liên quan."""
     db = _get_db()
-    for col in ("meeting_segments", "meeting_speakers", "identity_inferences", "ai_artifacts", "ai_interactions", "llm_usage"):
+    for col in ("meeting_segments", "meeting_speakers", "identity_inferences", "ai_artifacts", "ai_interactions", "llm_usage",
+                "bd_turns"):
         db[col].delete_many({"meeting_id": mid})
     return db["meetings"].delete_one({"id": mid}).deleted_count > 0
 

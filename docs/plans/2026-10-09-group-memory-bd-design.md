@@ -102,6 +102,18 @@
   - trò chuyện nhóm dùng gói của chủ nhóm.
   - Thêm ngữ cảnh "người dùng hiện tại" cho lời gọi không thuộc cuộc họp nào.
 
+## Thay đổi sau khi anh Phúc dùng thử (09/10/2026)
+
+- Yêu cầu: "khách hỏi thì AI nhận diện câu hỏi tự động đưa ra recommend câu trả lời từ tài liệu + nội dung các cuộc họp
+  (có note đánh dấu), nghĩa là chat + tự đưa ra câu trả lời".
+- Bảng BD đổi từ 2 thẻ gợi ý (tài liệu, các buổi trước) sang **khung chat**:
+  - mỗi câu hỏi (khách hỏi tự nhận ra, đội BD gõ, hoặc bấm "Hỏi AI" ở một câu trong lời nói) là một lượt;
+  - câu hỏi hiện ngay, câu trả lời tới sau;
+  - **một lời gọi AI** gộp tài liệu (K..) và các cuộc họp trước (M..), đánh dấu nguồn ngay sau ý, kèm ghi chú cho đội
+    BD; câu hỏi nối tiếp có vài lượt trước làm ngữ cảnh.
+- Song song: nhiều câu hỏi chạy cùng lúc (tự nhận ra tối đa 2, câu đội BD hỏi không giới hạn).
+- Lưu trong `bd_turns` (xóa cùng cuộc họp); `bd_cards` không dùng nữa.
+
 ## Kiểm tra
 - Test với AI giả, gồm:
   - mục thay đổi trong biên bản; chỉ so với buổi trước cùng nhóm; rút bù buổi cũ;

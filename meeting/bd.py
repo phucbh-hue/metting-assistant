@@ -1,14 +1,18 @@
-"""Chế độ BD (bản 3.19, giai đoạn 4): gợi ý cho đội kinh doanh ngay trong cuộc họp với khách.
+"""Chế độ BD (bản 3.19, giai đoạn 4): khung chat gợi ý cho đội kinh doanh ngay trong cuộc họp với khách.
 
 - Chỉ chạy khi nhóm của cuộc họp bật "Nhóm BD" (groups.bd_mode).
-- Gợi ý chỉ gửi qua kênh riêng /ws/meeting/<id>/bd tới bảng BD (mở trên máy của người trong nhóm), không qua kênh sự kiện
-  chung của phòng họp (màn hình trình chiếu) và không đọc thành tiếng: khách không thấy, không nghe.
-- Có câu mới thì chờ DEBOUNCE_S giây cho người nói nói hết. Lọc bằng luật đơn giản (dấu hỏi, "bao nhiêu", "thế nào", "giá",
-  "phí"..., hoặc khách nói dài) để không gọi AI cho mọi câu. Tối đa một lượt mỗi MIN_GAP_S giây, MAX_INFLIGHT lượt cùng lúc.
-- Mỗi lượt gọi SONG SONG 2 lời gọi AI: theo tài liệu của nhóm (K1..) và theo các cuộc họp trước (M1..). Lời gọi nào xong
-  trước thì hiện trước; không có gì đáng gợi ý thì không hiện.
-- Hỏi nhanh: người trong đội BD gõ câu hỏi trên bảng BD, cũng 2 lời gọi song song.
-- Người trên bảng BD đánh dấu ai là Khách / Đội mình (meetings.bd.roles): chỉ gợi ý cho câu của khách.
+- Mọi thứ chỉ gửi qua kênh riêng /ws/meeting/<id>/bd tới bảng BD (mở trên máy của người trong nhóm), không qua kênh sự
+  kiện chung của phòng họp (màn hình trình chiếu) và không đọc thành tiếng: khách không thấy, không nghe.
+- Bảng BD là một khung chat. Mỗi lượt là một câu hỏi và câu trả lời gợi ý:
+  - "auto": khách hỏi trong cuộc họp, trợ lý tự nhận ra (chờ DEBOUNCE_S giây cho khách nói hết; lọc bằng luật đơn giản:
+    dấu hỏi, "bao nhiêu", "thế nào", "giá", "phí"..., hoặc khách nói dài; AI bỏ qua lời chào, câu xác nhận);
+  - "typed": đội BD gõ vào khung chat (hiểu được câu hỏi nối tiếp nhờ vài lượt trước);
+  - "marked": đội BD bấm vào một câu trong lời nói để hỏi trợ lý (khi trợ lý bỏ sót).
+- Mỗi câu hỏi MỘT câu trả lời gộp tài liệu của nhóm (K1..) và các cuộc họp trước (M1..), đánh dấu nguồn ngay sau ý dùng
+  nguồn, kèm ghi chú cho đội BD (điều đã nói / hứa / báo giá ở buổi trước, chỗ khác với tài liệu, thông tin còn thiếu).
+- Câu hỏi hiện ngay trên khung chat (đang tìm câu trả lời), câu trả lời tới sau. Nhiều câu hỏi chạy song song (tự nhận ra
+  tối đa MAX_INFLIGHT cùng lúc, mỗi MIN_GAP_S giây một lượt; câu gõ / đánh dấu không giới hạn).
+- Người trên bảng BD đánh dấu ai là Khách / Đội mình (meetings.bd.roles): chỉ tự nhận câu hỏi của khách.
 """
 import asyncio
 import logging
@@ -27,28 +31,34 @@ MAX_INFLIGHT = 2
 WINDOW_S = 90.0
 WINDOW_LINES = 14
 LONG_WORDS = 25
-CARDS_LOAD = 60
+TURNS_LOAD = 80
+HISTORY_TURNS = 3
+K_SOURCES = 5
+M_SOURCES = 5
 _ASK = re.compile(r"\?|\b(bao nhieu|bao lau|bao gio|the nao|nhu nao|ra sao|khi nao|o dau|tai sao|vi sao|lam sao|duoc khong|"
                   r"co duoc|co the|co phai|phai khong|hay khong|gia|phi|chi phi|bang gia|chiet khau|uu dai|hop dong|"
                   r"thanh toan|bao hanh|doi tra|tich hop|ho tro|cam ket|thoi gian|deadline|so sanh|khac gi|loi ich|van de|"
                   r"kho khan|lo ngai|phan nan|chua)\b")
+_CODE = re.compile(r"\[\s*([KM]\d{1,2})\s*\]")
 
-COMMON = """Bạn là trợ lý ngồi cạnh đội kinh doanh (BD) của UrBox trong cuộc họp với khách hàng, gợi ý để đội BD trả lời khách tốt
-nhất. Chỉ đội BD thấy gợi ý này. Trả về DUY NHẤT một JSON, không kèm chữ nào khác:
-{"question": "câu khách vừa hỏi hoặc điều khách băn khoăn, viết lại ngắn gọn; rỗng nếu không có gì cần gợi ý",
- "answer": "gợi ý 2-4 câu đội BD nói được ngay (xưng 'bên em', lịch sự, cụ thể)",
- "points": ["ý chính / con số / điều kiện cụ thể, tối đa 4"], "refs": ["mã nguồn đã dùng"], "confidence": "cao|vừa|thấp"}
-Quy tắc chung: ưu tiên câu hỏi hoặc băn khoăn MỚI NHẤT của khách; câu do đội mình nói thì không cần gợi ý; nếu có câu hỏi
-được đội BD gõ (HỎI NHANH) thì trả lời đúng câu đó. Tiền theo 1.000.000đ, ngày dd/mm/yyyy, không dùng gạch dài."""
-
-KB_SYSTEM = COMMON + """
-Nguồn: TÀI LIỆU CỦA NHÓM (mã K1, K2...). Chỉ dùng thông tin trong tài liệu và trong cuộc họp; không bịa giá, chính sách.
-Tài liệu không có thông tin thì nói rõ "tài liệu chưa có thông tin này", gợi ý hẹn gửi lại sau, confidence "thấp"."""
-
-HISTORY_SYSTEM = COMMON + """
-Nguồn: CÁC CUỘC HỌP TRƯỚC của nhóm (biên bản và lời nói, mã M1, M2...). Nêu lần trước mình đã nói, hứa, báo giá hoặc thống
-nhất gì liên quan tới điều khách đang hỏi, và điều cần lưu ý (khác với lần trước, đã hứa mà chưa làm). Không có gì liên
-quan thì để "question" rỗng."""
+BD_SYSTEM = """Bạn là trợ lý ngồi cạnh đội kinh doanh (BD) của UrBox trong cuộc họp với khách hàng, trả lời trong một khung chat chỉ
+đội BD thấy. Mỗi lượt có một CÂU HỎI (khách vừa hỏi trong cuộc họp, hoặc đội BD hỏi trên khung chat) và các nguồn:
+- TÀI LIỆU CỦA NHÓM, mã K1, K2... (bảng giá, chính sách, FAQ, hồ sơ năng lực...);
+- CÁC CUỘC HỌP TRƯỚC của nhóm, mã M1, M2... (biên bản và lời nói, có tên buổi và ngày).
+Trả về DUY NHẤT một JSON, không kèm chữ nào khác:
+{"question": "câu hỏi viết lại ngắn gọn, rõ ý; rỗng nếu thực ra không có câu hỏi hay băn khoăn nào cần trả lời",
+ "answer": "câu trả lời gợi ý đội BD nói được ngay: 2-5 câu, xưng 'bên em', lịch sự, cụ thể. Đánh dấu nguồn ngay sau ý dùng nguồn, ví dụ: Phí tích hợp là 5.000.000đ [K1].",
+ "notes": ["ghi chú cho đội BD (khách không nghe), tối đa 3, mỗi ghi chú có mã nguồn nếu có, ví dụ: Buổi 02/10 anh Bình đã báo 4.000.000đ [M1], nên giải thích phần chênh lệch."],
+ "confidence": "cao|vừa|thấp"}
+Quy tắc:
+- Chỉ dùng thông tin trong nguồn và trong cuộc họp; không bịa giá, chính sách, cam kết. Thiếu thông tin thì nói trong answer
+  là bên em sẽ kiểm tra và gửi lại anh chị sau, confidence "thấp".
+- Tài liệu và cuộc họp trước nói khác nhau (giá, thời hạn...) thì answer theo tài liệu, ghi rõ khác biệt trong notes.
+- Notes dùng cho: điều đã nói, hứa, báo giá, thống nhất ở buổi trước; điều đã hứa mà chưa làm; điều cần hỏi thêm khách.
+- Câu tự nhận ra từ lời nói (nguồn câu hỏi: KHÁCH NÓI) mà thực ra không phải câu hỏi hay băn khoăn của khách (lời chào, câu
+  xác nhận, câu của đội mình) thì để "question" rỗng.
+- Câu đội BD hỏi trên khung chat thì luôn trả lời; câu hỏi nối tiếp thì hiểu theo HỘI THOẠI TRƯỚC TRÊN KHUNG CHAT.
+- Tiền theo 1.000.000đ, ngày dd/mm/yyyy, không dùng gạch dài."""
 
 
 def enabled_for(meeting: Optional[Dict[str, Any]]) -> bool:
@@ -58,11 +68,14 @@ def enabled_for(meeting: Optional[Dict[str, Any]]) -> bool:
 
 
 def _col():
-    return db._get_db()["bd_cards"]
+    return db._get_db()["bd_turns"]
 
 
-def load_cards(mid: int, limit: int = CARDS_LOAD) -> List[Dict[str, Any]]:
-    return list(_col().find({"meeting_id": int(mid)}, {"_id": 0}).sort("at", -1).limit(limit))
+def load_turns(mid: int, limit: int = TURNS_LOAD) -> List[Dict[str, Any]]:
+    """Các lượt hỏi đáp của bảng BD (cũ trước, mới sau), bỏ các câu trợ lý thấy không phải câu hỏi."""
+    rows = list(_col().find({"meeting_id": int(mid), "status": {"$ne": "none"}}, {"_id": 0})
+                .sort([("at", -1), ("_id", -1)]).limit(limit))       # _id: thứ tự ghi khi hai câu hỏi cùng một lúc
+    return rows[::-1]
 
 
 def _src(code: str, p: Dict[str, Any]) -> Dict[str, Any]:
@@ -73,12 +86,17 @@ def _src(code: str, p: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _clean(v: Any, n: int) -> str:
+    return str(v or "").replace(chr(0x2014), "-").strip()[:n]
+
+
 class BDAssistant:
     def __init__(self, s: Any):
         self.s = s
         self.subs: Set[asyncio.Queue] = set()
         self.roles: Dict[str, str] = {str(k): v for k, v in ((s.meeting.get("bd") or {}).get("roles") or {}).items()}
         self.inflight = 0
+        self.auto_inflight = 0
         self.last_run = 0.0
         self.last_seq = 0
         self.last_query: Set[str] = set()
@@ -116,7 +134,7 @@ class BDAssistant:
         await self.emit({"type": "bd_roles", "roles": dict(self.roles)})
         return dict(self.roles)
 
-    # ------------------------------------------------------------ tự gợi ý ---
+    # ------------------------------------------------------------ tác vụ nền ---
     def close(self) -> None:
         for t in list(self._tasks):
             t.cancel()
@@ -128,8 +146,18 @@ class BDAssistant:
         t.add_done_callback(self._tasks.discard)
         return t
 
+    async def drain(self, timeout: float = 60.0) -> None:
+        """Chờ các câu trả lời đang chạy xong (dùng khi test / kết thúc)."""
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            busy = [t for t in self._tasks if t is not asyncio.current_task() and t is not self._timer and not t.done()]
+            if not busy:
+                return
+            await asyncio.wait(busy, timeout=max(0.01, end - time.monotonic()))
+
+    # ------------------------------------------------------------ lời nói trong cuộc họp ---
     def note(self, seg: Dict[str, Any]) -> None:
-        """Câu mới trong cuộc họp: chờ người nói nói hết rồi xem có cần gợi ý không."""
+        """Câu mới trong cuộc họp: chờ người nói nói hết rồi xem khách có hỏi gì không."""
         if self._timer is not None and not self._timer.done():
             self._timer.cancel()
         self._timer = self._spawn(self._later(DEBOUNCE_S))
@@ -144,15 +172,17 @@ class BDAssistant:
     def _role(self, seg: Dict[str, Any]) -> str:
         return self.roles.get(str(seg.get("speaker_key")), "")
 
-    def _is_ask(self, segs: List[Dict[str, Any]]) -> bool:
+    def _candidates(self, segs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Câu có thể là câu hỏi / băn khoăn của khách (bỏ câu của đội mình khi đã đánh dấu vai trò)."""
         marked = bool(self.roles)
+        out = []
         for g in segs:
             if marked and self._role(g) == "team":
-                continue                              # câu của đội mình: không cần gợi ý
+                continue
             text = g.get("text") or ""
             if _ASK.search(retrieval.fold(text)) or len(text.split()) >= LONG_WORDS:
-                return True
-        return False
+                out.append(g)
+        return out
 
     def _window(self) -> List[Dict[str, Any]]:
         segs = [g for g in self.s.segments if (g.get("text") or "").strip()]
@@ -171,93 +201,111 @@ class BDAssistant:
         return "\n".join(out)
 
     async def check(self) -> None:
-        """Có câu hỏi / băn khoăn mới của khách thì chạy một lượt gợi ý (giữ giới hạn tần suất)."""
+        """Khách vừa hỏi / băn khoăn thì mở một lượt trên khung chat (giữ giới hạn tần suất)."""
         now = time.monotonic()
         # chỉ xét câu trong 90 giây gần nhất: server khởi động lại giữa buổi thì không xét lại cả buổi họp
         fresh = [g for g in self._window() if int(g.get("seq") or 0) > self.last_seq]
         if not fresh or not self.s.is_live():
             return
-        if self.inflight >= MAX_INFLIGHT or now - self.last_run < MIN_GAP_S:
+        if self.auto_inflight >= MAX_INFLIGHT or now - self.last_run < MIN_GAP_S:
             wait = max(MIN_GAP_S - (now - self.last_run), 1.0)
             self._timer = self._spawn(self._later(wait))   # thử lại sau, không bỏ lỡ câu hỏi vừa rồi
             return
         self.last_seq = max(int(g.get("seq") or 0) for g in fresh)
-        if not self._is_ask(fresh):
+        cands = self._candidates(fresh)
+        if not cands:
             return
-        query = " ".join(g.get("text", "") for g in fresh[-4:])
-        q = set(retrieval.terms(query))
+        last = cands[-1]
+        same = [g for g in cands[-3:] if g.get("speaker_key") == last.get("speaker_key")]   # khách hỏi trong vài câu liền
+        question = " ".join((g.get("text") or "").strip() for g in same)[:500]
+        q = set(retrieval.terms(question))
         if q and self.last_query and len(q & self.last_query) / max(1, len(q | self.last_query)) > 0.8:
-            return                                    # gần như trùng câu vừa gợi ý
+            return                                    # gần như trùng câu vừa trả lời
         self.last_query, self.last_run = q, now
-        # chạy thành tác vụ riêng: câu mới tới chỉ hủy bộ hẹn giờ, không hủy lượt gợi ý đang gọi AI
-        self._spawn(self.run(query, typed="", by=None))
+        # tác vụ riêng: câu mới tới chỉ hủy bộ hẹn giờ, không cắt ngang lượt đang ghi lên khung chat
+        self._spawn(self.open_turn("auto", question, seg=last))
 
-    async def ask(self, question: str, by: Optional[str]) -> List[Dict[str, Any]]:
-        """Hỏi nhanh từ bảng BD."""
+    # ------------------------------------------------------------ một lượt hỏi đáp ---
+    async def open_turn(self, source: str, question: str, seg: Optional[Dict[str, Any]] = None,
+                        by: Optional[str] = None) -> Dict[str, Any]:
+        """Ghi câu hỏi lên khung chat ngay (đang tìm câu trả lời), câu trả lời chạy nền rồi cập nhật cùng lượt đó."""
         question = re.sub(r"\s+", " ", question or "").strip()[:500]
-        return await self.run(question, typed=question, by=by) if question else []
+        turn = {"id": uuid.uuid4().hex[:12], "meeting_id": self.s.id, "source": source, "question": question,
+                "asked": question, "speaker": (seg or {}).get("speaker_label") or "", "seq": (seg or {}).get("seq"),
+                "t": (seg or {}).get("t_start"), "status": "pending", "answer": "", "notes": [], "sources": [],
+                "confidence": "", "by": by, "at": time.time()}
+        await asyncio.to_thread(_col().insert_one, dict(turn))
+        await self.emit({"type": "bd_turn", "turn": dict(turn)})       # bản sao: lượt còn được cập nhật khi có câu trả lời
+        self._spawn(self._answer(turn))
+        return dict(turn)
 
-    def ask_soon(self, question: str, by: Optional[str]) -> None:
-        self._spawn(self.ask(question, by))
+    async def ask(self, question: str, by: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Đội BD hỏi trên khung chat."""
+        question = re.sub(r"\s+", " ", question or "").strip()
+        return await self.open_turn("typed", question, by=by) if question else None
 
-    # ------------------------------------------------------------ một lượt ---
-    async def run(self, query: str, typed: str = "", by: Optional[str] = None) -> List[Dict[str, Any]]:
-        artifacts.set_meeting(self.s.id, "BD gợi ý")
-        gid = self.s.meeting.get("group_id")
-        idx = await asyncio.to_thread(retrieval.group_index, gid) if gid else retrieval.Index([])
-        recent = self._window()
-        search = f"{query} {typed}".strip()
-        kb = idx.search(search, k=6, kinds={"kb"})
-        hist = idx.search(search, k=6, kinds={"minutes", "talk"}, exclude_meeting=self.s.id)
-        jobs = []
-        if kb or typed:
-            jobs.append(self._card("kb", KB_SYSTEM, "K", kb, recent, typed, by))
-        if hist:
-            jobs.append(self._card("history", HISTORY_SYSTEM, "M", hist, recent, typed, by))
-        if not jobs:
-            return []
+    async def mark(self, seq: int, by: Optional[str]) -> Dict[str, Any]:
+        """Đội BD bấm vào một câu trong lời nói để hỏi trợ lý (trợ lý bỏ sót câu hỏi đó)."""
+        seg = next((g for g in self.s.segments if g.get("seq") == seq), None)
+        if seg is None or not (seg.get("text") or "").strip():
+            raise KeyError("Không tìm thấy câu này trong cuộc họp")
+        return await self.open_turn("marked", seg["text"], seg=seg, by=by)
+
+    def _history(self, before: float) -> str:
+        """Vài lượt hỏi đáp gần nhất trên khung chat (để hiểu câu hỏi nối tiếp)."""
+        rows = list(_col().find({"meeting_id": self.s.id, "status": "done", "at": {"$lt": before}}, {"_id": 0})
+                    .sort([("at", -1), ("_id", -1)]).limit(HISTORY_TURNS))[::-1]
+        return "\n".join(f"- Hỏi: {r.get('question')}\n  Đáp: {_CODE.sub('', r.get('answer') or '')[:400]}" for r in rows)
+
+    async def _answer(self, turn: Dict[str, Any]) -> None:
+        auto = turn["source"] == "auto"
         self.inflight += 1
+        if auto:
+            self.auto_inflight += 1
         await self.emit(self.status())
         try:
-            res = await asyncio.gather(*jobs, return_exceptions=True)
+            artifacts.set_meeting(self.s.id, "BD gợi ý")
+            gid = self.s.meeting.get("group_id")
+            idx = await asyncio.to_thread(retrieval.group_index, gid) if gid else retrieval.Index([])
+            history = "" if auto else await asyncio.to_thread(self._history, turn["at"])
+            search = f"{turn['question']} {history[-300:] if history else ''}".strip()
+            kb = idx.search(search, k=K_SOURCES, kinds={"kb"})
+            hist = idx.search(search, k=M_SOURCES, kinds={"minutes", "talk"}, exclude_meeting=self.s.id)
+            refs = {f"K{i + 1}": p for i, p in enumerate(kb)}
+            refs.update({f"M{i + 1}": p for i, p in enumerate(hist)})
+            src = "\n\n".join(f"[{c}] {p.get('title')} - {p.get('ref')}:\n{p.get('text', '')[:1400]}" for c, p in refs.items())
+            label = {"auto": "KHÁCH NÓI, trợ lý tự nhận ra từ lời nói", "typed": "ĐỘI BD HỎI TRÊN KHUNG CHAT",
+                     "marked": "ĐỘI BD ĐÁNH DẤU CÂU NÀY TRONG LỜI NÓI"}[turn["source"]]
+            prompt = (f"Cuộc họp: {self.s.title}\n\nLỜI NÓI GẦN NHẤT (90 giây):\n{self._lines(self._window()) or '(chưa có)'}\n\n"
+                      + (f"HỘI THOẠI TRƯỚC TRÊN KHUNG CHAT:\n{history}\n\n" if history else "")
+                      + f"CÂU HỎI ({label}): {turn['question']}\n\n"
+                      + f"NGUỒN:\n{src or '(nhóm chưa có tài liệu, chưa có cuộc họp trước liên quan)'}")
+            data = artifacts._json_from_text(await artifacts._call_llm(BD_SYSTEM, prompt, max_tokens=1000))
+            data = data if isinstance(data, dict) else {}
+            question = re.sub(r"\s+", " ", str(data.get("question") or "")).strip()[:300]
+            answer = _clean(data.get("answer"), 1500)
+            if auto and (not question or not answer):
+                upd = {"status": "none"}                   # trợ lý thấy không phải câu hỏi: gỡ khỏi khung chat
+            elif not answer:
+                upd = {"status": "error", "answer": "Chưa có câu trả lời, anh chị hỏi lại giúp em."}
+            else:
+                notes = [_clean(x, 400) for x in (data.get("notes") or []) if _clean(x, 400)][:3]
+                used = list(dict.fromkeys(_CODE.findall(" ".join([answer] + notes))))
+                upd = {"status": "done", "question": question or turn["question"], "answer": answer, "notes": notes,
+                       "sources": [_src(c, refs[c]) for c in used if c in refs][:8],
+                       "confidence": _clean(data.get("confidence"), 10).lower()}
+        except Exception as e:
+            log.warning("meeting.bd: trả lời câu hỏi lỗi: %s", e)
+            upd = {"status": "error", "answer": f"Chưa trả lời được: {e}"}
         finally:
             self.inflight -= 1
-            await self.emit(self.status())
-        cards = []
-        for r in res:
-            if isinstance(r, Exception):
-                log.warning("meeting.bd: gợi ý lỗi: %s", r)
-                await self.emit({"type": "bd_error", "text": f"Chưa gợi ý được: {r}"})
-            elif r:
-                cards.append(r)
-        return cards
-
-    async def _card(self, kind: str, system: str, prefix: str, passages: List[Dict[str, Any]],
-                    recent: List[Dict[str, Any]], typed: str, by: Optional[str]) -> Optional[Dict[str, Any]]:
-        refs = {f"{prefix}{i + 1}": p for i, p in enumerate(passages)}
-        label = "TÀI LIỆU CỦA NHÓM" if kind == "kb" else "CÁC CUỘC HỌP TRƯỚC"
-        src = "\n\n".join(f"[{code}] {p.get('title')} - {p.get('ref')}:\n{p.get('text', '')[:1500]}" for code, p in refs.items())
-        prompt = (f"Cuộc họp: {self.s.title}\n\nLỜI NÓI GẦN NHẤT (90 giây):\n{self._lines(recent) or '(chưa có)'}\n\n"
-                  + (f"HỎI NHANH của đội BD: {typed}\n\n" if typed else "")
-                  + f"{label}:\n{src or '(nhóm chưa có tài liệu nào)'}")
-        data = artifacts._json_from_text(await artifacts._call_llm(system, prompt, max_tokens=900))
-        if not isinstance(data, dict):
-            return None
-        question = re.sub(r"\s+", " ", str(data.get("question") or "")).strip()[:300]
-        answer = str(data.get("answer") or "").replace(chr(0x2014), "-").strip()[:1500]
-        if not answer or (not question and not typed):
-            return None
-        card = {"id": uuid.uuid4().hex[:12], "meeting_id": self.s.id, "kind": kind, "auto": not typed,
-                "question": typed or question, "answer": answer,
-                "points": [str(x).replace(chr(0x2014), "-").strip()[:300] for x in (data.get("points") or [])
-                           if str(x).strip()][:4],
-                "confidence": str(data.get("confidence") or "").strip().lower()[:10],
-                "sources": [_src(c, refs[c]) for c in dict.fromkeys(str(r).strip("[] ") for r in (data.get("refs") or []))
-                            if c in refs][:6],
-                "by": by, "at": time.time()}
-        await asyncio.to_thread(_col().insert_one, dict(card))
-        await self.emit({"type": "bd_card", "card": card})
-        return card
+            if auto:
+                self.auto_inflight -= 1
+        upd["done_at"] = time.time()
+        turn.update(upd)
+        await asyncio.to_thread(_col().update_one, {"id": turn["id"]}, {"$set": upd})
+        await self.emit({"type": "bd_turn", "turn": dict(turn)})
+        await self.emit(self.status())
 
 
 def assistant(s: Any) -> Optional[BDAssistant]:
