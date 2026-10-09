@@ -7,10 +7,95 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng người Việt tự nhiên của Soniox, đọc rõ cả từ tiếng
 Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy, miễn phí), vừa làm vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.16.0 - cập nhật 09/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.17.0 - cập nhật 09/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
+
+## Bản 3.17: nhóm cuộc họp, lưu biên bản lên Google Drive và về máy
+
+Thiết kế: `docs/plans/2026-10-09-groups-drive-design.md`. Kế hoạch: `docs/plans/2026-10-09-groups-drive.md`.
+Đây là giai đoạn 1/4. Các giai đoạn sau:
+- Calendar và Google Meet.
+- Nhớ xuyên cuộc họp: nhắc khi nói khác với các buổi trước.
+- Chế độ BD.
+
+### Nhóm cuộc họp
+- Trang chủ có cột **Nhóm**: Tất cả cuộc họp, từng nhóm (nhóm người khác chia sẻ có nhãn "được chia sẻ"), nút Tạo nhóm.
+  Màn hình nhỏ dùng ô chọn.
+- Có thể tạo cuộc họp ngay trong nhóm, hoặc chuyển cuộc họp đã có vào nhóm (menu cuộc họp, "Chuyển vào nhóm...").
+- Bản web, quyền theo vai:
+  - **Chủ nhóm**: đổi tên nhóm, thêm hoặc bớt thành viên (email công ty), đặt số ngày giữ ghi âm trên Drive, gỡ cuộc họp
+    khỏi nhóm, xóa nhóm. Xóa nhóm không xóa cuộc họp.
+  - **Thành viên**: xem mọi cuộc họp và biên bản của nhóm, tạo và tham gia cuộc họp trong nhóm. Không xóa được cuộc họp
+    của người khác.
+  - **Người ngoài nhóm**: mở link cuộc họp hay link nhóm đều nhận 404.
+- Bản chạy trên máy (`run.cmd`) vẫn dùng nhóm được, chỉ không chia sẻ.
+
+### Google Drive (bản web)
+- Cài đặt có mục **Google Drive**: mỗi người tự kết nối Drive của mình.
+  - Chỉ xin quyền `drive.file`: ứng dụng chỉ thấy các tệp do nó tạo.
+  - Tài khoản Google phải trùng email đăng nhập.
+  - Khóa Google được mã hóa trước khi lưu lên Atlas.
+- Khi biên bản xong, server tự lưu vào Drive của **chủ nhóm**:
+  `Meeting Copilot / <Tên nhóm> / <dd-mm-yyyy HHhMM - Tiêu đề> / Biên bản - <tiêu đề> (Google Docs) + Ghi âm.mp3`.
+  - Cuộc họp không thuộc nhóm lưu vào `Meeting Copilot / Cuộc họp riêng /` trong Drive của người tạo.
+  - Thư mục nhóm được chia sẻ quyền chỉnh sửa cho thành viên, tự gỡ khi bớt người, không gửi email thông báo.
+  - Lưu lại thì ghi đè đúng tệp cũ.
+  - Đổi tên nhóm thì thư mục đổi tên theo. Chuyển cuộc họp sang nhóm khác thì thư mục chuyển theo. Thư mục bị xóa trên
+    Drive thì được tạo lại.
+  - Lỗi tạm thời thì thử lại 3 lần. Trạng thái hiện trên thanh tiêu đề phòng họp: Đã lưu lên Drive (link), Đang lưu,
+    Lỗi - Lưu lại, Chưa lưu Drive: cần kết nối. Menu phòng họp có "Lưu lên Google Drive".
+- **Ghi âm trên Drive tự xóa** sau số ngày của nhóm (mặc định `RECORDING_RETENTION_DAYS`), kiểm tra mỗi 12 giờ.
+  - Xóa bản ghi âm hoặc xóa cuộc họp trong ứng dụng thì bản trên Drive cũng bị xóa.
+  - Biên bản trên Drive giữ mãi.
+  - Hộp xác nhận bật ghi âm nói rõ âm thanh được lưu lên Drive của nhóm.
+
+### Lưu về thư mục trên máy (Chrome, Edge)
+- Cài đặt, mục **Lưu biên bản về máy**: chọn một thư mục gốc. Ứng dụng tự tạo
+  `<gốc>/<Tên nhóm>/<dd-mm-yyyy HHhMM - Tiêu đề>/Biên bản.docx + Ghi âm.mp3`.
+- Cài đặt nhóm có thể chọn **thư mục riêng cho nhóm**, chỉ áp dụng trên trình duyệt đó.
+- Biên bản xong lúc ứng dụng đang mở thì ghi ngay. Biên bản xong lúc ứng dụng đóng thì ghi bù lần mở sau (30 ngày gần
+  nhất); trang chủ hiện nút **Cho phép lưu** khi trình duyệt cần quyền ghi lại.
+- Mỗi biên bản ghi một lần. Biên bản được lập lại thì ghi đè.
+- Trình duyệt khác: menu phòng họp có **Tải biên bản (.docx)** và **Tải ghi âm (.mp3)**.
+
+### Sửa thêm
+- Server trên Render chạy giờ UTC nên giờ trong biên bản lệch 7 tiếng. Image Docker giờ đặt `TZ=ICT-7` (giờ Việt Nam).
+
+### Việc làm một lần để bật Google Drive
+1. Google Cloud Console, project chứa OAuth client đang dùng (`GOOGLE_OAUTH_CLIENT_ID`):
+   - **APIs & Services > Library**: bật **Google Drive API**.
+   - **Credentials**: mở OAuth client, thêm **Authorized redirect URIs**:
+     `https://urbox-meeting-api.onrender.com/api/google/callback`.
+   - **OAuth consent screen** (Data access): thêm quyền `.../auth/drive.file`. Nên để User type **Internal**, để chỉ tài
+     khoản urbox.vn kết nối được và không cần Google thẩm định.
+2. Render > Environment: đặt `GOOGLE_OAUTH_CLIENT_SECRET` (lấy trong `.env`). `PUBLIC_BASE_URL` đã có trong `render.yaml`.
+3. Mở ứng dụng, Cài đặt, mục Google Drive, Kết nối.
+
+### Đã kiểm tra
+- 39 test mới:
+  - `test_groups`: dữ liệu và quyền nhóm, API, quyền xem cuộc họp theo nhóm, xóa cuộc họp.
+  - `test_recap_export`: Markdown sang Google Docs và Word, ghi âm sang MP3, tên thư mục giờ Việt Nam, API tải về.
+  - `test_google_oauth`: state ký, sai tài khoản, thiếu quyền Drive, khóa mã hóa, tự làm mới, thu hồi, chặn chuyển
+    hướng lạ.
+  - `test_drive_sync` (Drive giả):
+    - tạo cấu trúc thư mục, lưu lại không trùng;
+    - lưu vào Drive chủ nhóm và chia sẻ thành viên;
+    - thư mục bị xóa thì tạo lại, đổi tên theo nhóm, chuyển nhóm thì chuyển thư mục;
+    - chưa kết nối, lỗi tạm thời;
+    - xóa ghi âm quá hạn;
+    - biên bản xong thì tự lưu;
+    - xóa bản ghi âm thì xóa trên Drive.
+- Toàn bộ 330 test đều qua.
+- Chạy thử trên Chromium:
+  - Hai tài khoản: tạo nhóm, thêm thành viên (email ngoài công ty bị từ chối), tạo cuộc họp trong nhóm. Thành viên thấy
+    nhóm "được chia sẻ" và cuộc họp.
+  - Trạng thái Drive trong phòng họp, menu tải về, nút Kết nối chuyển sang Google đúng redirect URI và quyền `drive.file`,
+    thông báo khi quay về.
+  - Tự lưu về máy đúng cấu trúc thư mục, chạy lại không ghi trùng.
+- **Chưa kiểm tra với Google thật**: cần làm 3 bước ở trên trước. Hộp chọn thư mục gốc của Chrome không tự động hóa
+  được, bài kiểm tra thay bằng thư mục giả.
 
 ## Bản 3.16 (bản web): mỗi người một danh sách cuộc họp, tài liệu lấy từ máy người dùng
 

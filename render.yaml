@@ -21,6 +21,10 @@ services:
         generateValue: true
       - key: GOOGLE_OAUTH_CLIENT_ID
         sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET      # kết nối Google Drive của từng người (bản 3.17)
+        sync: false
+      - key: PUBLIC_BASE_URL                 # redirect URI của Google: <địa chỉ này>/api/google/callback
+        value: https://urbox-meeting-api.onrender.com
       - key: ALLOWED_DOMAIN
         value: urbox.vn
       - key: AUTH_ADMIN_EMAILS
