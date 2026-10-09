@@ -44,7 +44,8 @@ RUN useradd --create-home --uid 10001 app && mkdir -p data && chown -R app:app d
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 # Bản web: bắt buộc đăng nhập; chỉ dùng API key, không có gói đăng ký qua CLI (cài đặt chung trên Atlas chọn gói đăng ký
 # ở máy cá nhân thì server vẫn chạy bằng API key)
-ENV MEETING_ENV_FILE=/app/data/.env AUTH_REQUIRED=1 LLM_API_ONLY=1 CLI_LLM_DISABLED=1 PORT=8080
+# TZ=ICT-7 (chuỗi POSIX, không cần tzdata): giờ Việt Nam trong biên bản, tên thư mục; máy chủ đám mây mặc định chạy giờ UTC
+ENV MEETING_ENV_FILE=/app/data/.env AUTH_REQUIRED=1 LLM_API_ONLY=1 CLI_LLM_DISABLED=1 PORT=8080 TZ=ICT-7
 VOLUME ["/app/data"]
 EXPOSE 8080
 
