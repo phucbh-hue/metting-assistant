@@ -121,7 +121,8 @@ class WebModeApiTests(unittest.TestCase):
 
     def test_websocket_needs_token_and_recording_consent_names_the_user(self):
         tok = self.login()
-        mid = db.create_meeting("Họp web")
+        mid = self.client.post("/api/meetings", json={"title": "Họp web"},
+                               headers={"Authorization": f"Bearer {tok}"}).json()["meeting_id"]
         with self.assertRaises(WebSocketDisconnect):
             with self.client.websocket_connect(f"/ws/meeting/{mid}/events") as ws:
                 ws.receive_text()

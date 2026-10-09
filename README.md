@@ -7,10 +7,65 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng người Việt tự nhiên của Soniox, đọc rõ cả từ tiếng
 Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy, miễn phí), vừa làm vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.15.0 - cập nhật 08/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.16.0 - cập nhật 09/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
+
+## Bản 3.16 (bản web): mỗi người một danh sách cuộc họp, tài liệu lấy từ máy người dùng
+
+Chỉ áp dụng cho bản web (`AUTH_REQUIRED=1`). Chạy trên máy (`run.cmd`) vẫn như cũ: thấy mọi cuộc họp, thư mục tài liệu
+là thư mục trên chính máy đó.
+
+### Mỗi người chỉ thấy cuộc họp của mình
+- Cuộc họp lưu email người tạo (`owner`). Chỉ người tạo xem và mở được cuộc họp đó, kể cả quản trị viên cũng không:
+  - danh sách cuộc họp;
+  - API của cuộc họp (chép lời, biên bản, ghi âm, xuất dữ liệu);
+  - WebSocket mic và sự kiện;
+  - sản phẩm AI (`/api/artifacts/{id}`).
+- Người khác mở link cuộc họp thì nhận 404, như cuộc họp không tồn tại.
+- Cuộc họp tạo trước khi có đăng nhập (chưa có chủ) thuộc về quản trị viên. Dữ liệu trên Atlas không bị sửa.
+- Thống kê ở trang chủ chỉ đếm cuộc họp của mình. Bảng chi phí AI che tên cuộc họp của người khác.
+- Hồ sơ giọng nói vẫn dùng chung cả công ty, để nhận ra đồng nghiệp trong mọi cuộc họp.
+
+### Tài liệu lấy từ thư mục trên máy người dùng
+- Trước đây server tự quét thư mục (Desktop, Downloads...) của chính máy chạy server. Lên web thì đó là máy Render, nên
+  tính năng này không còn tác dụng.
+- Bây giờ mỗi người chọn thư mục trên máy mình:
+  - ở Cài đặt > Thư mục tài liệu;
+  - hoặc ngay trong hộp **Mở tài liệu** (có thêm nút **Chọn một tệp**).
+- Trình duyệt quét **tên** các tệp PDF, PowerPoint, Word, Markdown trong thư mục (sâu tới 4 cấp, tối đa 4.000 tệp) và gửi
+  danh sách tên lên server, để trợ lý tìm theo lời nói.
+- "Jarvis, mở file kế hoạch quý 4":
+  1. Server tìm tệp khớp nhất trong danh sách tên.
+  2. Server xin trình duyệt gửi đúng tệp đó (sự kiện `need_file`).
+  3. Trình duyệt gửi tệp lên, server dựng slide.
+  4. Server xóa tệp gốc ngay sau khi đọc, chỉ giữ ảnh từng trang.
+  - Tệp kịch bản ("trình bày theo kịch bản trong file X") cũng đi theo đường này.
+- Chrome và Edge nhớ thư mục đã chọn. Sau khi mở lại trình duyệt, cần bấm **Cho phép** một lần để đọc lại thư mục.
+  Trình duyệt khác (Firefox, Safari) phải chọn lại thư mục mỗi lần mở trang.
+- Giới hạn:
+  - Tệp tối đa `DOC_UPLOAD_MAX_MB` (mặc định 50 MB).
+  - Chỉ nhận `.pdf .pptx .ppt .docx .md .txt .json`.
+  - Chỉ người tạo cuộc họp gửi được tệp vào cuộc họp đó.
+- Server không có LibreOffice nên PowerPoint hiện chữ, ghi chú và hình lớn nhất của từng slide. Muốn đúng thiết kế thì lưu
+  thêm bản PDF rồi mở bản PDF.
+
+### Đã kiểm tra
+- 10 test mới (`tests/test_web_library.py`):
+  - Quyền xem cuộc họp: người khác, quản trị viên, cuộc họp cũ, WebSocket, sản phẩm AI, thống kê, chi phí.
+  - Tải tệp lên: mở, đọc kịch bản, tệp sai loại, tệp quá lớn, người khác gửi tệp vào cuộc họp không phải của mình.
+  - Mở bằng giọng nói: trình duyệt gửi tệp; trình duyệt báo không gửi được (trợ lý báo ngay, không chờ hết hạn);
+    chưa chọn thư mục.
+- Toàn bộ 299 test đều qua.
+- Chạy thử trên Chromium (server bật đăng nhập, mỗi người một token):
+  - Bình không thấy và không mở được cuộc họp của An.
+  - An chọn thư mục ở Cài đặt; tệp `.exe` bị bỏ qua.
+  - Lệnh "mở file kế hoạch quý 4": trợ lý xin đúng tệp, trình duyệt gửi lên, slide mở ra và trợ lý hỏi cách trình bày.
+  - Hộp Mở tài liệu liệt kê tệp trên máy; bấm một tệp thì mở được.
+  - Không còn tệp gốc nào trên server sau khi đọc.
+- Chưa kiểm tra được bằng tự động: hộp chọn thư mục gốc của Chrome/Edge (`showDirectoryPicker`). Bài kiểm tra trên dùng
+  cách chọn thư mục dự phòng của trình duyệt khác, phần quét và gửi tệp dùng chung.
 
 ## 0. Chạy trên web: giao diện trên Vercel, server riêng (bản 3.15.0)
 

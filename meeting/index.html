@@ -1218,7 +1218,10 @@ function onEvent(R, ev) {
   try { avatarEvent(R, ev); } catch (e) { console.error(e); }
   switch (ev.type) {
     case 'init':
-      applySnapshot(ev); renderRoom(); break;
+      applySnapshot(ev); renderRoom();
+      if (clientLib()) clibSync(R);          // bản web: báo server tên các tệp trong thư mục đã chọn trên máy
+      break;
+    case 'need_file': provideClientFile(R, ev); break;
     case 'segment': addSegment(ev.segment); break;
     case 'segments_relabeled':
       ev.items.forEach(it => { const s = R.segs.get(it.seq); if (s) Object.assign(s, it); });
@@ -3762,6 +3765,192 @@ function fmtSize(n) {
   n = n || 0;
   return n >= 1048576 ? `${(n / 1048576).toFixed(1).replace('.', ',')} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`;
 }
+/* ---------- Thư mục tài liệu trên máy người dùng (bản web) ----------
+   Server không đọc được ổ đĩa của người dùng. Trình duyệt quét TÊN các tệp trong thư mục người dùng chọn và gửi danh sách
+   tên lên để trợ lý tìm theo lời nói; nội dung một tệp chỉ được gửi lên khi mở tệp đó (server đọc xong là xóa).
+   Chrome / Edge nhớ thư mục đã chọn (IndexedDB, cần bấm "Cho phép" lại sau khi mở lại trình duyệt); trình duyệt khác
+   chọn lại thư mục mỗi lần mở trang. */
+const CLIB = { dirs: [], files: [], refs: new Map(), picked: [], needPerm: false };
+const CLIB_EXTS = ['.pdf', '.pptx', '.ppt', '.docx', '.md', '.txt', '.json'];
+const CLIB_SKIP = new Set(['node_modules', '.git', '__pycache__', 'appdata', '$recycle.bin', 'venv', '.venv']);
+const clientLib = () => AUTH.required;
+const canPickDir = () => typeof window.showDirectoryPicker === 'function';
+function clibDb() {
+  return new Promise((ok, bad) => {
+    const r = indexedDB.open('meeting-copilot', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('dirs', { keyPath: 'id' });
+    r.onsuccess = () => ok(r.result); r.onerror = () => bad(r.error);
+  });
+}
+async function clibStore(mode, fn) {
+  const dbh = await clibDb();
+  return new Promise((ok, bad) => {
+    const tx = dbh.transaction('dirs', mode); const req = fn(tx.objectStore('dirs'));
+    tx.oncomplete = () => ok(req ? req.result : undefined); tx.onerror = () => bad(tx.error);
+  });
+}
+function clibAdd(fid, rel, root, ref) {
+  const base = rel.split('/').pop(); const m = /\.[^.]+$/.exec(base); const ext = m ? m[0].toLowerCase() : '';
+  if (!CLIB_EXTS.includes(ext) || base.startsWith('~$') || base.startsWith('.') || CLIB.files.length >= 4000) return;
+  CLIB.refs.set(fid, ref);
+  CLIB.files.push({ fid, rel, root, ext, name: base.slice(0, base.length - ext.length), folder: rel.split('/').slice(0, -1).join('/') });
+}
+async function clibScan(dirH, id, root, prefix = '', depth = 0) {
+  for await (const [name, h] of dirH.entries()) {
+    if (CLIB.files.length >= 4000) return;
+    if (h.kind === 'directory') {
+      if (depth < 4 && !name.startsWith('.') && !CLIB_SKIP.has(name.toLowerCase())) await clibScan(h, id, root, `${prefix}${name}/`, depth + 1);
+    } else clibAdd(`${id}/${prefix}${name}`, `${prefix}${name}`, root, h);
+  }
+}
+async function clibPermission(h, ask) {
+  try {
+    if ((await h.queryPermission({ mode: 'read' })) === 'granted') return true;
+    return ask ? (await h.requestPermission({ mode: 'read' })) === 'granted' : false;
+  } catch (e) { return false; }
+}
+/** Quét lại các thư mục đã chọn. ask: hỏi quyền đọc (chỉ khi người dùng vừa bấm nút). */
+async function clibLoad(ask = false) {
+  CLIB.files = []; CLIB.refs.clear(); CLIB.needPerm = false;
+  CLIB.dirs = canPickDir() ? await clibStore('readonly', st => st.getAll()).catch(() => []) : [];
+  for (const d of CLIB.dirs) {
+    if (!(await clibPermission(d.handle, ask))) { CLIB.needPerm = true; continue; }
+    try { await clibScan(d.handle, d.id, d.name); } catch (e) { /* thư mục đã bị xóa hoặc đổi tên */ }
+  }
+  for (const f of CLIB.picked) {               // trình duyệt không nhớ thư mục: tệp đã chọn trong lần mở trang này
+    const parts = (f.webkitRelativePath || f.name).split('/');
+    const root = parts.length > 1 ? parts.shift() : 'Tệp đã chọn';
+    clibAdd(`pick/${root}/${parts.join('/')}`, parts.join('/'), root, f);
+  }
+  return CLIB.files;
+}
+function pickFiles({ dir = false } = {}) {
+  return new Promise(ok => {
+    const inp = document.createElement('input'); inp.type = 'file';
+    if (dir) { inp.webkitdirectory = true; inp.multiple = true; } else inp.accept = CLIB_EXTS.join(',');
+    inp.onchange = () => ok([...inp.files]);
+    inp.addEventListener('cancel', () => ok([]));
+    inp.click();
+  });
+}
+async function clibPickDir() {
+  if (!canPickDir()) {
+    const files = await pickFiles({ dir: true });
+    if (!files.length) return false;
+    CLIB.picked = files; await clibLoad(false); return true;
+  }
+  let h;
+  try { h = await window.showDirectoryPicker({ id: 'meeting-docs', mode: 'read' }); } catch (e) { return false; }   // bấm Hủy
+  await clibStore('readwrite', st => st.put({ id: `d${Date.now().toString(36)}`, name: h.name, handle: h }));
+  await clibLoad(true);
+  return true;
+}
+async function clibRemove(id) { await clibStore('readwrite', st => st.delete(id)); await clibLoad(false); }
+/** Báo server tên các tệp (không gửi nội dung) để trợ lý tìm tệp theo lời nói. */
+async function clibSync(R) {
+  if (!clientLib() || !R) return;
+  try {
+    await clibLoad(false);
+    await POST(`/api/meetings/${R.id}/client-library`, { files: CLIB.files.map(({ fid, rel, root, name, ext }) => ({ fid, rel, root, name, ext })) });
+  } catch (e) { console.warn('Không gửi được danh sách tài liệu:', e); }
+}
+async function clibFile(fid) {
+  const ref = CLIB.refs.get(fid);
+  if (!ref) throw new Error('Không còn thấy tệp này trong thư mục đã chọn');
+  return ref instanceof File ? ref : ref.getFile();
+}
+function uploadDoc(mid, file, fields = {}) {
+  const fd = new FormData(); fd.append('file', file, file.name);
+  Object.entries(fields).forEach(([k, v]) => fd.append(k, v));
+  return api('POST', `/api/meetings/${mid}/doc-upload`, fd);
+}
+/** Trợ lý vừa xin một tệp ("mở file kế hoạch quý 4"): gửi đúng tệp đó, không được thì báo để trợ lý nói lại ngay. */
+async function provideClientFile(R, ev) {
+  try {
+    await uploadDoc(R.id, await clibFile(ev.fid), { request_id: ev.request_id, purpose: ev.purpose === 'script' ? 'script' : 'open' });
+  } catch (e) {
+    try { await POST(`/api/meetings/${R.id}/client-file-error`, { request_id: ev.request_id, error: String(e.message || e).slice(0, 280) }); }
+    catch (_) { /* trợ lý tự hết thời gian chờ */ }
+    if (CLIB.needPerm) toast('Trình duyệt cần được cho phép đọc thư mục tài liệu: bấm Mở tài liệu rồi bấm Cho phép.', 'info', 7000);
+  }
+}
+function clibRow(f) {
+  return `<button type="button" class="lib-row" data-clib-fid="${esc(f.fid)}" title="${esc(`${f.root}/${f.rel}`)}">
+    <span class="lib-ext" style="color:${EXT_COLOR[f.ext] || '#9AA5B1'}">${esc(f.ext.replace('.', ''))}</span>
+    <span class="min-w-0"><span class="block truncate">${esc(f.name)}</span><span class="block truncate text-[12px] text-muted">${esc([f.root, f.folder].filter(Boolean).join(' / '))}</span></span>
+    <span></span></button>`;
+}
+function openClientLibrary(mode = 'open') {
+  const R = S.room; if (!R) return toast('Mở một cuộc họp trước để trình bày tài liệu.', 'info');
+  const script = mode === 'script';
+  openModal(`<h3 class="text-lg font-semibold mb-1">${script ? 'Chọn tệp kịch bản' : 'Mở tài liệu'}</h3>
+    <p class="text-muted text-[13px] mb-3">${script ? 'Tệp Word, PDF, Markdown hoặc văn bản chứa lời trình bày. Có đánh dấu "Slide 1:", "Slide 2:" thì em ghép đúng từng slide, không có thì em tự ghép theo nội dung và giữ nguyên câu chữ.'
+      : 'PDF, PowerPoint, Word, Markdown trong thư mục anh chị chọn trên máy. Chỉ tệp anh chị mở mới được gửi lên, server đọc xong là xóa.'}</p>
+    <div id="clib-perm"></div>
+    <input id="lib-q" class="input mb-2" type="search" autocomplete="off" placeholder="Tìm theo tên tệp hoặc thư mục" aria-label="Tìm tài liệu">
+    <div id="lib-list" class="flex flex-col gap-0.5" style="max-height:52vh;overflow:auto" aria-live="polite"><div class="flex items-center gap-2 text-muted p-2"><span class="spinner"></span>Đang đọc thư mục...</div></div>
+    <div class="flex flex-wrap justify-between items-center gap-2 mt-3">
+      <div class="flex flex-wrap gap-x-4 gap-y-1"><button type="button" class="link text-[12.5px]" data-clib="add">Chọn thư mục trên máy</button><button type="button" class="link text-[12.5px]" data-clib="file">Chọn một tệp</button></div>
+      <button type="button" class="btn btn-ghost" data-act="modal-close">Đóng</button></div>`, {
+    wide: true,
+    onMount(m) {
+      const render = () => {
+        if (!document.contains(m)) return;
+        $('#clib-perm', m).innerHTML = CLIB.needPerm ? `<div class="rounded-xl p-3 mb-3 text-[13px] flex items-center justify-between gap-3" style="border:1px solid var(--line-strong)">
+          <span>Trình duyệt cần anh chị cho phép đọc lại thư mục tài liệu đã chọn.</span><button type="button" class="btn btn-primary btn-sm shrink-0" data-clib="grant">Cho phép</button></div>` : '';
+        const words = foldVi($('#lib-q', m).value).split(/\s+/).filter(Boolean);
+        const items = CLIB.files.filter(f => words.every(w => foldVi(`${f.root}/${f.rel}`).includes(w))).slice(0, 150);
+        $('#lib-list', m).innerHTML = items.length ? items.map(clibRow).join('')
+          : `<p class="text-muted p-2">${CLIB.files.length ? 'Không có tệp nào khớp.' : (CLIB.dirs.length || CLIB.picked.length)
+            ? 'Thư mục đã chọn chưa có tệp PDF, PowerPoint, Word hay Markdown nào.' : 'Chưa chọn thư mục tài liệu. Bấm "Chọn thư mục trên máy" bên dưới.'}</p>`;
+      };
+      const send = async (file, folder) => {
+        closeModal();
+        if (script) hideAsk(); else if (!STAGE.open) openStage(true);
+        toast(`Đang gửi ${file.name}...`, 'info');
+        try { await uploadDoc(R.id, file, { purpose: script ? 'script' : 'open', folder: folder || '' }); }
+        catch (err) { toast(err.message, 'err'); }
+      };
+      $('#lib-q', m).addEventListener('input', render);
+      m.addEventListener('click', async e => {
+        const act = e.target.closest('[data-clib]');
+        if (act) {
+          const k = act.dataset.clib;
+          if (k === 'file') { const [f] = await pickFiles(); if (f) send(f, ''); return; }
+          if (k === 'add' ? await clibPickDir() : (await clibLoad(true), true)) { render(); clibSync(R); }
+          return;
+        }
+        const b = e.target.closest('[data-clib-fid]'); if (!b) return;
+        const entry = CLIB.files.find(f => f.fid === b.dataset.clibFid);
+        try { send(await clibFile(b.dataset.clibFid), entry ? entry.folder || entry.root : ''); }
+        catch (err) { toast(err.message, 'err'); }
+      });
+      clibLoad(false).then(render);
+    }
+  });
+}
+async function renderClientLibrarySettings(box) {
+  await clibLoad(false);
+  const x = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  box.innerHTML = `
+    <ul class="flex flex-col gap-1 mb-2">
+      ${CLIB.dirs.map(d => `<li class="flex items-center justify-between gap-2"><span class="truncate">${esc(d.name)}</span>
+        <button type="button" class="icon-btn" data-clib-rm="${esc(d.id)}" aria-label="Bỏ thư mục ${esc(d.name)}" title="Bỏ thư mục">${x}</button></li>`).join('')}
+      ${CLIB.picked.length ? `<li class="text-muted">${CLIB.picked.length} tệp đã chọn (chỉ trong lần mở trang này)</li>` : ''}
+      ${!CLIB.dirs.length && !CLIB.picked.length ? '<li class="text-muted">Chưa chọn thư mục nào.</li>' : ''}
+    </ul>
+    ${CLIB.needPerm ? '<p class="text-[12.5px] mb-2">Trình duyệt cần anh chị cho phép đọc lại thư mục. <button type="button" class="link" data-clib-grant>Cho phép</button></p>' : ''}
+    <button type="button" class="btn btn-ghost btn-sm" data-clib-add>Chọn thư mục trên máy</button>
+    <p class="text-[12px] text-muted mt-2">${canPickDir() ? 'Trình duyệt nhớ các thư mục này cho lần sau.' : 'Trình duyệt này không nhớ thư mục: mỗi lần mở trang cần chọn lại (Chrome hoặc Edge thì nhớ được).'}
+      Chỉ tên tệp được gửi lên để trợ lý tìm theo lời nói; nội dung chỉ gửi khi anh chị mở tệp đó.</p>`;
+  box.onclick = async e => {
+    if (e.target.closest('[data-clib-add]')) await clibPickDir();
+    else if (e.target.closest('[data-clib-grant]')) await clibLoad(true);
+    else { const rm = e.target.closest('[data-clib-rm]'); if (!rm) return; await clibRemove(rm.dataset.clibRm); }
+    renderClientLibrarySettings(box);
+    if (S.room) clibSync(S.room);
+  };
+}
 function libRow(it) {
   const when = it.mtime ? fmt.date(it.mtime).split(' ')[0] : '';
   return `<button type="button" class="lib-row" data-lib-path="${esc(it.path)}" title="${esc(it.path)}">
@@ -3770,6 +3959,7 @@ function libRow(it) {
     <span class="text-[12px] text-muted num whitespace-nowrap text-right">${esc(fmtSize(it.size))}${when ? `<br>${esc(when)}` : ''}</span></button>`;
 }
 function openLibrary(mode = 'open') {
+  if (clientLib()) return openClientLibrary(mode);
   const R = S.room; if (!R) return toast('Mở một cuộc họp trước để trình bày tài liệu.', 'info');
   const script = mode === 'script';
   openModal(`<h3 class="text-lg font-semibold mb-1">${script ? 'Chọn tệp kịch bản' : 'Mở tài liệu'}</h3>
@@ -4309,6 +4499,7 @@ async function testProvider(pid, btn) {
 }
 async function renderLibrarySettings(box) {
   if (!box) return;
+  if (clientLib()) return renderClientLibrarySettings(box);
   try {
     const r = await GET('/api/settings/library');
     const norm = p => String(p || '').toLowerCase().replace(/[\\/]+$/, '');

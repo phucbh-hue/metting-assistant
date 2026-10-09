@@ -48,6 +48,10 @@ def reset_db():
     artifacts._provider_cache.clear()          # nguồn AI đã chọn ở test trước không được dính sang test sau
     from meeting import tts
     tts._settings_cache["value"] = None        # nguồn giọng đọc đã chọn ở test trước cũng vậy
+    import sys
+    appmod = sys.modules.get("meeting.app")
+    if appmod is not None:
+        appmod._OWNERS.clear()                 # id cuộc họp được dùng lại sau khi dựng lại DB
     for s in list(live.SESSIONS.values()):
         s.dispose()
     live.SESSIONS.clear()

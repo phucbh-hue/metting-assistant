@@ -11,6 +11,7 @@ import io
 import json
 import logging
 import os
+import re
 import time
 import wave
 from contextlib import asynccontextmanager
@@ -71,6 +72,53 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Meeting Assistant AI", version="3.2.0", lifespan=lifespan)
+_MEETING_PATH = re.compile(r"^/(?:api/meetings|ws/meeting)/(\d+)(?:/|$)")
+_ARTIFACT_PATH = re.compile(r"^/api/artifacts/(\d+)(?:/|$)")
+_OWNERS: Dict[int, str] = {}       # id cuộc họp -> email người tạo ("" = chưa có chủ); chủ không đổi nên nhớ luôn
+
+
+def _meeting_owner(mid: int) -> Optional[str]:
+    if mid not in _OWNERS:
+        m = db.get_meeting(mid)
+        if m is None:
+            return None
+        _OWNERS[mid] = str(m.get("owner") or "")
+    return _OWNERS[mid]
+
+
+class MeetingAccessMiddleware:
+    """Bản web: mỗi cuộc họp (API, WebSocket, sản phẩm AI của cuộc họp) chỉ người tạo truy cập được. Người khác nhận
+    404 như cuộc họp không tồn tại. Chạy SAU AuthMiddleware (đã biết người dùng)."""
+
+    def __init__(self, app_):
+        self.app = app_
+
+    async def __call__(self, scope, receive, send):
+        if auth.ENABLED and scope["type"] in ("http", "websocket"):
+            path = scope.get("path") or ""
+            mid = None
+            m = _MEETING_PATH.match(path)
+            if m:
+                mid = int(m.group(1))
+            else:
+                a = _ARTIFACT_PATH.match(path)
+                if a:
+                    art = await asyncio.to_thread(db.get_artifact, int(a.group(1)))
+                    mid = int(art["meeting_id"]) if art and art.get("meeting_id") is not None else None
+            if mid is not None:
+                owner = await asyncio.to_thread(_meeting_owner, mid)
+                user = (scope.get("state") or {}).get("user")
+                if owner is not None and not auth.can_access(user, {"owner": owner}):
+                    if scope["type"] == "websocket":
+                        from starlette.websockets import WebSocketClose
+                        return await WebSocketClose(code=4404)(scope, receive, send)
+                    from starlette.responses import JSONResponse
+                    return await JSONResponse({"detail": "Không tìm thấy cuộc họp"}, status_code=404)(scope, receive, send)
+        return await self.app(scope, receive, send)
+
+
+# Thứ tự (ngoài -> trong): CORS -> đăng nhập -> quyền xem cuộc họp -> ứng dụng. Thêm sau = bọc ngoài.
+app.add_middleware(MeetingAccessMiddleware)
 # Bản web (AUTH_REQUIRED=1): chặn request chưa đăng nhập. CORS thêm SAU để bọc ngoài cùng: lỗi 401 vẫn có header CORS,
 # trang trên Vercel (khác tên miền) đọc được và hiện màn hình đăng nhập.
 app.add_middleware(auth.AuthMiddleware)
@@ -357,8 +405,9 @@ def health():
 
 
 @app.get("/api/stats")
-def stats():
-    return db.get_stats()
+def stats(request: Request):
+    u = _user(request)
+    return db.get_stats(db.owner_filter(u["email"], include_unowned=auth.is_admin(u)) if auth.ENABLED and u else None)
 
 
 @app.get("/api/settings/assistant")
@@ -380,6 +429,8 @@ def put_assistant_settings(req: AssistantSettings):
 @app.get("/api/library")
 async def library(q: str = "", limit: int = 60):
     """Tệp PDF / PowerPoint / Word / Markdown trong các thư mục tài liệu (khớp câu tìm, hoặc mới sửa trước)."""
+    if auth.ENABLED:            # bản web: tài liệu nằm trên máy người dùng, trình duyệt tự liệt kê
+        return {"items": [], "roots": [], "client": True}
     items = await asyncio.to_thread(decks.browse, q, max(1, min(int(limit), 200)))
     return {"items": items, "roots": [{"path": str(r), "name": r.name} for r in decks.library_roots()]}
 
@@ -392,7 +443,7 @@ def _library_settings() -> Dict[str, Any]:
     env_dirs = [d for d in (os.getenv("LIBRARY_DIRS") or "").split(os.pathsep) if d.strip()]
     return {"roots": [{"path": str(r), "name": r.name} for r in decks.library_roots()], "saved": saved,
             "env": env_dirs, "defaults": os.getenv("LIBRARY_DEFAULTS", "1").strip() != "0",
-            "slides_dir": str(decks.SLIDES_DIR), "libreoffice": bool(decks._soffice())}
+            "slides_dir": str(decks.SLIDES_DIR), "libreoffice": bool(decks._soffice()), "client": auth.ENABLED}
 
 
 @app.get("/api/settings/library")
@@ -429,6 +480,8 @@ def deck_asset(key: str, name: str):
 @app.post("/api/meetings/{mid}/open-file")
 async def open_file(mid: int, req: OpenFileReq):
     """Mở một tệp trong thư mục tài liệu lên màn hình trình chiếu, rồi hỏi tự trình bày hay theo kịch bản."""
+    if auth.ENABLED:
+        raise HTTPException(status_code=400, detail="Bản web mở tài liệu từ máy của anh chị: dùng Mở tài liệu để chọn tệp")
     p = decks.allowed(req.path)
     if p is None:
         raise HTTPException(status_code=400, detail="Tệp không đọc được hoặc không nằm trong thư mục tài liệu (thêm thư mục trong Cài đặt)")
@@ -443,6 +496,79 @@ async def open_file(mid: int, req: OpenFileReq):
         events.append(q.get_nowait())
     s.dispose_if_idle()
     return {"events": events, "artifact_id": s.stage["artifact_id"]}
+
+
+class ClientLibraryReq(BaseModel):
+    files: List[Dict[str, Any]] = Field(default_factory=list, max_length=5000)
+
+
+class ClientFileErrorReq(BaseModel):
+    request_id: str = Field(..., max_length=64)
+    error: str = Field("", max_length=300)
+
+
+@app.post("/api/meetings/{mid}/client-library")
+async def set_client_library(mid: int, req: ClientLibraryReq):
+    """Bản web: danh sách TÊN tệp trong các thư mục người dùng chọn trên máy, để trợ lý tìm tệp theo lời nói."""
+    s = await _session_or_404(mid)
+    n = s.set_client_library(req.files)
+    s.dispose_if_idle()
+    return {"files": n}
+
+
+@app.post("/api/meetings/{mid}/doc-upload")
+async def upload_document(mid: int, file: UploadFile = File(...), purpose: str = Form("open"),
+                          request_id: str = Form(""), folder: str = Form("")):
+    """Tệp gửi lên từ máy người dùng (bản web). purpose: open (mở lên màn hình), script (tệp kịch bản để trình bày),
+    hoặc request_id (trợ lý vừa xin tệp này theo lời nói). Đọc xong là xóa, chỉ giữ ảnh từng trang."""
+    if purpose not in ("open", "script"):
+        raise HTTPException(status_code=400, detail="purpose phải là open hoặc script")
+    s = await _session_or_404(mid)
+
+    def chunks():
+        while True:
+            b = file.file.read(1024 * 1024)
+            if not b:
+                return
+            yield b
+    try:
+        path = await asyncio.to_thread(decks.save_upload, mid, file.filename or "tai-lieu", chunks())
+    except ValueError as e:
+        if request_id:
+            s.resolve_client_file(request_id, error=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+    name = decks.safe_name(file.filename or "tai-lieu")
+    if request_id:              # trợ lý đang chờ tệp này: phần còn lại (mở, đọc kịch bản, xóa tệp) do trợ lý làm
+        if not s.resolve_client_file(request_id, path=str(path)):
+            decks.discard_upload(path)
+            raise HTTPException(status_code=410, detail="Trợ lý không còn chờ tệp này")
+        return {"accepted": True}
+    q = await s.subscribe()
+    try:
+        if purpose == "script":
+            try:
+                text = await asyncio.to_thread(decks.read_text, str(path))
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Không đọc được tệp kịch bản: {e}")
+            res = await s.answer_present({"mode": "script", "source": "text", "text": text, "name": name})
+        else:
+            await s.open_path(str(path), display=(name, folder.strip()[:120]))
+            res = {"artifact_id": s.stage["artifact_id"]}
+    finally:
+        s.unsubscribe(q)
+        decks.discard_upload(path)
+    events = []
+    while not q.empty():
+        events.append(q.get_nowait())
+    s.dispose_if_idle()
+    return {**res, "events": events}
+
+
+@app.post("/api/meetings/{mid}/client-file-error")
+async def client_file_error(mid: int, req: ClientFileErrorReq):
+    """Trình duyệt không gửi được tệp trợ lý xin (chưa cho phép đọc thư mục, tệp đã xóa...): trợ lý báo lại ngay."""
+    s = live.SESSIONS.get(mid)
+    return {"ok": bool(s and s.resolve_client_file(req.request_id, error=req.error or "trình duyệt không gửi được tệp"))}
 
 
 @app.post("/api/meetings/{mid}/explain")
@@ -480,6 +606,8 @@ async def present_mode(mid: int, req: PresentModeReq):
             raise HTTPException(status_code=400, detail="source phải là notes, file hoặc text")
         ans["source"] = req.source
         if req.source == "file":
+            if req.path and auth.ENABLED:
+                raise HTTPException(status_code=400, detail="Bản web: chọn tệp kịch bản trên máy để gửi lên")
             if req.path:
                 p = decks.allowed(req.path)
                 if p is None:
@@ -722,12 +850,14 @@ async def remove_voice(vid: int):
 # MEETINGS API
 # ==============================================================================
 @app.get("/api/meetings")
-def get_meetings():
-    return {"meetings": db.list_meetings_with_stats()}
+def get_meetings(request: Request):
+    u = _user(request)
+    where = db.owner_filter(u["email"], include_unowned=auth.is_admin(u)) if auth.ENABLED and u else None
+    return {"meetings": db.list_meetings_with_stats(where=where)}
 
 
 @app.post("/api/meetings")
-def create_meeting(req: MeetingCreate):
+def create_meeting(req: MeetingCreate, request: Request):
     title = req.title.strip() or "Cuộc họp nội bộ"
     mid = db.create_meeting(
         title=title,
@@ -738,7 +868,9 @@ def create_meeting(req: MeetingCreate):
         expected_attendees=[a.strip() for a in req.expected_attendees if a and a.strip()],
         vocab=req.vocab if req.vocab else DEFAULT_VOCAB,
         source=req.source,
+        owner=(_user(request) or {}).get("email") if auth.ENABLED else None,
     )
+    _OWNERS.pop(mid, None)
     return {"success": True, "meeting_id": mid, "title": title}
 
 
@@ -792,6 +924,8 @@ async def delete_meeting_record(mid: int):
     if s is not None:
         await s.close()
     await asyncio.to_thread(recording.delete, mid)
+    await asyncio.to_thread(decks.delete_uploads, mid)
+    _OWNERS.pop(mid, None)
     return {"success": await asyncio.to_thread(db.delete_meeting, mid)}
 
 
@@ -898,9 +1032,16 @@ class TtsReq(BaseModel):
 
 
 @app.get("/api/usage")
-async def llm_usage():
+async def llm_usage(request: Request):
     """Số lần gọi LLM, token vào/ra, chi phí ước tính: toàn bộ, theo cuộc họp, theo việc, theo model."""
-    return await asyncio.to_thread(db.usage_summary)
+    data = await asyncio.to_thread(db.usage_summary)
+    if auth.ENABLED:            # bản web: không lộ tên cuộc họp của người khác
+        u, owners = _user(request), await asyncio.to_thread(db.meeting_owners)
+        for row in data.get("by_meeting") or []:
+            mid = row.get("meeting_id")
+            if mid is not None and not auth.can_access(u, {"owner": owners.get(mid, "")}):
+                row["title"] = "(cuộc họp của người khác)"
+    return data
 
 
 @app.get("/api/meetings/{mid}/export")

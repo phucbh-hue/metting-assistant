@@ -347,12 +347,13 @@ def delete_voice(vid: int) -> bool:
 def create_meeting(title: str, description: str = "", host_id: Optional[int] = None,
                    meeting_type: str = "Technical Review", agenda: Optional[List[str]] = None,
                    expected_attendees: Optional[List[str]] = None,
-                   vocab: Optional[List[str]] = None, source: str = "mic") -> int:
+                   vocab: Optional[List[str]] = None, source: str = "mic", owner: Optional[str] = None) -> int:
     db = _get_db()
     now = time.time()
     mid = _next_id("meetings")
     db["meetings"].insert_one({
         "id": mid,
+        "owner": (owner or "").strip().lower() or None,       # bản web: email người tạo (chỉ người đó xem được)
         "title": (title or "").strip() or "Cuộc họp nội bộ",
         "description": (description or "").strip(),
         "meeting_type": (meeting_type or "").strip() or "Technical Review",
@@ -384,10 +385,23 @@ def list_meetings(limit: int = 50) -> List[Dict[str, Any]]:
     return list(_get_db()["meetings"].find({}, {"_id": 0}).sort("started_at", -1).limit(limit))
 
 
-def list_meetings_with_stats(limit: int = 100) -> List[Dict[str, Any]]:
-    """Danh sách cuộc họp kèm thống kê (thời lượng, số câu, số người nói, số artifacts)."""
+def owner_filter(email: str, include_unowned: bool = False) -> Dict[str, Any]:
+    """Điều kiện lọc cuộc họp của một người (bản web); include_unowned: thêm cuộc họp cũ chưa có chủ (quản trị viên)."""
+    conds: List[Dict[str, Any]] = [{"owner": (email or "").strip().lower()}]
+    if include_unowned:
+        conds += [{"owner": None}, {"owner": ""}]
+    return {"$or": conds}
+
+
+def meeting_owners() -> Dict[int, str]:
+    """{id cuộc họp: email người tạo ("" nếu chưa có chủ)}."""
+    return {m["id"]: (m.get("owner") or "") for m in _get_db()["meetings"].find({}, {"_id": 0, "id": 1, "owner": 1})}
+
+
+def list_meetings_with_stats(limit: int = 100, where: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """Danh sách cuộc họp kèm thống kê (thời lượng, số câu, số người nói, số artifacts). where: điều kiện lọc thêm."""
     db = _get_db()
-    docs = list(db["meetings"].find({}, {"_id": 0}).sort("started_at", -1).limit(limit))
+    docs = list(db["meetings"].find(where or {}, {"_id": 0}).sort("started_at", -1).limit(limit))
     ids = [d["id"] for d in docs]
     seg_stats: Dict[int, Dict[str, Any]] = {}
     art_counts: Dict[int, int] = {}
@@ -454,9 +468,10 @@ def end_meeting(mid: int) -> bool:
     ).modified_count > 0
 
 
-def get_stats() -> Dict[str, Any]:
+def get_stats(where: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Thống kê chung; where: chỉ tính các cuộc họp khớp điều kiện (bản web: của người đang đăng nhập)."""
     db = _get_db()
-    meetings = list(db["meetings"].find({}, {"_id": 0, "status": 1, "started_at": 1, "ended_at": 1}))
+    meetings = list(db["meetings"].find(where or {}, {"_id": 0, "id": 1, "status": 1, "started_at": 1, "ended_at": 1}))
     ended = [m for m in meetings if m.get("status") == "ended" and m.get("started_at") and m.get("ended_at")]
     total_s = sum(max(0.0, m["ended_at"] - m["started_at"]) for m in ended)
     return {
@@ -465,7 +480,8 @@ def get_stats() -> Dict[str, Any]:
         "meetings_ended": len(ended),
         "total_duration_s": int(total_s),
         "avg_duration_s": int(total_s / len(ended)) if ended else 0,
-        "segments_total": db["meeting_segments"].count_documents({}),
+        "segments_total": db["meeting_segments"].count_documents(
+            {"meeting_id": {"$in": [m["id"] for m in meetings]}} if where else {}),
         "voices_total": db["voices"].count_documents({}),
     }
 

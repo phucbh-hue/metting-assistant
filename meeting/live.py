@@ -25,7 +25,7 @@ from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple
 import numpy as np
 import websockets
 
-from meeting import artifacts, db, follow, identity, llm, recording, tts, voice
+from meeting import artifacts, auth, db, follow, identity, llm, recording, tts, voice
 
 log = logging.getLogger("meeting.live")
 
@@ -552,6 +552,10 @@ class MeetingSession:
         self._art_cache: Dict[int, Dict[str, Any]] = {}
         self._explain_cache: Dict[Tuple[int, str], str] = {}     # (sơ đồ, ý) -> lời giải thích: bấm lại không gọi AI
         self._present_scope: Optional[Dict[str, Any]] = None     # "thuyết trình slide này": nhớ qua câu hỏi cách trình bày
+        # Bản web: tài liệu nằm trên máy người dùng. Trình duyệt gửi danh sách TÊN tệp trong thư mục đã chọn; nội dung
+        # một tệp chỉ được gửi lên khi cần mở / đọc kịch bản (need_file -> trình duyệt gửi tệp -> resolve_client_file).
+        self.client_files: List[Dict[str, Any]] = []
+        self._file_waits: Dict[str, "asyncio.Future"] = {}
         self._queue: asyncio.Queue = asyncio.Queue()
         self._db_queue: asyncio.Queue = asyncio.Queue()
         self._workers: List[asyncio.Task] = []
@@ -1759,9 +1763,89 @@ class MeetingSession:
         await self._say(f"Dạ, em mở lại {name} \"{target.get('title', '')}\"{ver}.", quiet=True)
         return True
 
+    # ------------------------------------------------- tài liệu trên máy người dùng (bản web) ---
+    CLIENT_FILE_WAIT_S = 90.0      # chờ trình duyệt gửi tệp lên (tệp lớn, mạng chậm)
+
+    def set_client_library(self, files: List[Dict[str, Any]]) -> int:
+        """Danh sách tệp trong các thư mục người dùng chọn trên máy (chỉ tên, không có nội dung)."""
+        from meeting import decks
+        out = []
+        for f in files[:5000]:
+            ext = str(f.get("ext") or "").lower()
+            fid = str(f.get("fid") or "")[:600]
+            if not fid or ext not in decks.EXTS:
+                continue
+            out.append({"fid": fid, "rel": str(f.get("rel") or "")[:600], "root": str(f.get("root") or "")[:120],
+                        "name": str(f.get("name") or "")[:200], "ext": ext})
+        self.client_files = out
+        return len(out)
+
+    def client_mode(self) -> bool:
+        """Tài liệu lấy từ máy người dùng (bản web) thay vì thư mục trên máy chạy server."""
+        return auth.ENABLED
+
+    async def _client_file(self, entry: Dict[str, Any], purpose: str) -> Optional[str]:
+        """Nhờ trình duyệt gửi lên một tệp trong thư mục đã chọn. Trả về đường dẫn tạm trên server, hoặc None nếu trình
+        duyệt không gửi được (chưa cho phép đọc thư mục, tệp đã bị xóa, không ai đang mở phòng họp...)."""
+        import secrets
+        rid = secrets.token_hex(8)
+        fut = asyncio.get_running_loop().create_future()
+        self._file_waits[rid] = fut
+        try:
+            await self.emit({"type": "need_file", "request_id": rid, "fid": entry["fid"], "purpose": purpose,
+                             "name": f"{entry.get('name', '')}{entry.get('ext', '')}"})
+            return await asyncio.wait_for(fut, self.CLIENT_FILE_WAIT_S)
+        except (asyncio.TimeoutError, RuntimeError) as e:
+            log.info("meeting.live: không nhận được tệp %s từ trình duyệt: %s", entry.get("fid"), e)
+            return None
+        finally:
+            self._file_waits.pop(rid, None)
+
+    def resolve_client_file(self, request_id: str, path: Optional[str] = None, error: str = "") -> bool:
+        """Trình duyệt đã gửi tệp (path) hoặc báo không gửi được (error). False nếu không còn ai chờ."""
+        fut = self._file_waits.get(request_id)
+        if fut is None or fut.done():
+            return False
+        if path:
+            fut.set_result(path)
+        else:
+            fut.set_exception(RuntimeError(error or "trình duyệt không gửi được tệp"))
+        return True
+
+    async def _open_client_file(self, query: str) -> bool:
+        from meeting import decks
+        if not self.client_files:
+            await self._say("Anh chị chưa chọn thư mục tài liệu trên máy. Bấm Mở tài liệu, hoặc vào Cài đặt, Thư mục tài liệu "
+                            "để chọn thư mục, rồi gọi lại em nhé.", "concerned")
+            return True
+        found = decks.rank_entries(query, self.client_files)
+        if not found:
+            roots = ", ".join(sorted({f["root"] for f in self.client_files if f.get("root")})[:4])
+            await self._say(f"Em không thấy tệp nào khớp trong {roots or 'thư mục đã chọn'}. Anh chị bấm Mở tài liệu để chọn "
+                            "tệp giúp em.", "concerned")
+            return True
+        if len(found) > 1 and found[1]["score"] >= found[0]["score"]:
+            names = "; ".join(f"{r['name']}{r['ext']} trong {r['folder'] or r['root']}" for r in found[:3])
+            await self._say(f"Em thấy nhiều tệp giống nhau: {names}. Anh chị nói rõ tên tệp giúp em.", "concerned")
+            return True
+        entry = found[0]
+        name = f"{entry['name']}{entry['ext']}"
+        await self._progress(f"Dạ, em lấy tệp {name} từ máy anh chị.", "status")
+        path = await self._client_file(entry, "open")
+        if not path:
+            await self._say(f"Em chưa lấy được tệp {name} từ máy anh chị. Có thể trình duyệt cần được cho phép đọc thư mục: "
+                            "anh chị bấm Mở tài liệu rồi chọn lại tệp giúp em.", "concerned")
+            return True
+        try:
+            return await self.open_path(path, query, display=(name, entry["folder"] or entry["root"]))
+        finally:
+            decks.discard_upload(path)
+
     async def _open_deck_file(self, query: str) -> bool:
         """"Mở file báo cáo Q3 trong Downloads": tìm trong các thư mục tài liệu, mở lên màn hình, hỏi cách trình bày."""
         from meeting import decks
+        if self.client_mode():
+            return await self._open_client_file(query)
         found = await asyncio.to_thread(decks.find_files, query)
         if not found:
             roots = ", ".join(r.name for r in decks.library_roots()) or str(decks.SLIDES_DIR)
@@ -1776,15 +1860,17 @@ class MeetingSession:
             return True
         return await self.open_path(found[0]["path"], query)
 
-    async def open_path(self, path: str, command: str = "") -> bool:
-        """Mở một tệp trên máy lên màn hình trình chiếu rồi hỏi cách trình bày (hoặc làm luôn nếu câu lệnh đã nói)."""
+    async def open_path(self, path: str, command: str = "", display: Optional[Tuple[str, str]] = None) -> bool:
+        """Mở một tệp trên máy lên màn hình trình chiếu rồi hỏi cách trình bày (hoặc làm luôn nếu câu lệnh đã nói).
+        display: (tên tệp, thư mục) để nói với người dùng khi tệp đang nằm ở thư mục tạm (gửi lên từ trình duyệt)."""
         p = Path(path)
+        shown, folder = display or (p.name, p.parent.name or p.anchor)
         if p.suffix.lower() in (".pdf", ".pptx", ".ppt"):
-            await self._progress(f"Dạ, em mở {p.name}, đang dựng hình từng trang ạ.", "status")
+            await self._progress(f"Dạ, em mở {shown}, đang dựng hình từng trang ạ.", "status")
         try:
             art = await asyncio.to_thread(artifacts.import_deck, self.id, str(p))
         except Exception as e:
-            await self._say(f"Em không đọc được tệp {p.name}: {e}", "concerned")
+            await self._say(f"Em không đọc được tệp {shown}: {e}", "concerned")
             return True
         self._art_cache[art["id"]] = art
         await self.emit({"type": "artifact_created", "artifact": art})
@@ -1792,7 +1878,8 @@ class MeetingSession:
         await self.stage_action("show", artifact_id=art["id"])
         n = len(self._slides_of(art))
         unit = "trang" if p.suffix.lower() in (".pdf", ".docx") else "slide"
-        await self._say(f"Dạ, em mở \"{p.name}\" trong thư mục {p.parent.name or p.anchor}, gồm {n} {unit}.", quiet=True)
+        where = f" trong thư mục {folder}" if folder else ""
+        await self._say(f"Dạ, em mở \"{shown}\"{where}, gồm {n} {unit}.", quiet=True)
         ans = llm.present_answer(command, explicit=True) if command else None
         self._present_scope = None                    # tệp vừa mở: trình bày từ trang đầu
         if ans:
@@ -1863,8 +1950,21 @@ class MeetingSession:
         elif source in ("file", "text"):
             text = ans.get("text") or ""
             if source == "file":
-                path = ans.get("path")
-                if not path:
+                path, shown, temp = ans.get("path"), "", False
+                if not path and self.client_mode():
+                    found = decks.rank_entries(ans.get("query", ""), self.client_files)
+                    if not found:
+                        await self._ask_where("Em không thấy tệp kịch bản nào khớp trong thư mục đã chọn. Anh chị nói lại tên "
+                                              "tệp, hoặc bấm Chọn tệp kịch bản giúp em.")
+                        return {"ok": False, "need": "where"}
+                    shown = f"{found[0]['name']}{found[0]['ext']}"
+                    path = await self._client_file(found[0], "script")
+                    if not path:
+                        await self._ask_where(f"Em chưa lấy được tệp {shown} từ máy anh chị. Anh chị bấm Chọn tệp kịch bản "
+                                              "giúp em.")
+                        return {"ok": False, "need": "where"}
+                    temp = True
+                elif not path:
                     exclude = (deck.get("source") or {}).get("path")
                     found = await asyncio.to_thread(decks.find_files, ans.get("query", ""), None, exclude)
                     if not found:
@@ -1876,9 +1976,12 @@ class MeetingSession:
                 except Exception as e:
                     await self._ask_where(f"Em không đọc được tệp kịch bản: {e}")
                     return {"ok": False, "need": "where"}
-                label = f"tệp {Path(path).name}"
+                finally:
+                    if temp:
+                        decks.discard_upload(path)
+                label = f"tệp {shown or Path(path).name}"
             else:
-                label = "kịch bản anh chị dán vào"
+                label = f"tệp {ans['name']}" if ans.get("name") else "kịch bản anh chị dán vào"
             if not text.strip():
                 await self._ask_where("Kịch bản đang trống. Anh chị gửi lại giúp em nhé.")
                 return {"ok": False, "need": "where"}

@@ -184,24 +184,90 @@ def find_files(query: str, base: Optional[Path] = None, exclude: Optional[str] =
             continue
         root = _root_of(p, roots) or p.parent
         rel = p.relative_to(root)
-        folder_toks = set(_tokens(" ".join(rel.parts[:-1])))
-        file_toks = set(_tokens(p.stem))
-        score = 2.0 * len(q & folder_toks) + 1.5 * len(q & file_toks)
+        score = _score(q, fq, rel.parts[:-1], p.stem, p.suffix.lower(), root.name)
         if score <= 0:
             continue
-        if rel.parts[:-1] and fold(rel.parts[-2]) in fq:
-            score += 3.0              # tên thư mục xuất hiện nguyên vẹn trong câu nói
-        if len(fold(p.stem)) > 3 and fold(p.stem) in fq:
-            score += 3.0
-        root_name = root.name.lower()
-        if root_name in _ROOT_WORDS and q & _ROOT_WORDS[root_name]:
-            score += 1.0
-        if q & _EXT_WORDS.get(p.suffix.lower(), set()):
-            score += 0.8
         results.append({"path": str(p), "rel": str(rel).replace(os.sep, "/"), "folder": "/".join(rel.parts[:-1]),
                         "name": p.stem, "ext": p.suffix.lower(), "root": str(root), "score": score})
     results.sort(key=lambda r: (-r["score"], len(r["rel"]), r["rel"]))
     return results
+
+
+def _score(q: set, fq: str, folder_parts, stem: str, ext: str, root_name: str) -> float:
+    """Mức khớp giữa câu nói (tập từ q, câu đã bỏ dấu fq) và một tệp: thư mục chứa, tên tệp, thư mục gốc, định dạng."""
+    score = 2.0 * len(q & set(_tokens(" ".join(folder_parts)))) + 1.5 * len(q & set(_tokens(stem)))
+    if score <= 0:
+        return 0.0
+    if folder_parts and fold(folder_parts[-1]) in fq:
+        score += 3.0              # tên thư mục xuất hiện nguyên vẹn trong câu nói
+    if len(fold(stem)) > 3 and fold(stem) in fq:
+        score += 3.0
+    root_name = (root_name or "").lower()
+    if root_name in _ROOT_WORDS and q & _ROOT_WORDS[root_name]:
+        score += 1.0
+    if q & _EXT_WORDS.get(ext, set()):
+        score += 0.8
+    return score
+
+
+def rank_entries(query: str, entries: List[Dict[str, Any]], exclude: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Như find_files nhưng trên danh sách tệp do trình duyệt gửi lên (bản web: thư mục trên máy người dùng).
+    entries: [{fid, rel ("thư mục con/tên.pdf"), root (tên thư mục đã chọn), name, ext}]; exclude: fid bỏ qua."""
+    q, fq = set(_tokens(query)), fold(query)
+    out = []
+    for e in entries:
+        if exclude and e.get("fid") == exclude:
+            continue
+        parts = [x for x in str(e.get("rel") or "").split("/") if x][:-1]
+        score = _score(q, fq, parts, str(e.get("name") or ""), str(e.get("ext") or "").lower(), str(e.get("root") or ""))
+        if score > 0:
+            out.append({**e, "folder": "/".join(parts), "score": score})
+    out.sort(key=lambda r: (-r["score"], len(r.get("rel") or ""), r.get("rel") or ""))
+    return out
+
+
+# ------------------------------------------------------- tệp gửi lên từ trình duyệt ---
+UPLOAD_DIR = Path(os.getenv("DOC_UPLOAD_DIR") or (ROOT / "data" / "uploads"))
+UPLOAD_MAX_MB = float(os.getenv("DOC_UPLOAD_MAX_MB", "50") or 50)
+
+
+def safe_name(name: str) -> str:
+    """Tên tệp an toàn để lưu (giữ tiếng Việt, bỏ thư mục và ký tự cấm), giữ đuôi tệp."""
+    base = Path(str(name or "").replace("\\", "/")).name
+    base = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", base).strip(" .") or "tai-lieu"
+    stem, ext = os.path.splitext(base)
+    return stem[:120] + ext.lower()
+
+
+def save_upload(meeting_id: int, name: str, chunks) -> Path:
+    """Lưu tệp người dùng gửi lên (để mở / đọc kịch bản) vào thư mục tạm riêng của cuộc họp. Đọc xong thì xóa
+    (discard_upload): ảnh từng trang đã lưu trong data/deck_assets, server không giữ tệp gốc của người dùng."""
+    fname = safe_name(name)
+    ext = os.path.splitext(fname)[1]
+    if ext not in EXTS:
+        raise ValueError(f"Chưa hỗ trợ định dạng {ext or '(không có đuôi)'}: chỉ mở được {', '.join(EXTS)}")
+    d = UPLOAD_DIR / f"m{int(meeting_id)}" / hashlib.sha1(os.urandom(16)).hexdigest()[:12]
+    d.mkdir(parents=True, exist_ok=True)
+    path, size, limit = d / fname, 0, UPLOAD_MAX_MB * 1024 * 1024
+    with open(path, "wb") as fh:
+        for chunk in chunks:
+            size += len(chunk)
+            if size > limit:
+                fh.close()
+                shutil.rmtree(d, ignore_errors=True)
+                raise ValueError(f"Tệp lớn hơn {UPLOAD_MAX_MB:.0f} MB")
+            fh.write(chunk)
+    return path
+
+
+def discard_upload(path) -> None:
+    p = Path(path)
+    if UPLOAD_DIR in p.parents:
+        shutil.rmtree(p.parent, ignore_errors=True)
+
+
+def delete_uploads(meeting_id: int) -> None:
+    shutil.rmtree(UPLOAD_DIR / f"m{int(meeting_id)}", ignore_errors=True)
 
 
 def folders(base: Optional[Path] = None) -> List[str]:
