@@ -233,6 +233,7 @@ def init():
         db["meeting_groups"].create_index("id", unique=True)
         db["meeting_groups"].create_index("members")
         db["meetings"].create_index("group_id")
+        db["google_tokens"].create_index("email", unique=True)
     except Exception as e:
         log.warning("meeting.db init indexes: %s", e)
     log.info("meeting.db: Khởi tạo collections MongoDB hoàn tất (%s)", "Mock" if _is_mock else "Live MongoDB")

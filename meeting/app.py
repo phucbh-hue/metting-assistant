@@ -29,11 +29,12 @@ _ENV_FIXED = _envfile.clean_environ()   # trước khi các module khác đọc 
 import numpy as np  # noqa: E402
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
-from fastapi.responses import FileResponse, Response, StreamingResponse  # noqa: E402
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
-from meeting import artifacts, auth, cli_llm, db, decks, envfile, groups, live, llm, mcp, recording, tts, voice, websearch  # noqa: E402
+from meeting import (artifacts, auth, cli_llm, db, decks, envfile, google_oauth, groups, live, llm, mcp,  # noqa: E402
+                     recording, tts, voice, websearch)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("meeting.app")
@@ -978,6 +979,79 @@ async def delete_meeting_record(mid: int, request: Request):
     await asyncio.to_thread(decks.delete_uploads, mid)
     _MEETING_KEYS.pop(mid, None)
     return {"success": await asyncio.to_thread(db.delete_meeting, mid)}
+
+
+# ==============================================================================
+# KẾT NỐI GOOGLE (bản web): Drive để lưu biên bản, ghi âm
+# ==============================================================================
+class GoogleConnectReq(BaseModel):
+    return_to: str = Field("", max_length=500)
+
+
+def _base_url(request: Request) -> str:
+    """Địa chỉ công khai của server (redirect URI của Google). Sau proxy HTTPS (Render) dùng X-Forwarded-Proto."""
+    env = (os.getenv("PUBLIC_BASE_URL") or "").strip().rstrip("/")
+    if env:
+        return env
+    proto = (request.headers.get("x-forwarded-proto") or request.url.scheme).split(",")[0].strip()
+    return f"{proto}://{request.headers.get('host') or request.url.netloc}"
+
+
+def _safe_return(url: str, request: Request) -> str:
+    """Chỉ quay về trang của chính ứng dụng (server, hoặc giao diện trong CORS_ORIGINS), không chuyển hướng tùy ý."""
+    from urllib.parse import urlparse
+    base = _base_url(request)
+    if not url:
+        return base + "/"
+    u = urlparse(url)
+    origin = f"{u.scheme}://{u.netloc}"
+    allowed = {base} | {o for o in CORS_ORIGINS if o != "*"}
+    if u.scheme not in ("http", "https") or origin not in allowed:
+        raise HTTPException(status_code=400, detail="Địa chỉ quay về sau khi kết nối Google không hợp lệ")
+    return origin + (u.path or "/")
+
+
+@app.get("/api/google/status")
+def google_status(request: Request):
+    u = _user(request)
+    return {"available": auth.ENABLED and google_oauth.configured(), **google_oauth.status((u or {}).get("email"))}
+
+
+@app.post("/api/google/connect")
+def google_connect(req: GoogleConnectReq, request: Request):
+    """Địa chỉ trang đồng ý của Google; trình duyệt chuyển sang đó, xong Google chuyển về /api/google/callback."""
+    if not auth.ENABLED:
+        raise HTTPException(status_code=400, detail="Kết nối Google Drive chỉ có ở bản web (cần đăng nhập)")
+    u = _user(request)
+    try:
+        return {"url": google_oauth.auth_url(u["email"], _safe_return(req.return_to, request), _base_url(request))}
+    except google_oauth.OAuthError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.get("/api/google/callback")
+async def google_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    from urllib.parse import quote
+    back = _base_url(request) + "/"
+    try:
+        back = google_oauth.read_state(state, check_expiry=False).get("r") or back
+    except google_oauth.OAuthError:
+        pass
+    if error:
+        return RedirectResponse(f"{back}#/?drive=denied", status_code=303)
+    try:
+        res = await google_oauth.exchange(code, state, _base_url(request))
+    except google_oauth.OAuthError as e:
+        return RedirectResponse(f"{back}#/?drive=err&msg={quote(str(e)[:240])}", status_code=303)
+    return RedirectResponse(f"{res['return_to'] or back}#/?drive=ok", status_code=303)
+
+
+@app.post("/api/google/disconnect")
+async def google_disconnect(request: Request):
+    u = _user(request)
+    if u:
+        await google_oauth.disconnect(u["email"])
+    return {"available": auth.ENABLED and google_oauth.configured(), **google_oauth.status((u or {}).get("email"))}
 
 
 # ==============================================================================
