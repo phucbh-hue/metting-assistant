@@ -4816,7 +4816,7 @@ function renderGroupDrive(box, g) {
   if (!box || !AUTH.required) return;
   const d = g.drive || {};
   const warn = d.keeper_connected === false
-    ? `<p class="text-[12.5px] mt-1" style="color:rgb(255 193 69)">${g.role === 'owner' ? 'Anh chị chưa kết nối Google Drive nên biên bản của nhóm chưa được lưu lên Drive. Vào Cài đặt, mục Google Drive để kết nối.' : 'Chủ nhóm chưa kết nối Google Drive nên biên bản chưa được lưu lên Drive.'}</p>` : '';
+    ? `<p class="text-[12.5px] mt-1" style="color:rgb(255 193 69)">${g.role === 'owner' ? 'Anh chị chưa kết nối Google Drive nên biên bản của nhóm chưa được lưu lên Drive. Vào Cài đặt, mục Google (Drive và Lịch) để kết nối.' : 'Chủ nhóm chưa kết nối Google Drive nên biên bản chưa được lưu lên Drive.'}</p>` : '';
   box.innerHTML = `<div class="mt-5 pt-4 border-t divider"><h4 class="font-semibold mb-1">Thư mục trên Google Drive</h4>
     <p class="text-[13px]">${d.folder_url ? `<a class="link" href="${esc(d.folder_url)}" target="_blank" rel="noopener noreferrer">Mở thư mục của nhóm trên Drive</a>`
       : `Tạo ở lần lưu biên bản đầu tiên: Meeting Copilot / ${esc(g.name)}, trong Drive của chủ nhóm.`}</p>${warn}
@@ -4985,7 +4985,7 @@ function openVoiceStudio() {
     <p class="text-muted text-[13px] mb-4">Người được thu đọc to đoạn bên dưới khoảng 10 giây, ở nơi yên tĩnh.</p>
     <div class="flex flex-col gap-4">
       <div class="grid grid-cols-2 gap-3">
-        <div class="col-span-2"><label class="field" for="vs-name">Họ và tên</label><input id="vs-name" class="input" required placeholder="Ví dụ: Bùi Hồng Phúc"></div>
+        <div class="col-span-2"><label class="field" for="vs-name">Họ và tên</label><input id="vs-name" class="input" required placeholder="Ví dụ: Nguyễn Văn An"></div>
         <div><label class="field" for="vs-role">Chức danh</label><input id="vs-role" class="input" placeholder="Ví dụ: Product Manager"></div>
         <div><label class="field" for="vs-dept">Phòng ban</label><input id="vs-dept" class="input" placeholder="Ví dụ: Merchant Solutions"></div>
       </div>
@@ -5604,7 +5604,7 @@ async function openDiagnostics() {
   openModal(`<h3 class="text-lg font-semibold mb-2">Tình trạng hệ thống</h3>
     <ul class="mb-4">
       ${row('Nhận dạng giọng nói (Soniox)', h.soniox.ready, `${h.soniox.model} - ${h.soniox.status}`)}
-      ${row('Phân biệt người nói (CAM++)', h.campp.ready, h.campp.status)}
+      ${row('Phân biệt người nói (nhận diện giọng)', h.campp.ready, h.campp.status)}
       ${row('Trợ lý AI', h.llm.ready, `${PROVIDER_NAMES[h.llm.provider] || h.llm.provider} (Claude ${h.llm.claude_ready ? 'có' : 'chưa có'} key, Gemini ${h.llm.gemini_ready ? 'có' : 'chưa có'} key). Đổi nguồn AI trong Cài đặt.`)}
       ${row('Cơ sở dữ liệu', true, `${h.mongodb.status}`, h.mongodb.is_mock)}
       ${h.web_search ? row('Tra cứu trên mạng', h.web_search.playwright || h.web_search.claude,

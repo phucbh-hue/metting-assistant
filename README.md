@@ -8,6 +8,8 @@ trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói b
 Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy, miễn phí), vừa làm vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
 - Phiên bản: 3.19.0 - cập nhật 09/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Hướng dẫn sử dụng cho người dùng (đăng nhập, mọi tính năng, Cài đặt) kèm video demo:
+  [docs/huong-dan-su-dung.md](docs/huong-dan-su-dung.md).
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
