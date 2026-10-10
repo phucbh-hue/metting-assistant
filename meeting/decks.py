@@ -7,8 +7,8 @@ LIBRARY_DIRS), đọc thành bộ slide của hệ thống.
 Định dạng:
 - .pdf  : mỗi trang thành một slide hiện đúng hình trang gốc (dựng ảnh bằng pypdfium2), kèm chữ của trang để tìm kiếm,
           tự chuyển slide theo lời nói và viết lời thuyết trình.
-- .pptx : chữ, ghi chú người trình bày (kịch bản) và hình lớn nhất của từng slide. Máy có LibreOffice thì dựng ảnh
-          đúng thiết kế từng slide.
+- .pptx : chữ, ghi chú người trình bày (kịch bản) và hình lớn nhất của từng slide (hình phủ kín slide thì hiện cả
+          hình như trang PDF). Máy có LibreOffice thì dựng ảnh đúng thiết kế từng slide.
 - .ppt  : cần LibreOffice để chuyển đổi.
 - .docx : tiêu đề lớn thành slide, đoạn văn / gạch đầu dòng thành ý.
 - .md / .txt : "#" là tên bộ slide, mỗi "##" một slide, gạch đầu dòng là ý, đoạn văn là ghi chú.
@@ -34,6 +34,7 @@ ASSETS_DIR = Path(os.getenv("DECK_ASSETS_DIR") or (ROOT / "data" / "deck_assets"
 EXTS = (".pdf", ".pptx", ".ppt", ".docx", ".json", ".md", ".txt")
 MAX_PAGES = int(os.getenv("DECK_MAX_PAGES", "60") or 60)       # trang tối đa đọc từ một tệp
 SCAN_DEPTH = 4                                                  # độ sâu thư mục khi quét tên tệp
+FULL_BLEED = 0.9                                                # hình PowerPoint phủ từ 90% slide: hiện cả hình
 SCAN_LIMIT = 4000
 _SKIP_DIRS = {"node_modules", ".git", "__pycache__", "appdata", "$recycle.bin", "venv", ".venv", "site-packages",
               "program files", "program files (x86)", "windows", ".cache", ".npm", ".vscode", "data"}
@@ -408,6 +409,7 @@ def _pptx_slides(path: Path, key: Optional[str]) -> List[Dict[str, Any]]:
     from pptx.enum.shapes import MSO_SHAPE_TYPE
     prs = Presentation(str(path))
     out_dir = ASSETS_DIR / key if key else None
+    slide_area = int(prs.slide_width or 0) * int(prs.slide_height or 0) or 1
     slides = []
 
     def walk(shapes):
@@ -454,7 +456,10 @@ def _pptx_slides(path: Path, key: Optional[str]) -> List[Dict[str, Any]]:
             target = out_dir / name
             if not target.exists():
                 target.write_bytes(best.image.blob)
-            sl.update(layout="media", image=_asset_url(key, name))
+            # hình phủ gần kín slide (slide xuất từ Canva / Google Slides dạng ảnh): hiện cả hình như trang PDF,
+            # chữ và ghi chú vẫn dùng để tìm kiếm, nhắc bài và trình bày
+            full = best_area >= FULL_BLEED * slide_area
+            sl.update(layout="image" if full else "media", image=_asset_url(key, name))
         slides.append(sl)
     return slides
 

@@ -10,6 +10,9 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 - Phiên bản: 3.19.0 - cập nhật 09/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Hướng dẫn sử dụng cho người dùng (đăng nhập, mọi tính năng, Cài đặt) kèm video demo:
   [docs/huong-dan-su-dung.md](docs/huong-dan-su-dung.md).
+- Bộ slide demo để Jarvis tự trình bày (mở tệp, chọn "Theo ghi chú trong tệp"):
+  `slides/demo/UrBox Meeting Copilot - Demo 10.2026.pptx`, bản PDF và kịch bản demo trong `docs/demo/`
+  ([kich-ban-demo.md](docs/demo/kich-ban-demo.md)). Dựng lại: `python docs/demo/build_deck.py`.
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
@@ -321,6 +324,8 @@ là thư mục trên chính máy đó.
   - Chỉ người tạo cuộc họp gửi được tệp vào cuộc họp đó.
 - Server không có LibreOffice nên PowerPoint hiện chữ, ghi chú và hình lớn nhất của từng slide. Muốn đúng thiết kế thì lưu
   thêm bản PDF rồi mở bản PDF.
+- Slide PowerPoint chỉ là một hình phủ từ 90% slide (xuất từ Canva / Google Slides dạng ảnh, hoặc bộ slide demo trong
+  `slides/demo`) thì hiện cả hình như trang PDF, vẫn giữ ghi chú để trình bày (10/10/2026).
 
 ### Đã kiểm tra
 - 10 test mới (`tests/test_web_library.py`):

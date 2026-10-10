@@ -121,6 +121,27 @@ class ReadFileTests(TempLibrary, unittest.TestCase):
         self.assertEqual((s2["layout"], s2.get("image")), ("bullets", None))
         self.assertTrue(decks.read_text(str(pp)).startswith("Slide 1: Nhấn mạnh doanh số"))
 
+    def test_pptx_full_slide_picture_shows_as_whole_page(self):
+        """Slide chỉ là một hình phủ kín (xuất từ Canva / Google Slides dạng ảnh): hiện cả hình như trang PDF, chữ nằm
+        dưới hình vẫn dùng để tìm kiếm và nhắc bài, ghi chú là lời trình bày."""
+        from PIL import Image
+        from pptx import Presentation
+        png = Path(self.tmp.name) / "slide.png"
+        Image.new("RGB", (1600, 900), (32, 20, 60)).save(png)
+        prs = Presentation()
+        prs.slide_width, prs.slide_height = 12192000, 6858000
+        s = prs.slides.add_slide(prs.slide_layouts[5])
+        s.shapes.title.text = "Chế độ BD"
+        s.shapes.add_picture(str(png), 0, 0, prs.slide_width, prs.slide_height)
+        s.notes_slide.notes_text_frame.text = "Khi khách hỏi, trợ lý tự gợi ý câu trả lời."
+        pp = self.base / "demo.pptx"
+        prs.save(str(pp))
+        with mock.patch.object(decks, "_soffice", lambda: None):
+            sl = artifacts.normalize_deck(decks.read_deck(str(pp)), max_slides=decks.MAX_PAGES)["slides"][0]
+        self.assertEqual((sl["title"], sl["layout"]), ("Chế độ BD", "image"))
+        self.assertRegex(sl["image"], r"/api/deck-assets/[0-9a-f]{16}/1m\.png$")
+        self.assertEqual(sl["notes"], "Khi khách hỏi, trợ lý tự gợi ý câu trả lời.")
+
     def test_docx_headings_become_slides(self):
         dx = self.base / "ke-hoach.docx"
         make_docx(dx)
