@@ -521,6 +521,9 @@ Khung chat **Trợ lý BD**:
 - Mỗi câu trả lời còn có **độ chắc** (cao / vừa / thấp) và nút **Chép câu trả lời** (chép không kèm dấu
   nguồn).
 - Câu đã được trả lời có dấu "đã trả lời" ở phần lời nói. Bấm vào dấu đó để xem câu trả lời.
+- Trợ lý BD **không tra cứu trên mạng**: chỉ trả lời từ tài liệu của nhóm và các cuộc họp trước. Thiếu thông
+  tin thì gợi ý "bên em sẽ kiểm tra và gửi lại". Cần thông tin bên ngoài (tỷ giá, tin tức, đối thủ) thì hỏi
+  Jarvis ([mục 7](#7-trợ-lý-ai)).
 
 ### 11.3. Chủ nhóm hỏi về các cuộc họp
 
@@ -678,5 +681,7 @@ thì nhờ quản trị viên.
 - **Tài liệu nhóm BD**: tối đa 25 MB mỗi tệp, 100 tài liệu. PDF dạng ảnh chụp không đọc được chữ.
 - **Tìm kiếm của chế độ BD** dựa theo từ khóa (bỏ dấu khi so), không hiểu từ đồng nghĩa. Tài liệu nên dùng
   đúng từ mà khách hay nói.
+- **Tra cứu trên mạng**: chỉ Jarvis tra được; bảng BD và khung hỏi của chủ nhóm thì không. Bản web tra bằng
+  công cụ tìm kiếm của Claude (API key của công ty, có tính phí), mỗi lần khoảng 25-40 giây.
 - **Gói AI của tôi**: mỗi lần đăng nhập tối đa 6 phút. Bản web chưa hỗ trợ gói Gemini.
 - **Google Meet**: bot nghe tối đa 16 người nói cùng lúc, không vào được phòng nhóm nhỏ (breakout room).

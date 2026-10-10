@@ -722,7 +722,8 @@ async def _web_search_tool(query: str, on_progress, rewrite: bool) -> Dict[str, 
     except Exception as e:
         return {"error": f"chưa tra cứu được trên mạng ({e})"}
     return {"query": query, "engine": "Claude web_search", "summary": body[:4000],
-            "sources": [{"n": i, "title": s["title"], "url": s["url"]} for i, s in enumerate(sources[:8], 1)]}
+            "sources": [{"n": i, "title": s["title"], "url": s["url"], "domain": websearch.domain_of(s["url"])}
+                        for i, s in enumerate(sources[:8], 1)]}
 
 
 # ==============================================================================

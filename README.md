@@ -502,7 +502,10 @@ ra** ở cả bản trên máy và bản web cùng lúc.
 - Nguồn AI chung của server chỉ là API key. Bản trên máy chọn gói đăng ký trong Cài đặt (lưu chung trên Atlas) thì server
   vẫn chạy bằng API key.
 - Gói Claude.ai / ChatGPT là của từng người (bản 3.18): Cài đặt > Gói AI của tôi. Gemini CLI chưa có trên bản web.
-- Tra cứu web bằng trình duyệt thật tắt mặc định (xem `WITH_BROWSER`).
+- Tra cứu web bằng trình duyệt thật tắt mặc định (xem `WITH_BROWSER`): trợ lý tra bằng công cụ web_search của Claude
+  (API key của công ty, 0,01 USD mỗi lượt tìm cộng token, khoảng 25-40 giây). Lần đầu mở Chromium lỗi vì chưa cài thì
+  các lần sau tra thẳng bằng Claude, không thử lại trình duyệt (10/10/2026).
+- Bảng BD và khung hỏi của chủ nhóm không tra trên mạng: chỉ dùng tài liệu nhóm và các cuộc họp trước.
 - Thư mục tài liệu (mở PowerPoint/PDF để trình bày) là thư mục trên máy người dùng, chọn từ trình duyệt (bản 3.16).
 - Ghi âm lưu trên ổ của server, vẫn tự xóa sau `RECORDING_RETENTION_DAYS` ngày.
 

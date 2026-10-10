@@ -73,11 +73,18 @@ EXTRACT_JS = r"""() => {
 
 def available() -> bool:
     """Đã cài gói playwright chưa (trình duyệt Chromium kiểm tra khi chạy thật)."""
+    if _NO_BROWSER:
+        return False
     try:
         import playwright.async_api  # noqa: F401
         return True
     except Exception:
         return False
+
+
+# Có gói playwright nhưng chưa tải Chromium (bản Docker mặc định WITH_BROWSER=0): lần mở đầu tiên lỗi thì các lần sau
+# tra thẳng bằng Claude, không thử lại trình duyệt (cài Chromium xong thì khởi động lại server).
+_NO_BROWSER = False
 
 
 def fold(text: str) -> str:
@@ -265,7 +272,13 @@ async def _research(question: str, on_progress: Progress, max_pages: int, querie
                 pass
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        try:
+            browser = await p.chromium.launch(headless=True)
+        except Exception as e:
+            if "Executable doesn't exist" in str(e):
+                global _NO_BROWSER
+                _NO_BROWSER = True
+            raise
         try:
             ctx = await browser.new_context(user_agent=UA, locale="vi-VN", viewport={"width": 1280, "height": 900})
             await ctx.route("**/*", _block_heavy)

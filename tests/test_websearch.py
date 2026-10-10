@@ -213,6 +213,43 @@ class AgentWebSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Em đã đọc 2 nguồn trên mạng: sjc.com.vn, 24h.com.vn.", progress)
         self.assertEqual(res["chat_response"], "Vàng SJC đang bán 144.300.000đ một lượng.")
 
+    async def test_missing_chromium_is_remembered_and_claude_sources_have_domains(self):
+        """Bản web (Docker WITH_BROWSER=0): có gói playwright nhưng không có Chromium. Lần đầu thử trình duyệt rồi
+        chuyển sang Claude, các lần sau tra thẳng bằng Claude; câu trợ lý đọc to nêu tên miền, không cắt tiêu đề."""
+        class FakePlaywright:
+            launches = 0
+
+            def __init__(self):
+                self.chromium = self
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def launch(self, **kw):
+                FakePlaywright.launches += 1
+                raise RuntimeError("BrowserType.launch: Executable doesn't exist at /ms-playwright/chrome")
+        claude = []
+
+        async def fake_claude(query, context_text=""):
+            claude.append(query)
+            return ("# Tra cứu: tỷ giá\n\n25.660đ", [{"url": "https://www.vietcombank.com.vn/vi-VN/KHCN/Cong-cu-tien-ich/Ty-gia",
+                                                    "title": "Tỷ giá ngân hàng Vietcombank (VCB) hôm nay cập nhật"}], 1)
+        with mock.patch.object(websearch, "_NO_BROWSER", False), \
+                mock.patch("playwright.async_api.async_playwright", FakePlaywright), \
+                mock.patch.dict("os.environ", {"WEB_SEARCH_PROVIDER": "auto", "ANTHROPIC_API_KEY": "x"}), \
+                mock.patch.object(artifacts, "llm_available", lambda: False), \
+                mock.patch.object(artifacts, "_claude_search", fake_claude):
+            first = await artifacts.web_search_tool("tỷ giá USD hôm nay")
+            self.assertFalse(websearch.available())
+            await artifacts.web_search_tool("giá vàng hôm nay")
+        self.assertEqual(FakePlaywright.launches, 1)                 # lần sau không thử lại trình duyệt
+        self.assertEqual(claude, ["tỷ giá USD hôm nay", "giá vàng hôm nay"])
+        self.assertEqual(first["engine"], "Claude web_search")
+        self.assertEqual(llm.summarize_tool_result("web_search", first), "Em đã đọc 1 nguồn trên mạng: vietcombank.com.vn.")
+
     def test_summarize_web_result(self):
         self.assertEqual(llm.summarize_tool_result("web_search", {"sources": []}),
                          "Em chưa tìm được trang nào phù hợp trên mạng.")
