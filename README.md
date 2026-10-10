@@ -48,6 +48,14 @@ Thiết kế: `docs/plans/2026-10-09-group-memory-bd-design.md`. Đây là giai 
     - **Ghi chú cho đội mình**: lần trước đã nói, hứa, báo giá gì; chỗ khác với tài liệu; điều nên hỏi thêm khách.
     - Độ chắc của câu trả lời, nút **Chép câu trả lời** (chép không kèm dấu nguồn).
   - Bên phần lời nói, câu nào đã được trả lời thì có dấu "đã trả lời", bấm vào để xem câu trả lời.
+  - **Tra thêm trên mạng** (10/10/2026): nút dưới mỗi câu trả lời, chỉ chạy khi đội BD bấm.
+    - Trợ lý tra internet cho câu hỏi đó (công cụ web_search bản cơ bản của Claude, tối đa 3 lượt tìm, khoảng 15-30
+      giây, có tính phí), rồi viết khối **Trên mạng**: vài câu có dấu nguồn W1, W2 (bấm mở trang), ghi chú cho đội
+      mình, độ chắc, nút Chép kết quả.
+    - Khối này ghi rõ "thông tin công khai, chưa kiểm chứng". Giá, chính sách của UrBox vẫn theo tài liệu của nhóm;
+      trên mạng nói khác thì trợ lý ghi vào ghi chú.
+    - Bản công cụ mới của Claude (lọc kết quả bằng code) đo được 42-122 giây và không trả trích dẫn, nên bảng BD dùng
+      bản cơ bản (khoảng 10 giây, có đoạn trích của từng trang).
   - Đánh dấu ai là **Khách**, ai là **Đội mình** để trợ lý chỉ tự trả lời câu của khách.
   - Trợ lý không đọc thành tiếng. Màn hình phòng họp (kênh sự kiện chung) không nhận nội dung của khung chat.
   - Không gọi AI cho mọi câu: chỉ câu có dấu hỏi, "bao nhiêu", "thế nào", "giá", "phí"... hoặc khách nói dài; trợ lý
@@ -505,7 +513,7 @@ ra** ở cả bản trên máy và bản web cùng lúc.
 - Tra cứu web bằng trình duyệt thật tắt mặc định (xem `WITH_BROWSER`): trợ lý tra bằng công cụ web_search của Claude
   (API key của công ty, 0,01 USD mỗi lượt tìm cộng token, khoảng 25-40 giây). Lần đầu mở Chromium lỗi vì chưa cài thì
   các lần sau tra thẳng bằng Claude, không thử lại trình duyệt (10/10/2026).
-- Bảng BD và khung hỏi của chủ nhóm không tra trên mạng: chỉ dùng tài liệu nhóm và các cuộc họp trước.
+- Bảng BD chỉ tra trên mạng khi đội BD bấm "Tra thêm trên mạng"; khung hỏi của chủ nhóm không tra trên mạng.
 - Thư mục tài liệu (mở PowerPoint/PDF để trình bày) là thư mục trên máy người dùng, chọn từ trình duyệt (bản 3.16).
 - Ghi âm lưu trên ổ của server, vẫn tự xóa sau `RECORDING_RETENTION_DAYS` ngày.
 

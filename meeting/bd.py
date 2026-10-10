@@ -13,8 +13,12 @@
 - Câu hỏi hiện ngay trên khung chat (đang tìm câu trả lời), câu trả lời tới sau. Nhiều câu hỏi chạy song song (tự nhận ra
   tối đa MAX_INFLIGHT cùng lúc, mỗi MIN_GAP_S giây một lượt; câu gõ / đánh dấu không giới hạn).
 - Người trên bảng BD đánh dấu ai là Khách / Đội mình (meetings.bd.roles): chỉ tự nhận câu hỏi của khách.
+- "Tra thêm trên mạng" (10/10/2026): đội BD bấm ở một câu trả lời thì trợ lý tra internet cho câu hỏi đó (chỉ khi bấm:
+  mỗi lượt mất khoảng 15-30 giây và tính phí), tóm tắt thành khối "Trên mạng" có nguồn W1, W2... gắn vào cùng lượt
+  (turn["web"]). Thông tin trên mạng chưa được kiểm chứng, không thay cho giá / chính sách trong tài liệu của nhóm.
 """
 import asyncio
+import json
 import logging
 import re
 import time
@@ -40,6 +44,10 @@ _ASK = re.compile(r"\?|\b(bao nhieu|bao lau|bao gio|the nao|nhu nao|ra sao|khi n
                   r"thanh toan|bao hanh|doi tra|tich hop|ho tro|cam ket|thoi gian|deadline|so sanh|khac gi|loi ich|van de|"
                   r"kho khan|lo ngai|phan nan|chua)\b")
 _CODE = re.compile(r"\[\s*([KM]\d{1,2})\s*\]")
+_WCODE = re.compile(r"\[\s*(W\d{1,2})\s*\]")
+W_SOURCES = 6
+W_SEARCHES = 3                  # số lượt tìm tối đa mỗi lần tra (công cụ của Claude): nhanh hơn, rẻ hơn
+WEB_TIMEOUT_S = 180
 
 BD_SYSTEM = """Bạn là trợ lý ngồi cạnh đội kinh doanh (BD) của UrBox trong cuộc họp với khách hàng, trả lời trong một khung chat chỉ
 đội BD thấy. Mỗi lượt có một CÂU HỎI (khách vừa hỏi trong cuộc họp, hoặc đội BD hỏi trên khung chat) và các nguồn:
@@ -58,6 +66,23 @@ Quy tắc:
 - Câu tự nhận ra từ lời nói (nguồn câu hỏi: KHÁCH NÓI) mà thực ra không phải câu hỏi hay băn khoăn của khách (lời chào, câu
   xác nhận, câu của đội mình) thì để "question" rỗng.
 - Câu đội BD hỏi trên khung chat thì luôn trả lời; câu hỏi nối tiếp thì hiểu theo HỘI THOẠI TRƯỚC TRÊN KHUNG CHAT.
+- Tiền theo 1.000.000đ, ngày dd/mm/yyyy, không dùng gạch dài."""
+
+BD_WEB_SYSTEM = """Bạn là trợ lý ngồi cạnh đội kinh doanh (BD) của UrBox trong cuộc họp với khách hàng. Đội BD vừa bấm "Tra thêm
+trên mạng" cho một CÂU HỎI. Bên dưới là kết quả tra cứu trên internet (nguồn mã W1, W2...) và câu trả lời trước đó lấy
+từ tài liệu nội bộ của nhóm (nếu có).
+Trả về DUY NHẤT một JSON, không kèm chữ nào khác:
+{"answer": "2-4 câu, tối đa 80 từ, nêu điều tìm được trên mạng liên quan câu hỏi, cụ thể (con số, thời điểm). Đánh dấu nguồn ngay sau ý, ví dụ: Tỷ giá USD bán ra ngày 10/10/2026 khoảng 26.070đ [W1].",
+ "notes": ["ghi chú cho đội BD, tối đa 3 ghi chú, mỗi ghi chú tối đa 25 từ: thời điểm và độ tin cậy của số liệu, chỗ khác với tài liệu nội bộ, điều cần kiểm tra trước khi nói với khách"],
+ "confidence": "cao|vừa|thấp"}
+Quy tắc:
+- Chỉ dùng thông tin trong kết quả tra cứu; không bịa. Gắn mã W cho ý có trong đoạn trích của nguồn đó, hoặc khi phần
+  tóm tắt của công cụ tìm kiếm ghi rõ ý đó lấy từ trang nào (tên báo, tên miền trùng với nguồn W). Kết quả không trả lời
+  được câu hỏi thì nói thẳng là chưa tìm thấy trên mạng, confidence "thấp".
+- Đây là thông tin công khai trên internet, UrBox chưa xác nhận: không biến nó thành giá, chính sách hay cam kết của
+  UrBox. Giá, chính sách của UrBox luôn theo tài liệu nội bộ; trên mạng nói khác thì ghi trong notes.
+- Ghi rõ thời điểm của số liệu; nguồn không ghi thời điểm thì nói "chưa rõ thời điểm". Ưu tiên nguồn chính thức (trang
+  của doanh nghiệp, cơ quan nhà nước) hơn báo và trang tổng hợp.
 - Tiền theo 1.000.000đ, ngày dd/mm/yyyy, không dùng gạch dài."""
 
 
@@ -102,6 +127,7 @@ class BDAssistant:
         self.last_query: Set[str] = set()
         self._timer: Optional[asyncio.Task] = None
         self._tasks: Set[asyncio.Task] = set()
+        self._web_ids: Set[str] = set()                 # lượt đang tra trên mạng (bấm hai lần không tra hai lần)
 
     # ------------------------------------------------------------ kênh riêng ---
     async def subscribe(self) -> asyncio.Queue:
@@ -304,6 +330,81 @@ class BDAssistant:
         upd["done_at"] = time.time()
         turn.update(upd)
         await asyncio.to_thread(_col().update_one, {"id": turn["id"]}, {"$set": upd})
+        await self.emit({"type": "bd_turn", "turn": dict(turn)})
+        await self.emit(self.status())
+
+    # ------------------------------------------------------------ tra thêm trên mạng ---
+    async def search_web(self, turn_id: str, by: Optional[str]) -> Dict[str, Any]:
+        """Đội BD bấm "Tra thêm trên mạng" ở một lượt: tra internet cho câu hỏi đó, chạy nền, kết quả vào turn["web"]."""
+        turn = await asyncio.to_thread(_col().find_one, {"meeting_id": self.s.id, "id": str(turn_id)}, {"_id": 0})
+        if turn is None or turn.get("status") == "none":
+            raise KeyError("Không tìm thấy câu hỏi này trên khung chat")
+        if turn.get("status") == "pending":
+            raise ValueError("Trợ lý đang trả lời câu này, anh chị chờ xong rồi tra thêm trên mạng")
+        if turn["id"] in self._web_ids:
+            return turn                                    # đang tra rồi: không tra (và tính phí) thêm lần nữa
+        self._web_ids.add(turn["id"])
+        web = {"status": "pending", "by": by, "at": time.time()}
+        turn["web"] = web
+        await asyncio.to_thread(_col().update_one, {"id": turn["id"]}, {"$set": {"web": web}})
+        await self.emit({"type": "bd_turn", "turn": dict(turn)})
+        self._spawn(self._web(turn))
+        return dict(turn)
+
+    async def _web(self, turn: Dict[str, Any]) -> None:
+        from meeting import websearch
+        self.inflight += 1
+        await self.emit(self.status())
+        question = turn.get("question") or turn.get("asked") or ""
+        asked = turn.get("web") or {}
+        web: Dict[str, Any] = {"status": "error", "by": asked.get("by"), "at": asked.get("at")}
+        try:
+            artifacts.set_meeting(self.s.id, "BD tra cứu web")
+            res = await asyncio.wait_for(artifacts.web_search_tool(question, max_uses=W_SEARCHES, basic=True), WEB_TIMEOUT_S)
+            if res.get("error"):
+                raise RuntimeError(res["error"])
+            refs = {f"W{i + 1}": s for i, s in enumerate((res.get("sources") or [])[:W_SOURCES])}
+            if not refs:
+                raise RuntimeError("không tìm được trang nào phù hợp trên mạng")
+            src = "\n\n".join(
+                f"[{c}] {s.get('title') or ''} - {s.get('domain') or s.get('url')}"
+                + (f" (đăng/cập nhật: {s['published']})" if s.get("published") else "")
+                + f":\n{(s.get('excerpt') or '(không có đoạn trích)')[:1500]}" for c, s in refs.items())
+            internal = _CODE.sub("", turn.get("answer") or "").strip() if turn.get("status") == "done" else ""
+            prompt = (f"Thời điểm hiện tại: {time.strftime('%H:%M %d/%m/%Y')}\nCuộc họp: {self.s.title}\n\n"
+                      f"CÂU HỎI: {question}\n\n"
+                      f"CÂU TRẢ LỜI TỪ TÀI LIỆU NỘI BỘ: {internal or '(chưa có)'}\n\n"
+                      + (f"TÓM TẮT CỦA CÔNG CỤ TÌM KIẾM (không có mã nguồn):\n{res['summary'][:2500]}\n\n" if res.get("summary") else "")
+                      + f"KẾT QUẢ TRA CỨU TRÊN MẠNG:\n{src}")
+            raw = await artifacts._call_llm(BD_WEB_SYSTEM, prompt, max_tokens=3000)
+            data = artifacts._json_from_text(raw)
+            data = data if isinstance(data, dict) else {}
+            if not data.get("answer"):                     # JSON bị cắt giữa chừng: vẫn lấy được câu trả lời đã viết xong
+                m = re.search(r'"answer"\s*:\s*"((?:[^"\\]|\\.)*)"', raw or "")
+                data = {"answer": json.loads(f'"{m.group(1)}"')} if m else {}
+            answer = _clean(data.get("answer"), 1500)
+            if not answer:
+                raise RuntimeError("chưa tổng hợp được kết quả tra cứu")
+            notes = [_clean(x, 400) for x in (data.get("notes") or []) if _clean(x, 400)][:3]
+            used = [c for c in dict.fromkeys(_WCODE.findall(" ".join([answer] + notes))) if c in refs]
+
+            def _ws(c: str) -> Dict[str, Any]:
+                s = refs[c]
+                url = str(s.get("url") or "")
+                return {"code": c, "title": _clean(s.get("title"), 160), "domain": s.get("domain") or websearch.domain_of(url),
+                        "url": url if re.match(r"https?://", url, re.I) else ""}
+            web.update({"status": "done", "answer": answer, "notes": notes,
+                        "confidence": _clean(data.get("confidence"), 10).lower(),
+                        "sources": [_ws(c) for c in (used or list(refs))], "engine": res.get("engine") or ""})
+        except Exception as e:
+            log.warning("meeting.bd: tra cứu trên mạng lỗi: %s", e)
+            web["error"] = _clean(e, 300) or "lỗi không rõ"
+        finally:
+            self.inflight -= 1
+            self._web_ids.discard(turn["id"])
+        web["done_at"] = time.time()
+        turn["web"] = web
+        await asyncio.to_thread(_col().update_one, {"id": turn["id"]}, {"$set": {"web": web}})
         await self.emit({"type": "bd_turn", "turn": dict(turn)})
         await self.emit(self.status())
 

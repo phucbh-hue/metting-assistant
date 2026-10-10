@@ -582,8 +582,13 @@ def _clean_report(text: str, query: str) -> str:
     return body
 
 
-async def _claude_search(query: str, context_text: str = "") -> Tuple[str, List[Dict[str, str]], int]:
-    """Tìm bằng công cụ web_search của Claude. Trả về (báo cáo markdown, nguồn, số lượt tìm)."""
+async def _claude_search(query: str, context_text: str = "", max_uses: int = 5,
+                         basic: bool = False) -> Tuple[str, List[Dict[str, str]], int]:
+    """Tìm bằng công cụ web_search của Claude. Trả về (báo cáo markdown, nguồn, số lượt tìm).
+
+    max_uses: số lượt tìm tối đa (ít lượt thì nhanh hơn, rẻ hơn; bảng BD dùng 3).
+    basic: bản công cụ cơ bản (web_search_20250305): khoảng 10 giây, có trích dẫn kèm đoạn văn của từng trang. Bản mới
+    (20260209, lọc kết quả bằng code) đọc kỹ hơn nhưng chậm hơn nhiều (30-120 giây) và không trả trích dẫn."""
     if not os.getenv("ANTHROPIC_API_KEY"):
         raise RuntimeError("Tra cứu bằng Claude cần ANTHROPIC_API_KEY")
     t0 = time.time()
@@ -592,23 +597,31 @@ async def _claude_search(query: str, context_text: str = "") -> Tuple[str, List[
     try:
         resp = await _anthropic().messages.create(
             model=model, max_tokens=4000, system=WEB_SYSTEM_PROMPT,
-            tools=[{"type": "web_search_20260209", "name": "web_search", "max_uses": 5}],
+            tools=[{"type": "web_search_20250305" if basic else "web_search_20260209", "name": "web_search",
+                    "max_uses": max(1, int(max_uses))}],
             messages=[{"role": "user", "content": prompt}])
     except Exception:
         _record("claude", model, len(prompt) // 4, 0, t0, ok=False, estimated=True)
         raise
     texts, sources, searches = [], [], 0
 
-    def _add_source(url, title):
-        if url and url not in [x["url"] for x in sources]:
-            sources.append({"url": url, "title": (title or url).strip()})
+    def _add_source(url, title, cited=None):
+        if not url:
+            return
+        hit = next((x for x in sources if x["url"] == url), None)
+        if hit is None:
+            hit = {"url": url, "title": (title or url).strip()}
+            sources.append(hit)
+        cited = re.sub(r"\s+", " ", str(cited or "")).strip()
+        if cited and cited not in hit.get("excerpt", "") and len(hit.get("excerpt", "")) < 1500:
+            hit["excerpt"] = f"{hit['excerpt']} ... {cited}" if hit.get("excerpt") else cited
 
     for b in resp.content:
         bt = getattr(b, "type", None)
         if bt == "text":
             texts.append(b.text)
-            for c in getattr(b, "citations", None) or []:
-                _add_source(getattr(c, "url", None), getattr(c, "title", None))
+            for c in getattr(b, "citations", None) or []:     # cited_text: đoạn trang web Claude dẫn cho ý này
+                _add_source(getattr(c, "url", None), getattr(c, "title", None), getattr(c, "cited_text", None))
         elif bt == "server_tool_use":
             searches += 1
         elif bt == "web_search_tool_result":
@@ -688,15 +701,16 @@ async def web_research(meeting_id: int, query: str, context_text: str = "", on_p
     return _save_web_report(meeting_id, query, body, sources, f"công cụ tìm kiếm của Claude, {searches} lượt tìm")
 
 
-async def web_search_tool(query: str, on_progress=None, rewrite: bool = True) -> Dict[str, Any]:
+async def web_search_tool(query: str, on_progress=None, rewrite: bool = True, max_uses: int = 5,
+                          basic: bool = False) -> Dict[str, Any]:
     """Công cụ web_search cho agent: nội dung các trang đã đọc (agent tự tổng hợp vào câu trả lời / sản phẩm).
 
     rewrite=False: câu tìm do agent viết đã là từ khóa, không tốn thêm một lần gọi AI để đổi từ khóa."""
     with purpose("tra cứu web"):
-        return await _web_search_tool(query, on_progress, rewrite)
+        return await _web_search_tool(query, on_progress, rewrite, max_uses, basic)
 
 
-async def _web_search_tool(query: str, on_progress, rewrite: bool) -> Dict[str, Any]:
+async def _web_search_tool(query: str, on_progress, rewrite: bool, max_uses: int = 5, basic: bool = False) -> Dict[str, Any]:
     from meeting import websearch
     query = (query or "").strip()
     if not query:
@@ -718,12 +732,13 @@ async def _web_search_tool(query: str, on_progress, rewrite: bool) -> Dict[str, 
     if not os.getenv("ANTHROPIC_API_KEY"):
         return {"error": "chưa tra cứu được trên mạng (thiếu Playwright và ANTHROPIC_API_KEY)"}
     try:
-        body, sources, _ = await _claude_search(query)
+        body, sources, _ = await _claude_search(query, max_uses=max_uses, basic=basic)
     except Exception as e:
         return {"error": f"chưa tra cứu được trên mạng ({e})"}
+    sources = sorted(sources, key=lambda s: not s.get("excerpt"))     # nguồn có đoạn trích dẫn lên trước
     return {"query": query, "engine": "Claude web_search", "summary": body[:4000],
-            "sources": [{"n": i, "title": s["title"], "url": s["url"], "domain": websearch.domain_of(s["url"])}
-                        for i, s in enumerate(sources[:8], 1)]}
+            "sources": [{"n": i, "title": s["title"], "url": s["url"], "domain": websearch.domain_of(s["url"]),
+                         "excerpt": s.get("excerpt", "")} for i, s in enumerate(sources[:8], 1)]}
 
 
 # ==============================================================================

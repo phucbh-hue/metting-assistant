@@ -233,7 +233,7 @@ class AgentWebSearchTests(unittest.IsolatedAsyncioTestCase):
                 raise RuntimeError("BrowserType.launch: Executable doesn't exist at /ms-playwright/chrome")
         claude = []
 
-        async def fake_claude(query, context_text=""):
+        async def fake_claude(query, context_text="", **kw):
             claude.append(query)
             return ("# Tra cứu: tỷ giá\n\n25.660đ", [{"url": "https://www.vietcombank.com.vn/vi-VN/KHCN/Cong-cu-tien-ich/Ty-gia",
                                                     "title": "Tỷ giá ngân hàng Vietcombank (VCB) hôm nay cập nhật"}], 1)

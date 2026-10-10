@@ -1448,6 +1448,10 @@ class BDMarkReq(BaseModel):
     seq: int
 
 
+class BDWebReq(BaseModel):
+    turn_id: str = Field(..., max_length=40)
+
+
 async def _bd_of(mid: int) -> "bd.BDAssistant":
     s = await _session_or_404(mid)
     a = bd.assistant(s)
@@ -1485,6 +1489,19 @@ async def meeting_bd_mark(mid: int, req: BDMarkReq, request: Request):
         return {"turn": await a.mark(req.seq, (_user(request) or {}).get("email"))}
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e).strip("'\""))
+
+
+@app.post("/api/meetings/{mid}/bd/web")
+async def meeting_bd_web(mid: int, req: BDWebReq, request: Request):
+    """"Tra thêm trên mạng" cho một lượt trên khung chat BD: chạy nền (khoảng 15-30 giây, có tính phí), kết quả có nguồn
+    W1, W2... tới qua kênh /ws/meeting/<id>/bd."""
+    a = await _bd_of(mid)
+    try:
+        return {"turn": await a.search_web(req.turn_id, (_user(request) or {}).get("email"))}
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e).strip("'\""))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @app.put("/api/meetings/{mid}/bd/roles/{sid}")

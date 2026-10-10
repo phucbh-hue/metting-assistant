@@ -132,6 +132,8 @@
     .cite { display: inline-block; font-size: 10.5px; line-height: 1; padding: 2px 5px; margin: 0 1px; border-radius: 6px; font-weight: 600;
       background: rgb(var(--accent) / .16); color: rgb(var(--accent)); vertical-align: 1px; text-decoration: none; cursor: help; }
     a.cite { cursor: pointer; }
+    .bd-web { border-color: rgba(255, 193, 69, .4); background: rgba(255, 193, 69, .05); }
+    .cite.w { background: rgba(255, 193, 69, .18); color: #FFC145; }
     .bd-line { padding: 2px 4px; border-radius: 8px; }
     .bd-line.asked { background: rgb(var(--accent) / .09); cursor: pointer; }
     .bd-line .bd-ask-line { opacity: 0; }
@@ -1488,15 +1490,38 @@ function renderBDTranscript() {
   }).join('') || '<p class="text-muted">Lời nói trong cuộc họp hiện ở đây.</p>';
   if (near) box.scrollTop = box.scrollHeight;
 }
-/** Chữ của câu trả lời: thoát HTML rồi đổi [K1] / [M2] thành dấu nguồn (di chuột xem tên, bấm M mở cuộc họp đó). */
+/** Chữ của câu trả lời: thoát HTML rồi đổi [K1] / [M2] / [W1] thành dấu nguồn (di chuột xem tên; bấm M mở cuộc họp
+ *  đó, bấm W mở trang web). */
 function bdCited(text, sources) {
   const by = new Map((sources || []).map(x => [x.code, x]));
-  return esc(text || '').replace(/\[\s*([KM]\d{1,2})\s*\]/g, (all, code) => {
+  return esc(text || '').replace(/\[\s*([KMW]\d{1,2})\s*\]/g, (all, code) => {
     const x = by.get(code); if (!x) return '';
-    const title = `${x.title || ''}${x.ref ? ` - ${x.ref}` : ''}`;
+    const title = `${x.title || ''}${x.ref ? ` - ${x.ref}` : ''}${x.domain ? ` - ${x.domain}` : ''}`;
+    if (x.url && /^https?:\/\//i.test(x.url)) return `<a class="cite w" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer" title="${esc(title)}">${code}</a>`;
     return x.meeting_id ? `<a class="cite" href="#/m/${x.meeting_id}" target="_blank" rel="noopener" title="${esc(title)}">${code}</a>`
       : `<span class="cite" title="${esc(title)}">${code}</span>`;
   });
+}
+/** Khối "Trên mạng" dưới câu trả lời: nút tra, đang tra, kết quả có nguồn W hoặc lỗi. */
+function bdWeb(t) {
+  if (t.status !== 'done' && t.status !== 'error') return '';
+  const w = t.web;
+  const btn = label => `<button type="button" class="btn btn-ghost btn-sm" data-bd-web="${esc(t.id)}"
+      title="Tìm thêm trên internet cho câu hỏi này: khoảng 15-30 giây, mỗi lần có tính phí">${label}</button>`;
+  if (!w) return `<div class="flex justify-start">${btn('Tra thêm trên mạng')}</div>`;
+  if (w.status === 'pending') return '<div class="bd-a bd-web flex items-center gap-2 text-muted text-[13px]"><span class="spinner"></span>Đang tra trên mạng, khoảng 15-30 giây...</div>';
+  if (w.status === 'error') return `<div class="flex flex-wrap items-center gap-2 text-[12.5px]"><span style="color:rgb(var(--danger))">Chưa tra được trên mạng: ${esc(w.error || '')}</span>${btn('Tra lại')}</div>`;
+  const conf = { cao: 'chip-accent', 'vừa': '', 'thấp': 'chip-warn' };
+  const legend = (w.sources || []).map(x => `<span><b>${esc(x.code)}</b> ${x.url && /^https?:\/\//i.test(x.url)
+    ? `<a class="link" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer" title="${esc(x.title || '')}">${esc(x.domain || x.title || 'trang web')}</a>` : esc(x.domain || x.title || '')}</span>`).join('');
+  return `<div class="bd-a bd-web">
+    <div class="text-[11.5px] mb-1" style="color:#FFC145">Trên mạng: thông tin công khai, chưa kiểm chứng. Kiểm tra lại trước khi nói với khách.</div>
+    <p class="bd-answer">${bdCited(w.answer, w.sources)}</p>
+    ${(w.notes || []).length ? `<div class="mt-2 text-[13px]"><div class="text-[11.5px] text-muted mb-0.5">Ghi chú cho đội mình</div>
+      <ul class="flex flex-col gap-0.5" style="list-style:disc;padding-left:18px">${w.notes.map(n => `<li>${bdCited(n, w.sources)}</li>`).join('')}</ul></div>` : ''}
+    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11.5px] text-muted">
+      ${w.confidence ? `<span class="chip ${conf[w.confidence] || ''}" style="font-size:10.5px">độ chắc: ${esc(w.confidence)}</span>` : ''}
+      ${legend}<button type="button" class="link ml-auto" data-bd-copy="${esc(t.id)}" data-web="1">Chép kết quả</button></div></div>`;
 }
 function renderBDChat() {
   const box = $('#bd-chat'); if (!box) return;
@@ -1520,9 +1545,10 @@ function renderBDChat() {
           ${t.confidence ? `<span class="chip ${conf[t.confidence] || ''}" style="font-size:10.5px">độ chắc: ${esc(t.confidence)}</span>` : ''}
           ${legend}<button type="button" class="link ml-auto" data-bd-copy="${esc(t.id)}">Chép câu trả lời</button></div></div>`;
     }
-    return q + a;
+    return q + a + bdWeb(t);
   }).join('') || `<div class="text-muted text-[13.5px] p-2">Khi khách hỏi hoặc băn khoăn, trợ lý tự nhận ra câu hỏi và trả lời ngay ở đây, lấy từ tài liệu của nhóm
-      và các cuộc họp trước, có đánh dấu nguồn (K: tài liệu, M: cuộc họp trước). Câu nào trợ lý bỏ sót thì bấm "Hỏi AI" ở câu đó bên trái, hoặc gõ câu hỏi bên dưới.</div>`;
+      và các cuộc họp trước, có đánh dấu nguồn (K: tài liệu, M: cuộc họp trước). Câu nào trợ lý bỏ sót thì bấm "Hỏi AI" ở câu đó bên trái, hoặc gõ câu hỏi bên dưới.
+      Cần thông tin bên ngoài (tỷ giá, tin tức, đối thủ) thì bấm "Tra thêm trên mạng" dưới câu trả lời (W: trang web).</div>`;
   BD.fresh = null;
   if (near || BD.turns.length <= 1) box.scrollTop = box.scrollHeight;
 }
@@ -1542,13 +1568,20 @@ document.addEventListener('click', async e => {
     catch (err) { toast(err.message, 'err'); }
     return;
   }
+  const wb = e.target.closest('[data-bd-web]');
+  if (wb) {
+    wb.disabled = true;
+    try { const r = await POST(`/api/meetings/${BD.mid}/bd/web`, { turn_id: wb.dataset.bdWeb }); if (r.turn) upsertTurn(r.turn); }
+    catch (err) { wb.disabled = false; toast(err.message, 'err'); }
+    return;
+  }
   const go = e.target.closest('[data-bd-goto]');
   if (go) { const el = document.getElementById(`bd-turn-${go.dataset.bdGoto}`); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
   const cp = e.target.closest('[data-bd-copy]');
   if (cp) {
     const t = BD.turns.find(x => x.id === cp.dataset.bdCopy); if (!t) return;
-    const plain = String(t.answer || '').replace(/\s*\[\s*[KM]\d{1,2}\s*\]/g, '');
-    try { await navigator.clipboard.writeText(plain); toast('Đã chép câu trả lời.'); } catch (err) { toast('Trình duyệt không cho chép, hãy bôi đen để chép.', 'info'); }
+    const plain = String((cp.dataset.web ? (t.web || {}).answer : t.answer) || '').replace(/\s*\[\s*[KMW]\d{1,2}\s*\]/g, '');
+    try { await navigator.clipboard.writeText(plain); toast(cp.dataset.web ? 'Đã chép kết quả tra trên mạng.' : 'Đã chép câu trả lời.'); } catch (err) { toast('Trình duyệt không cho chép, hãy bôi đen để chép.', 'info'); }
   }
 });
 $('#bd-ask').addEventListener('submit', async e => {

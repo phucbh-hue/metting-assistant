@@ -344,6 +344,89 @@ class BDSessionTests(unittest.TestCase):
         self.assertEqual([t["source"] for t in bd.load_turns(self.mid)], ["typed", "typed", "marked"])
         self.assertEqual(list(db.get_meeting(self.mid)["bd"]["roles"].values()), ["team"])
 
+    def test_web_lookup_runs_only_when_asked_and_cites_web_sources(self):
+        def web_reply(prompt):
+            self.assertIn("CÂU TRẢ LỜI TỪ TÀI LIỆU NỘI BỘ: Dạ phí tích hợp API bên em là 5.000.000đ", prompt)
+            self.assertNotIn("[K1]", prompt.split("CÂU TRẢ LỜI TỪ TÀI LIỆU NỘI BỘ:")[1].split("\n")[0])
+            self.assertIn("[W1] Bảng giá đối thủ - doithu.vn", prompt)
+            self.assertIn("Phí tích hợp 3.000.000đ một lần.", prompt)
+            return json.dumps({"answer": "Một đơn vị khác niêm yết phí tích hợp 3.000.000đ [W1].",
+                               "notes": ["Giá của UrBox vẫn theo bảng giá nội bộ; trang thứ hai không liên quan [W2]."],
+                               "confidence": "vừa"}, ensure_ascii=False)
+        base = self.fake()
+        fake = FakeLLM({'Đội BD vừa bấm "Tra thêm': web_reply, **base.replies})
+        searched = []
+
+        async def fake_web(query, on_progress=None, rewrite=True, max_uses=5, basic=False):
+            self.assertEqual((max_uses, basic), (bd.W_SEARCHES, True))   # BD: tìm nhanh, có trích dẫn
+            searched.append(query)
+            await asyncio.sleep(0.05)
+            if len(searched) == 2:                                              # lượt tra thứ hai: công cụ tìm kiếm lỗi
+                return {"error": "bị chặn"}
+            return {"query": query, "engine": "Bing", "sources": [
+                {"n": 1, "title": "Bảng giá đối thủ", "url": "https://doithu.vn/bang-gia", "domain": "doithu.vn",
+                 "published": "", "excerpt": "Phí tích hợp 3.000.000đ một lần."},
+                {"n": 2, "title": "Trang lạ", "url": "javascript:alert(1)", "domain": "la.vn", "excerpt": "không liên quan"},
+                {"n": 3, "title": "Không dùng", "url": "https://khac.vn", "domain": "khac.vn", "excerpt": "..."}]}
+
+        async def go():
+            s = await live.get_session(self.mid)
+            a = bd.assistant(s)
+            q = await a.subscribe()
+            with mock.patch.object(artifacts, "_call_llm", fake), mock.patch.object(artifacts, "web_search_tool", fake_web):
+                t = await a.ask("Phí tích hợp API bao nhiêu?", "binh@urbox.vn")
+                with self.assertRaises(ValueError):                             # đang trả lời: chưa tra trên mạng
+                    await a.search_web(t["id"], "binh@urbox.vn")
+                await a.drain()
+                before = list(searched)
+                first = await a.search_web(t["id"], "binh@urbox.vn")
+                await a.search_web(t["id"], "binh@urbox.vn")                    # bấm hai lần: chỉ tra một lần
+                await a.drain()
+                with self.assertRaises(KeyError):
+                    await a.search_web("khong-co", None)
+                t2 = await a.ask("Câu hỏi làm lỗi tra cứu?", None)
+                await a.drain()
+                await a.search_web(t2["id"], None)
+                await a.drain()
+            return before, first, [q.get_nowait() for _ in range(q.qsize())]
+        before, first, events = asyncio.run(go())
+        self.assertEqual(before, [])                                            # trả lời thường không tra trên mạng
+        self.assertEqual(searched, ["Phí tích hợp API bao nhiêu?", "Phí tích hợp API bao nhiêu?"])
+        self.assertEqual((first["web"]["status"], first["web"]["by"]), ("pending", "binh@urbox.vn"))
+        turns = bd.load_turns(self.mid)
+        web = turns[0]["web"]
+        self.assertEqual(web["status"], "done")
+        self.assertIn("[W1]", web["answer"])
+        self.assertEqual([(x["code"], x["domain"], x["url"]) for x in web["sources"]],
+                         [("W1", "doithu.vn", "https://doithu.vn/bang-gia"), ("W2", "la.vn", "")])   # bỏ link javascript:
+        self.assertEqual(turns[0]["answer"], "Dạ phí tích hợp API bên em là 5.000.000đ một lần ạ [K1].")  # câu trả lời cũ giữ nguyên
+        self.assertEqual((turns[1]["web"]["status"], turns[1]["web"]["error"]), ("error", "bị chặn"))
+        webs = [e["turn"]["web"]["status"] for e in events if e["type"] == "bd_turn" and e["turn"].get("web")]
+        self.assertEqual(webs, ["pending", "done", "pending", "error"])
+        self.assertEqual({c["purpose"] for c in fake.of('Đội BD vừa bấm "Tra thêm')}, {"BD tra cứu web"})
+
+    def test_web_answer_survives_truncated_json(self):
+        base = self.fake()
+        cut = '{"answer": "Tỷ giá \\"trung tâm\\" ngày 10/10/2026 là 25.629đ [W1].", "notes": ["Ghi chú dài bị cắt giữa chừ'
+        fake = FakeLLM({'Đội BD vừa bấm "Tra thêm': cut, **base.replies})
+
+        async def fake_web(query, on_progress=None, rewrite=True, **kw):
+            return {"query": query, "engine": "Claude web_search", "summary": "Tỷ giá trung tâm 25.629đ.",
+                    "sources": [{"n": 1, "title": "Tỷ giá", "url": "https://sbv.gov.vn", "domain": "sbv.gov.vn", "excerpt": ""}]}
+
+        async def go():
+            s = await live.get_session(self.mid)
+            a = bd.assistant(s)
+            with mock.patch.object(artifacts, "_call_llm", fake), mock.patch.object(artifacts, "web_search_tool", fake_web):
+                t = await a.ask("Tỷ giá USD hôm nay?", None)
+                await a.drain()
+                await a.search_web(t["id"], None)
+                await a.drain()
+        asyncio.run(go())
+        web = bd.load_turns(self.mid)[0]["web"]
+        self.assertEqual((web["status"], web["answer"]), ("done", 'Tỷ giá "trung tâm" ngày 10/10/2026 là 25.629đ [W1].'))
+        self.assertEqual([x["code"] for x in web["sources"]], ["W1"])
+
     def test_group_without_bd_mode_has_no_assistant(self):
         g2 = groups.create_group("Sprint", "an@urbox.vn")
         mid = meeting("Họp sprint", g2["id"], T0, ended=False)
@@ -404,6 +487,13 @@ class BDApiTests(unittest.TestCase):
             r = self.client.post(f"/api/meetings/{self.mid}/bd/mark", json={"seq": 1}, headers=hdr("binh@urbox.vn"))
             self.assertEqual((r.json()["turn"]["source"], r.json()["turn"]["question"]), ("marked", "Phí tích hợp bao nhiêu?"))
         self.assertEqual(len(self.client.get(f"/api/meetings/{self.mid}/bd", headers=hdr("an@urbox.vn")).json()["turns"]), 2)
+        tid = r.json()["turn"]["id"]
+        self.assertEqual(self.client.post(f"/api/meetings/{self.mid}/bd/web", json={"turn_id": tid},
+                                          headers=hdr("binh@urbox.vn")).status_code, 409)       # câu chưa trả lời xong
+        self.assertEqual(self.client.post(f"/api/meetings/{self.mid}/bd/web", json={"turn_id": "x"},
+                                          headers=hdr("binh@urbox.vn")).status_code, 404)
+        self.assertEqual(self.client.post(f"/api/meetings/{self.mid}/bd/web", json={"turn_id": tid},
+                                          headers=hdr("la@urbox.vn")).status_code, 404)          # người ngoài nhóm
         db.delete_meeting(self.mid)
         self.assertEqual(db._get_db()["bd_turns"].count_documents({}), 0)       # xóa cuộc họp xóa luôn khung chat BD
 
