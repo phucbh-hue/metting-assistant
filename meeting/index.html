@@ -1012,6 +1012,14 @@ async function route() {
       dq[1] === 'ok' ? 'ok' : 'err', 8000);
     history.replaceState(null, '', location.pathname + location.search + '#/');
   }
+  const wq = (location.hash || '').match(/[?&]wikibox=(ok|err|denied)(?:&msg=([^&]*))?/);
+  if (wq) {
+    const msg = wq[2] ? decodeURIComponent(wq[2].replace(/\+/g, ' ')) : '';
+    toast(wq[1] === 'ok' ? 'Đã kết nối WikiBox. Trợ lý và Bảng BD tra kho tri thức của công ty trong các cuộc họp anh chị tạo.'
+      : wq[1] === 'denied' ? 'Anh chị chưa cho phép nên chưa kết nối WikiBox.' : `Chưa kết nối được WikiBox: ${msg}`,
+      wq[1] === 'ok' ? 'ok' : 'err', 8000);
+    history.replaceState(null, '', location.pathname + location.search + '#/');
+  }
   const h = location.hash || '#/';
   const bdm = h.match(/^#\/m\/(\d+)\/bd/), gc = h.match(/^#\/g\/(\d+)\/chat/);
   if (!bdm) closeBD();
@@ -1584,7 +1592,7 @@ function renderBDTranscript() {
  *  đó, bấm W mở trang web). */
 function bdCited(text, sources) {
   const by = new Map((sources || []).map(x => [x.code, x]));
-  return esc(text || '').replace(/\[\s*([KMW]\d{1,2})\s*\]/g, (all, code) => {
+  return esc(text || '').replace(/\[\s*([KMUW]\d{1,2})\s*\]/g, (all, code) => {
     const x = by.get(code); if (!x) return '';
     const title = `${x.title || ''}${x.ref ? ` - ${x.ref}` : ''}${x.domain ? ` - ${x.domain}` : ''}`;
     if (x.url && /^https?:\/\//i.test(x.url)) return `<a class="cite w" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer" title="${esc(title)}">${code}</a>`;
@@ -1623,10 +1631,11 @@ function renderBDChat() {
     const q = `<div class="bd-q ${t.source === 'auto' ? 'auto' : ''}" id="bd-turn-${esc(t.id)}"><div class="text-[11.5px] text-muted mb-0.5">${who(t)}, ${at(t)}${t.source === 'auto' ? ' - trợ lý tự nhận ra' : ''}</div>
       <div class="font-medium">${esc(t.question || t.asked || '')}</div></div>`;
     let a;
-    if (t.status === 'pending') a = '<div class="bd-a flex items-center gap-2 text-muted text-[13px]"><span class="spinner"></span>Đang tìm trong tài liệu và các buổi trước...</div>';
+    if (t.status === 'pending') a = '<div class="bd-a flex items-center gap-2 text-muted text-[13px]"><span class="spinner"></span>Đang tìm trong tài liệu, các buổi trước và kho tri thức...</div>';
     else if (t.status === 'error') a = `<div class="bd-a text-[13px]" style="color:rgb(var(--danger))">${esc(t.answer || 'Chưa trả lời được')}</div>`;
     else {
-      const legend = (t.sources || []).map(x => `<span><b>${esc(x.code)}</b> ${x.meeting_id ? `<a class="link" href="#/m/${x.meeting_id}" target="_blank" rel="noopener">${esc(x.title || '')}</a>` : esc(x.title || '')}${x.ref ? `, ${esc(x.ref)}` : ''}</span>`).join('');
+      const legend = (t.sources || []).map(x => `<span><b>${esc(x.code)}</b> ${x.meeting_id ? `<a class="link" href="#/m/${x.meeting_id}" target="_blank" rel="noopener">${esc(x.title || '')}</a>`
+        : x.url && /^https?:\/\//i.test(x.url) ? `<a class="link" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title || '')}</a>` : esc(x.title || '')}${x.ref ? `, ${esc(x.ref)}` : ''}</span>`).join('');
       a = `<div class="bd-a ${t.id === BD.fresh ? 'fresh' : ''}">
         <p class="bd-answer">${bdCited(t.answer, t.sources)}</p>
         ${(t.notes || []).length ? `<div class="mt-2 text-[13px]"><div class="text-[11.5px] text-muted mb-0.5">Ghi chú cho đội mình</div>
@@ -1637,7 +1646,7 @@ function renderBDChat() {
     }
     return q + a + bdWeb(t);
   }).join('') || `<div class="text-muted text-[13.5px] p-2">Khi khách hỏi hoặc băn khoăn, trợ lý tự nhận ra câu hỏi và trả lời ngay ở đây, lấy từ tài liệu của nhóm
-      và các cuộc họp trước, có đánh dấu nguồn (K: tài liệu, M: cuộc họp trước). Câu nào trợ lý bỏ sót thì bấm "Hỏi AI" ở câu đó bên trái, hoặc gõ câu hỏi bên dưới.
+      và các cuộc họp trước, có đánh dấu nguồn (K: tài liệu, M: cuộc họp trước, U: kho tri thức WikiBox của công ty khi người tạo cuộc họp đã kết nối). Câu nào trợ lý bỏ sót thì bấm "Hỏi AI" ở câu đó bên trái, hoặc gõ câu hỏi bên dưới.
       Cần thông tin bên ngoài (tỷ giá, tin tức, đối thủ) thì bấm "Tra thêm trên mạng" dưới câu trả lời (W: trang web).</div>`;
   BD.fresh = null;
   if (near || BD.turns.length <= 1) box.scrollTop = box.scrollHeight;
@@ -4935,6 +4944,66 @@ async function renderDriveSettings(box) {
     try { await POST('/api/google/disconnect', {}); toast('Đã ngắt kết nối Google.'); } catch (err) { toast(err.message, 'err'); }
   };
 }
+/* ---------- Kho tri thức WikiBox (MCP thật): mỗi người kết nối bằng tài khoản WikiBox của mình ---------- */
+async function renderWikiboxSettings(box) {
+  if (!box) return;
+  let st;
+  try { st = await GET('/api/wikibox/status'); } catch (e) { box.innerHTML = `<p style="color:rgb(var(--danger))">${esc(e.message)}</p>`; return; }
+  if (!st.available) { box.innerHTML = '<p class="text-muted">Server chưa bật kho tri thức WikiBox (WIKIBOX_URL): báo quản trị viên.</p>'; return; }
+  const host = (st.url || '').replace(/^https?:\/\//, '');
+  const tools = st.tools || [];
+  box.innerHTML = st.connected
+    ? `<div class="flex items-start justify-between gap-3"><div class="min-w-0">
+        <div>Đã kết nối <b>${esc(host)}</b> ${st.kind === 'key' ? '(API key cá nhân)' : '(đăng nhập WikiBox)'}</div>
+        <div class="text-[12px] text-muted mt-1">${tools.length} công cụ chỉ đọc${tools.length ? `: ${esc(tools.join(', '))}` : ''}${st.search_tool ? `. Tìm tài liệu bằng ${esc(st.search_tool)}` : ''}.</div>
+        ${st.error ? `<div class="text-[12px] mt-1" style="color:#FFC145">${esc(st.error)}</div>` : ''}
+        <div class="text-[12px] text-muted mt-1">Trợ lý và Bảng BD tra kho tri thức này dưới quyền của anh chị, trong các cuộc họp anh chị tạo, thay cho dữ liệu mẫu. Chỉ đọc, không sửa gì trên WikiBox.</div></div>
+        <button type="button" class="btn btn-ghost btn-sm shrink-0" data-wb="disconnect">Ngắt kết nối</button></div>
+      <form data-wb-form="test" class="flex gap-2 mt-3"><input class="input" name="q" maxlength="300" placeholder="Thử tìm, ví dụ: quy trình phát hành voucher" style="height:32px" required>
+        <button class="btn btn-ghost btn-sm shrink-0" type="submit">Kiểm tra</button></form>
+      <div data-wb-out class="mt-2"></div>`
+    : `<p class="text-muted mb-2">Kết nối kho tri thức của công ty trên ${esc(host)} để trợ lý và Bảng BD trả lời từ tài liệu thật (sản phẩm, quy trình, chính sách) thay cho dữ liệu mẫu.
+         Chạy dưới quyền của anh chị trên WikiBox: chỉ đọc được tài liệu anh chị được xem, không sửa gì.</p>
+       <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-primary btn-sm" data-wb="connect">Kết nối WikiBox</button>
+         <button type="button" class="btn btn-ghost btn-sm" data-wb="key">Dùng API key</button></div>
+       <form data-wb-form="key" class="hidden mt-2 flex gap-2"><input class="input" name="k" type="password" autocomplete="off" maxlength="500" required
+           placeholder="API key tạo ở WikiBox > Tùy chỉnh cá nhân > WikiBox MCP > Tạo key mới" style="height:32px">
+         <button class="btn btn-primary btn-sm shrink-0" type="submit">Lưu</button></form>`;
+  box.onclick = async e => {
+    const b = e.target.closest('[data-wb]'); if (!b) return;
+    if (b.dataset.wb === 'key') { $('[data-wb-form="key"]', box).classList.remove('hidden'); $('[data-wb-form="key"] input', box).focus(); return; }
+    if (b.dataset.wb === 'connect') {
+      b.disabled = true;
+      try { const r = await POST('/api/wikibox/connect', { return_to: location.origin + location.pathname }); location.href = r.url; }
+      catch (err) { toast(err.message, 'err', 8000); b.disabled = false; }
+      return;
+    }
+    const ok = await confirmDialog({ title: 'Ngắt kết nối WikiBox?', ok: 'Ngắt kết nối', danger: true,
+      body: 'Trợ lý và Bảng BD quay về dữ liệu mẫu cho tới khi anh chị kết nối lại. Không có gì trên WikiBox bị xóa.' });
+    if (!ok) return;
+    try { await POST('/api/wikibox/disconnect', {}); toast('Đã ngắt kết nối WikiBox.'); } catch (err) { toast(err.message, 'err'); }
+    renderWikiboxSettings(box);
+  };
+  box.onsubmit = async e => {
+    e.preventDefault();
+    const f = e.target.closest('[data-wb-form]'); if (!f) return;
+    const btn = $('button[type=submit]', f); btn.disabled = true;
+    try {
+      if (f.dataset.wbForm === 'key') {
+        await POST('/api/wikibox/key', { api_key: f.k.value.trim() });
+        toast('Đã kết nối WikiBox bằng API key.');
+        return renderWikiboxSettings(box);
+      }
+      const out = $('[data-wb-out]', box);
+      out.innerHTML = '<div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang tìm trên WikiBox...</div>';
+      const r = await POST('/api/wikibox/test', { query: f.q.value.trim() });
+      out.innerHTML = (r.hits || []).length ? `<ul class="flex flex-col gap-1.5">${r.hits.map(h => `<li class="text-[12.5px]"><b>${h.url ? `<a class="link" href="${esc(h.url)}" target="_blank" rel="noopener noreferrer">${esc(h.title)}</a>` : esc(h.title)}</b>${h.kb ? ` <span class="text-muted">(${esc(h.kb)})</span>` : ''}
+          <div class="text-muted">${esc((h.text || '').slice(0, 220))}${(h.text || '').length > 220 ? '...' : ''}</div></li>`).join('')}</ul>`
+        : `<p class="text-[12.5px] text-muted">${r.search_tool ? 'Chưa thấy tài liệu nào khớp.' : 'WikiBox chưa có công cụ tìm kiếm cho tài khoản này.'}</p>`;
+    } catch (err) { toast(err.message, 'err', 8000); }
+    finally { btn.disabled = false; }
+  };
+}
 function renderGroupDrive(box, g) {
   if (!box || !AUTH.required) return;
   const d = g.drive || {};
@@ -5182,10 +5251,12 @@ function openSettings() {
       <button type="button" class="btn btn-ghost" data-act="logout">Đăng xuất</button></div>` : '';
   const gdrive = AUTH.required ? `<div class="mb-5 pb-4 border-b divider"><h4 class="font-semibold mb-2">Google (Drive và Lịch)</h4>
       <div id="gd-box" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang kiểm tra...</div></div></div>` : '';
+  const wiki = `<div class="mb-5 pb-4 border-b divider"><h4 class="font-semibold mb-2">Kho tri thức WikiBox</h4>
+      <div id="wb-box" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang kiểm tra...</div></div></div>`;
   const myllm = AUTH.required ? `<div class="mb-5 pb-4 border-b divider">
       <div class="flex items-center justify-between gap-2 mb-1"><h4 class="font-semibold">Gói AI của tôi</h4><span class="text-[12px] text-muted">Claude.ai hoặc ChatGPT của riêng bạn</span></div>
       <div id="myllm-box" data-llm-scope="me" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang kiểm tra...</div></div></div>` : '';
-  openModal(`${acct}${gdrive}${myllm}
+  openModal(`${acct}${gdrive}${wiki}${myllm}
     <h3 class="text-lg font-semibold mb-1">Cài đặt trợ lý</h3>
     <p class="text-muted text-[13px] mb-4">Đặt tên để gọi trợ lý trong cuộc họp thay cho "Jarvis".</p>
     <form id="as-form" class="flex flex-col gap-4">
@@ -5246,6 +5317,7 @@ function openSettings() {
       renderUsage($('#usage-box', m));
       renderStorage($('#storage-box', m));
       renderDriveSettings($('#gd-box', m));
+      renderWikiboxSettings($('#wb-box', m));
       renderRecapSettings($('#rs-box', m));
       renderLlm($('#llm-box', m));
       renderMyLlm($('#myllm-box', m));

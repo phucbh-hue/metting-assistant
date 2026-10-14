@@ -25,7 +25,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional, Set
 
-from meeting import artifacts, db, groups, retrieval
+from meeting import artifacts, db, groups, retrieval, wikibox
 
 log = logging.getLogger("meeting.bd")
 
@@ -39,11 +39,12 @@ TURNS_LOAD = 80
 HISTORY_TURNS = 3
 K_SOURCES = 5
 M_SOURCES = 5
+U_SOURCES = 5                   # kho tri thức WikiBox của công ty (kết nối của người tạo cuộc họp)
 _ASK = re.compile(r"\?|\b(bao nhieu|bao lau|bao gio|the nao|nhu nao|ra sao|khi nao|o dau|tai sao|vi sao|lam sao|duoc khong|"
                   r"co duoc|co the|co phai|phai khong|hay khong|gia|phi|chi phi|bang gia|chiet khau|uu dai|hop dong|"
                   r"thanh toan|bao hanh|doi tra|tich hop|ho tro|cam ket|thoi gian|deadline|so sanh|khac gi|loi ich|van de|"
                   r"kho khan|lo ngai|phan nan|chua)\b")
-_CODE = re.compile(r"\[\s*([KM]\d{1,2})\s*\]")
+_CODE = re.compile(r"\[\s*([KMU]\d{1,2})\s*\]")
 _WCODE = re.compile(r"\[\s*(W\d{1,2})\s*\]")
 W_SOURCES = 6
 W_SEARCHES = 3                  # số lượt tìm tối đa mỗi lần tra (công cụ của Claude): nhanh hơn, rẻ hơn
@@ -52,7 +53,8 @@ WEB_TIMEOUT_S = 180
 BD_SYSTEM = """Bạn là trợ lý ngồi cạnh đội kinh doanh (BD) của UrBox trong cuộc họp với khách hàng, trả lời trong một khung chat chỉ
 đội BD thấy. Mỗi lượt có một CÂU HỎI (khách vừa hỏi trong cuộc họp, hoặc đội BD hỏi trên khung chat) và các nguồn:
 - TÀI LIỆU CỦA NHÓM, mã K1, K2... (bảng giá, chính sách, FAQ, hồ sơ năng lực...);
-- CÁC CUỘC HỌP TRƯỚC của nhóm, mã M1, M2... (biên bản và lời nói, có tên buổi và ngày).
+- CÁC CUỘC HỌP TRƯỚC của nhóm, mã M1, M2... (biên bản và lời nói, có tên buổi và ngày);
+- KHO TRI THỨC CÔNG TY (WikiBox), mã U1, U2... (tài liệu chính thức của UrBox: sản phẩm, dịch vụ, quy trình, chính sách).
 Trả về DUY NHẤT một JSON, không kèm chữ nào khác:
 {"question": "câu hỏi viết lại ngắn gọn, rõ ý; rỗng nếu thực ra không có câu hỏi hay băn khoăn nào cần trả lời",
  "answer": "câu trả lời gợi ý đội BD nói được ngay: 2-5 câu, xưng 'bên em', lịch sự, cụ thể. Đánh dấu nguồn ngay sau ý dùng nguồn, ví dụ: Phí tích hợp là 5.000.000đ [K1].",
@@ -62,6 +64,8 @@ Quy tắc:
 - Chỉ dùng thông tin trong nguồn và trong cuộc họp; không bịa giá, chính sách, cam kết. Thiếu thông tin thì nói trong answer
   là bên em sẽ kiểm tra và gửi lại anh chị sau, confidence "thấp".
 - Tài liệu và cuộc họp trước nói khác nhau (giá, thời hạn...) thì answer theo tài liệu, ghi rõ khác biệt trong notes.
+- Giá, điều khoản riêng cho khách: ưu tiên tài liệu của nhóm (K); kiến thức chung về UrBox: kho tri thức công ty (U).
+  K và U nói khác nhau thì answer theo K, ghi khác biệt trong notes.
 - Notes dùng cho: điều đã nói, hứa, báo giá, thống nhất ở buổi trước; điều đã hứa mà chưa làm; điều cần hỏi thêm khách.
 - Câu tự nhận ra từ lời nói (nguồn câu hỏi: KHÁCH NÓI) mà thực ra không phải câu hỏi hay băn khoăn của khách (lời chào, câu
   xác nhận, câu của đội mình) thì để "question" rỗng.
@@ -105,7 +109,7 @@ def load_turns(mid: int, limit: int = TURNS_LOAD) -> List[Dict[str, Any]]:
 
 def _src(code: str, p: Dict[str, Any]) -> Dict[str, Any]:
     out = {"code": code, "kind": p.get("kind"), "title": p.get("title"), "ref": p.get("ref")}
-    for k in ("meeting_id", "doc_id"):
+    for k in ("meeting_id", "doc_id", "url"):
         if p.get(k) is not None:
             out[k] = p[k]
     return out
@@ -292,6 +296,7 @@ class BDAssistant:
         try:
             artifacts.set_meeting(self.s.id, "BD gợi ý")
             gid = self.s.meeting.get("group_id")
+            wiki_job = asyncio.ensure_future(wikibox.search_for_meeting(self.s.meeting, turn["question"], U_SOURCES))
             idx = await asyncio.to_thread(retrieval.group_index, gid) if gid else retrieval.Index([])
             history = "" if auto else await asyncio.to_thread(self._history, turn["at"])
             search = f"{turn['question']} {history[-300:] if history else ''}".strip()
@@ -299,6 +304,8 @@ class BDAssistant:
             hist = idx.search(search, k=M_SOURCES, kinds={"minutes", "talk"}, exclude_meeting=self.s.id)
             refs = {f"K{i + 1}": p for i, p in enumerate(kb)}
             refs.update({f"M{i + 1}": p for i, p in enumerate(hist)})
+            refs.update({f"U{i + 1}": {"kind": "wiki", "title": h["title"], "ref": h["kb"] or "WikiBox", "text": h["text"],
+                                       "url": h["url"]} for i, h in enumerate(await wiki_job)})
             src = "\n\n".join(f"[{c}] {p.get('title')} - {p.get('ref')}:\n{p.get('text', '')[:1400]}" for c, p in refs.items())
             label = {"auto": "KHÁCH NÓI, trợ lý tự nhận ra từ lời nói", "typed": "ĐỘI BD HỎI TRÊN KHUNG CHAT",
                      "marked": "ĐỘI BD ĐÁNH DẤU CÂU NÀY TRONG LỜI NÓI"}[turn["source"]]

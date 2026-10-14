@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field  # noqa: E402
 
 from meeting import (artifacts, auth, bd, cli_llm, db, decks, drive_sync, envfile, gcalendar,  # noqa: E402
                      google_oauth, group_chat, group_kb, groups, live, llm, mcp, meet_bots, recall, recap_export,
-                     recording, tts, user_llm, user_prefs, voice, websearch)
+                     recording, tts, user_llm, user_prefs, voice, websearch, wikibox)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("meeting.app")
@@ -1132,6 +1132,79 @@ async def google_disconnect(request: Request):
     if u:
         await google_oauth.disconnect(u["email"])
     return {"available": auth.ENABLED and google_oauth.configured(), **google_oauth.status((u or {}).get("email"))}
+
+
+# ==============================================================================
+# KHO TRI THỨC WIKIBOX (MCP thật của wiki.urbox.dev, thay kho tri thức giả lập)
+# ==============================================================================
+class WikiboxKeyReq(BaseModel):
+    api_key: str = Field(..., max_length=500)
+
+
+class WikiboxTestReq(BaseModel):
+    query: str = Field(..., max_length=300)
+
+
+def _wiki_email(request: Request) -> Optional[str]:
+    u = _user(request)
+    if auth.ENABLED and not u:
+        raise HTTPException(status_code=401, detail="Cần đăng nhập")
+    return (u or {}).get("email")
+
+
+@app.get("/api/wikibox/status")
+def wikibox_status(request: Request):
+    return wikibox.status(_wiki_email(request))
+
+
+@app.post("/api/wikibox/connect")
+async def wikibox_connect(req: GoogleConnectReq, request: Request):
+    """Địa chỉ trang đồng ý của WikiBox (OAuth 2.1 + PKCE); xong WikiBox chuyển về /api/wikibox/callback."""
+    email = _wiki_email(request)
+    try:
+        return {"url": await wikibox.auth_url(email, _safe_return(req.return_to, request), _base_url(request))}
+    except wikibox.WikiboxError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.get("/api/wikibox/callback")
+async def wikibox_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    from urllib.parse import quote
+    back = wikibox.return_of(state) or _base_url(request) + "/"
+    if error:
+        return RedirectResponse(f"{back}#/?wikibox=denied", status_code=303)
+    try:
+        res = await wikibox.exchange(code, state)
+    except wikibox.WikiboxError as e:
+        return RedirectResponse(f"{back}#/?wikibox=err&msg={quote(str(e)[:240])}", status_code=303)
+    return RedirectResponse(f"{res['return_to'] or back}#/?wikibox=ok", status_code=303)
+
+
+@app.post("/api/wikibox/key")
+async def wikibox_key(req: WikiboxKeyReq, request: Request):
+    """Dán API key cá nhân của WikiBox (cách thay cho đăng nhập OAuth)."""
+    try:
+        return await wikibox.save_key(_wiki_email(request), req.api_key)
+    except wikibox.WikiboxError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/wikibox/disconnect")
+async def wikibox_disconnect(request: Request):
+    return await wikibox.disconnect(_wiki_email(request))
+
+
+@app.post("/api/wikibox/test")
+async def wikibox_test(req: WikiboxTestReq, request: Request):
+    """Thử tìm trong kho tri thức bằng kết nối của chính mình (nút Kiểm tra trong Cài đặt)."""
+    owner = wikibox.who(_wiki_email(request))
+    try:
+        found = await wikibox.tools(owner, refresh=True)
+        hits = await wikibox.search(owner, req.query, 5)
+    except wikibox.WikiboxError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    st = wikibox.search_tool(found)
+    return {"tools": [t["name"] for t in found], "search_tool": st[0] if st else None, "hits": hits}
 
 
 # ==============================================================================

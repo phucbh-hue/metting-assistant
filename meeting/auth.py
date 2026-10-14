@@ -56,7 +56,7 @@ if ENABLED and not CLIENT_ID:
 # Không cần đăng nhập: trang, tài nguyên tĩnh, kiểm tra server còn sống, cấu hình và đổi token đăng nhập.
 # /api/health (tên DB, số mẫu giọng...) vẫn cần đăng nhập; nền tảng chạy server dùng /healthz.
 PUBLIC_PATHS = {"/", "/vesper", "/config.js", "/favicon.ico", "/healthz", "/api/auth/config", "/api/auth/google",
-                "/api/google/callback"}      # Google chuyển hướng về đây (kiểm bằng state đã ký, không bằng token)
+                "/api/google/callback", "/api/wikibox/callback"}   # Google / WikiBox chuyển hướng về (kiểm bằng state)
 # /ws/recall/: bot Recall gửi âm thanh Google Meet, xác thực bằng mã ngẫu nhiên của từng buổi (meet_bots.check_token)
 PUBLIC_PREFIXES = ("/static/", "/ws/recall/")
 # Chỉ quản trị viên được ĐỔI (mọi method trừ GET/HEAD) các mục cài đặt dùng chung của server

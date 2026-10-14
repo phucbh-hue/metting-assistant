@@ -18,7 +18,7 @@ import time
 import unicodedata
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from meeting import artifacts, db, mcp
+from meeting import artifacts, db, mcp, wikibox
 
 log = logging.getLogger("meeting.llm")
 
@@ -504,6 +504,35 @@ AGENT_TOOLS = {
     "web_search": "web_search(query): tìm trên Internet thông tin công khai mới nhất (giá cả, tỷ giá, tin tức, đối thủ, "
                   "quy định); trả về nội dung các trang đã đọc kèm nguồn",
 }
+WIKI_PREFIX = "wikibox."
+_MOCK_KB_TOOLS = ("search_knowledge", "read_document")
+
+
+async def agent_tools(meeting_id: Optional[int], meeting: Optional[Dict[str, Any]]) -> Tuple[Dict[str, str], str]:
+    """Công cụ của trợ lý cho cuộc họp này + khóa kết nối WikiBox dùng để gọi.
+
+    Người tạo cuộc họp đã kết nối WikiBox: công cụ thật của WikiBox (wikibox.<tên>) thay kho tri thức giả lập
+    (search_knowledge / read_document). Chưa kết nối hoặc WikiBox lỗi: giữ như cũ."""
+    owner = wikibox.owner_of(meeting) if meeting else wikibox.who(artifacts._meeting_owner(meeting_id) if meeting_id else "")
+    tools_map = dict(AGENT_TOOLS)
+    if not owner or not wikibox.connected(owner):
+        return tools_map, owner
+    try:
+        lines = wikibox.agent_tool_lines(await wikibox.tools(owner))
+    except wikibox.WikiboxError as e:
+        log.warning("meeting.llm: chưa đọc được công cụ WikiBox: %s", e)
+        return tools_map, owner
+    if lines:
+        for t in _MOCK_KB_TOOLS:
+            tools_map.pop(t, None)
+        tools_map.update(lines)
+    return tools_map, owner
+
+
+def tool_label(tool: str) -> str:
+    return "kho tri thức WikiBox" if tool.startswith(WIKI_PREFIX) else TOOL_LABELS.get(tool, tool)
+
+
 ARTIFACT_KINDS = ("dashboard", "report", "slides", "web_design", "diagram", "minutes")
 KIND_NAMES = {"dashboard": "dashboard", "report": "báo cáo nhanh", "slides": "bộ slide", "web_design": "trang web",
               "diagram": "sơ đồ", "minutes": "biên bản"}
@@ -683,7 +712,13 @@ def summarize_tool_result(tool: str, result: Any) -> str:
     if not isinstance(result, dict):
         return ""
     if result.get("error"):
-        return f"Em chưa tra được {TOOL_LABELS.get(tool, tool)}: {result['error']}."
+        return f"Em chưa tra được {tool_label(tool)}: {result['error']}."
+    if tool.startswith(WIKI_PREFIX):
+        hits = wikibox.normalize_hits(result, 8)
+        if not hits:
+            return "Em đã tra kho tri thức WikiBox." if result else "Em chưa thấy tài liệu nào trên WikiBox khớp."
+        names = ", ".join(dict.fromkeys(h["title"][:50] for h in hits[:3]))
+        return f"Em tìm thấy {len(hits)} tài liệu trên WikiBox: {names}."
     if tool == "web_search":
         srcs = result.get("sources") or []
         if not srcs:
@@ -931,9 +966,10 @@ async def think_and_act(meeting_id: int, prompt: str, segments: List[Dict[str, A
         if on_progress:
             await on_progress(text, kind)
 
+    tools_map, wiki_owner = await agent_tools(meeting_id, meeting)
     system = artifacts.Blocks([artifacts.text_block(artifacts.with_skill(
         AGENT_SYSTEM.replace("{{NAME}}", assistant_config()["name"])
-        .replace("{{TOOLS}}", "\n".join(f"- {d}" for d in AGENT_TOOLS.values())), "assistant"), cache=True)])
+        .replace("{{TOOLS}}", "\n".join(f"- {d}" for d in tools_map.values())), "assistant"), cache=True)])
     transcript = transcript_blocks(segments)
     plan: Dict[str, Any] = {}
     plain = ""
@@ -948,14 +984,14 @@ async def think_and_act(meeting_id: int, prompt: str, segments: List[Dict[str, A
         if final is not None:
             plan = final
             break
-        calls = [c for c in calls if c.get("tool") in AGENT_TOOLS][:3]
+        calls = [c for c in calls if c.get("tool") in tools_map][:3]
         if not calls or last:
             plain = text
             break
         for c in calls:
             tool = c["tool"]
             args = c.get("arguments") if isinstance(c.get("arguments"), dict) else (c.get("args") or {})
-            await _thought(f"Em đang tra cứu {TOOL_LABELS.get(tool, tool)}...")
+            await _thought(f"Em đang tra cứu {tool_label(tool)}...")
             if on_tool:
                 await on_tool({"tool": tool, "args": args})
             if tool == "web_search":                                # trình duyệt thật / Claude, không qua MCP
@@ -963,6 +999,11 @@ async def think_and_act(meeting_id: int, prompt: str, segments: List[Dict[str, A
                     await _progress(text, "status")
                 res = await artifacts.web_search_tool(str(args.get("query") or prompt), _web_status,
                                                       rewrite=not args.get("query"))
+            elif tool.startswith(WIKI_PREFIX):                      # MCP thật của WikiBox, bằng kết nối của người tạo cuộc họp
+                try:
+                    res = await wikibox.call(wiki_owner, tool[len(WIKI_PREFIX):], args)
+                except wikibox.WikiboxError as e:
+                    res = {"error": str(e)}
             else:
                 call_async = getattr(mcp, "call_tool_async", None)  # qua MCP thật nếu đã cấu hình, không thì tại chỗ
                 res = await call_async(tool, args) if call_async else await asyncio.to_thread(mcp.call_tool, tool, args)
