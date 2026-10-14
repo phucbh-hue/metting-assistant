@@ -337,21 +337,81 @@ async def _call_llm(system: Any, prompt: Any, max_tokens: int = 4000) -> str:
     return (await _call_llm_raw(system, prompt, max_tokens) or "").replace(chr(0x2014), "-")   # quy ước nội dung: "-" thay cho gạch dài
 
 
+# Suy nghĩ của Claude (tài liệu Claude API 10/2026): Sonnet 5.5 / 5, Opus 5.5 / 5, Fable, Mythos, Haiku 5.5 mặc định BẬT
+# suy nghĩ thích ứng khi không gửi tham số thinking, và phần suy nghĩ tính vào max_tokens (chữ suy nghĩ không trả về).
+# Prompt của app viết cho Opus 4.7 (không suy nghĩ). Cuộc họp 86 phút #72 (12/10/2026) ra biên bản rỗng 3 lần: cả 3.500
+# token đều dành cho suy nghĩ. Nên: effort thấp (model chỉ nghĩ ngắn khi cần), chừa thêm token cho phần suy nghĩ, và nếu vẫn
+# hết token mà chưa có chữ thì gọi lại với suy nghĩ tắt hẳn.
+THINK_HEADROOM = 6000                       # token thêm cho phần suy nghĩ (chỉ tính tiền phần thật sự dùng)
+MAX_NONSTREAM_TOKENS = 20000                # SDK đòi streaming khi max_tokens > ~21.000 với thời gian chờ mặc định
+_THINKING_FAMILIES = ("sonnet-5", "opus-5", "fable", "mythos", "haiku-5")
+
+
+def _model_base(model: str) -> str:
+    """'claude-sonnet-5-5[1m]' / 'claude-haiku-4-5-20251001' -> tên gốc để so khớp."""
+    return re.sub(r"-\d{8}$", "", re.sub(r"\[[^\]]*\]$", "", (model or "").strip().lower()))
+
+
+def thinks_by_default(model: str) -> bool:
+    return any(f in _model_base(model) for f in _THINKING_FAMILIES)
+
+
+def claude_effort() -> str:
+    """Mức effort cho các việc soạn nội dung (biên bản, tóm tắt, JSON, trả lời): low mặc định; đổi bằng CLAUDE_EFFORT."""
+    e = (os.getenv("CLAUDE_EFFORT") or "low").strip().lower()
+    return e if e in ("low", "medium", "high") else "low"
+
+
+def claude_params(model: str, max_tokens: int, quiet: bool = False) -> Dict[str, Any]:
+    """max_tokens / effort / thinking hợp với từng model Claude.
+
+    max_tokens là phần dành cho chữ trả lời; model mặc định suy nghĩ được cộng thêm THINK_HEADROOM.
+    quiet=True (gọi lại khi lần đầu chỉ toàn suy nghĩ): tắt hẳn suy nghĩ ở model cho phép tắt; Opus 5.5 / Fable / Mythos
+    không tắt được thì cho thêm chỗ."""
+    if not thinks_by_default(model):
+        return {"max_tokens": max_tokens}
+    base = _model_base(model)
+    p: Dict[str, Any] = {"max_tokens": max_tokens + THINK_HEADROOM, "output_config": {"effort": claude_effort()}}
+    if quiet:
+        if base == "claude-sonnet-5-5":
+            p["thinking"] = {"type": "between_tools"}     # mức suy nghĩ thấp nhất của Sonnet 5.5 (disabled bị từ chối)
+        elif base in ("claude-sonnet-5", "claude-opus-5", "claude-haiku-5-5"):
+            p["thinking"] = {"type": "disabled"}          # chấp nhận ở effort high trở xuống
+        else:
+            p["max_tokens"] = max_tokens * 2 + THINK_HEADROOM
+    p["max_tokens"] = min(p["max_tokens"], MAX_NONSTREAM_TOKENS)
+    return p
+
+
 async def _claude_text(system: Any, prompt: Any, max_tokens: int, model: Optional[str] = None) -> str:
-    t0 = time.time()
     model = model or claude_model()
-    try:
-        resp = await _anthropic().messages.create(
-            model=model, max_tokens=max_tokens, system=getattr(system, "blocks", None) or system,
-            messages=[{"role": "user", "content": getattr(prompt, "blocks", None) or prompt}])
-    except Exception:
-        _record("claude", model, len(_as_text(system) + _as_text(prompt)) // 4, 0, t0, ok=False, estimated=True)
-        raise
-    text = "\n".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
-    u = _usage_of(resp, _as_text(system) + _as_text(prompt), text)
-    _record("claude", model, u["input"], u["output"], t0, ok=True, estimated=u["estimated"],
-            cache_read=u["cache_read"], cache_write=u["cache_write"])
-    return text
+    sys_blocks = getattr(system, "blocks", None) or system
+    messages = [{"role": "user", "content": getattr(prompt, "blocks", None) or prompt}]
+    for quiet in (False, True):
+        t0 = time.time()
+        try:
+            resp = await _anthropic().messages.create(model=model, system=sys_blocks, messages=messages,
+                                                      **claude_params(model, max_tokens, quiet))
+        except Exception:
+            _record("claude", model, len(_as_text(system) + _as_text(prompt)) // 4, 0, t0, ok=False, estimated=True)
+            raise
+        text = "\n".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+        stop = getattr(resp, "stop_reason", None)
+        u = _usage_of(resp, _as_text(system) + _as_text(prompt), text)
+        _record("claude", model, u["input"], u["output"], t0, ok=bool(text.strip()), estimated=u["estimated"],
+                cache_read=u["cache_read"], cache_write=u["cache_write"])
+        if stop == "refusal":
+            cat = getattr(getattr(resp, "stop_details", None), "category", None)
+            raise RuntimeError(f"Claude từ chối yêu cầu ({cat or 'không rõ lý do'})")
+        if text.strip() or stop != "max_tokens":
+            if stop == "max_tokens":
+                log.warning("meeting.artifacts: Claude dừng vì hết max_tokens (%d), câu trả lời có thể bị cắt", max_tokens)
+            return text
+        if quiet:
+            break
+        log.warning("meeting.artifacts: Claude dùng hết %d token cho phần suy nghĩ mà chưa viết chữ nào, gọi lại với "
+                    "suy nghĩ tắt", u["output"])
+    raise RuntimeError("Claude không trả về nội dung (hết giới hạn token cho phần suy nghĩ)")
 
 
 async def _gemini_text(system: Any, prompt: Any, model: Optional[str] = None) -> str:
@@ -596,7 +656,7 @@ async def _claude_search(query: str, context_text: str = "", max_uses: int = 5,
     model = claude_model()
     try:
         resp = await _anthropic().messages.create(
-            model=model, max_tokens=4000, system=WEB_SYSTEM_PROMPT,
+            model=model, system=WEB_SYSTEM_PROMPT, **claude_params(model, 4000),
             tools=[{"type": "web_search_20250305" if basic else "web_search_20260209", "name": "web_search",
                     "max_uses": max(1, int(max_uses))}],
             messages=[{"role": "user", "content": prompt}])
@@ -776,12 +836,33 @@ def _fmt_date(ts: Any) -> str:
         return ""
 
 
+def compact_transcript(segments: List[Dict[str, Any]]) -> str:
+    """Gộp các câu liền nhau của cùng một người thành một đoạn "Tên: ...": cuộc họp dài bớt hàng nghìn token lặp tên."""
+    out: List[str] = []
+    who, buf = None, []
+    for s in segments:
+        text = str(s.get("text") or "").strip()
+        if not text:
+            continue
+        label = s.get("speaker_label") or "Không rõ"
+        if label != who and buf:
+            out.append(f"{who}: {' '.join(buf)}")
+            buf = []
+        who = label
+        buf.append(text)
+    if buf:
+        out.append(f"{who}: {' '.join(buf)}")
+    return "\n".join(out)
+
+
+MINUTES_MAX_TOKENS = 8000           # phần chữ của biên bản (cuộc họp 1-2 giờ cần 3.000-6.000 token)
+
+
 async def generate_meeting_minutes(meeting_id: int, segments: List[Dict[str, Any]],
                                    title: str = "Cuộc họp nội bộ", meeting: Optional[Dict[str, Any]] = None,
                                    speakers: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     set_meeting(meeting_id, "biên bản")
-    lines = [f"{s.get('speaker_label', 'Không rõ')}: {s.get('text', '')}" for s in segments]
-    transcript_text = "\n".join(lines) if lines else "(Chưa có nội dung)"
+    transcript_text = compact_transcript(segments) or "(Chưa có nội dung)"
     meeting = meeting or {}
     people = "\n".join(
         f"- {p.get('label')}" + (f" ({p.get('role')})" if p.get("role") else "")
@@ -793,7 +874,10 @@ async def generate_meeting_minutes(meeting_id: int, segments: List[Dict[str, Any
               f"Người nói trong buổi họp (nhãn 'Người nói N' là người chưa xác định được tên):\n{people}\n\n"
               f"Transcript cuộc họp:\n{transcript_text}\n\nHãy lập biên bản cuộc họp chi tiết theo cấu trúc. "
               "Ngày tháng ghi theo dd/mm/yyyy.")
-    content = await _call_llm(MINUTES_SYSTEM, prompt, max_tokens=3500)
+    content = await _call_llm(MINUTES_SYSTEM, prompt, max_tokens=MINUTES_MAX_TOKENS)
+    if not (content or "").strip():
+        # không lưu biên bản rỗng: báo lỗi để cuộc họp hiện "lập biên bản lỗi" và lập lại được, thay vì "xong" mà trống
+        raise RuntimeError("AI trả về biên bản rỗng, anh chị bấm lập lại biên bản giúp em")
     if meeting.get("group_id"):
         # Nhớ xuyên cuộc họp: nói khác điều nhóm đã chốt ở buổi trước thì biên bản có mục "Thay đổi so với các buổi trước"
         try:
