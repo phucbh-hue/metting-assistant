@@ -137,6 +137,12 @@ def update_group(gid: Any, name: Any = None, members: Any = None,
     return get_group(g["id"])
 
 
+def set_minutes_template(gid: int, ref: str) -> None:
+    """Mẫu biên bản mặc định của nhóm ("" = theo mặc định của công ty). Kiểm quyền ở meeting.minutes_templates."""
+    _col().update_one({"id": int(gid)}, {"$set": {"minutes_template": str(ref or "")}})
+    _CACHE.pop(int(gid), None)
+
+
 def update_drive(gid: int, **fields: Any) -> None:
     """Ghi các trường của thư mục Drive của nhóm (folder_id, folder_url, permissions...)."""
     if fields:

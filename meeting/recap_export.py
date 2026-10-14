@@ -1,6 +1,6 @@
 """Xuất biên bản và ghi âm để lưu vào thư mục của cuộc họp (Google Drive của nhóm, thư mục trên máy người dùng).
 
-- Biên bản: Markdown do AI viết (cấu trúc MINUTES_SYSTEM: tiêu đề, đoạn văn, gạch đầu dòng, danh sách số, bảng, chữ
+- Biên bản: Markdown do AI viết (cấu trúc theo mẫu biên bản, minutes_templates: tiêu đề, đoạn văn, gạch đầu dòng, danh sách số, bảng, chữ
   đậm) -> HTML để Drive chuyển thành Google Docs, hoặc -> Word (.docx) để lưu trên máy.
 - Ghi âm: nối các lượt ghi PCM 16 kHz của cuộc họp thành một tệp MP3 (libsndfile qua soundfile, khoảng 5 MB/giờ nói).
 - Tên thư mục cuộc họp: "dd-mm-yyyy HHhMM - Tiêu đề" theo giờ Việt Nam, bỏ ký tự Windows / Drive không cho dùng.

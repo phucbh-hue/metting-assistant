@@ -910,10 +910,10 @@ function toast(msg, kind = 'ok', ms = 3800) {
 
 /* ---------- Modal & menu ---------- */
 let modalCloser = null;
-function openModal(html, { onMount, wide } = {}) {
+function openModal(html, { onMount, wide, maxWidth } = {}) {
   closeModal();
   const root = $('#modal-root');
-  root.innerHTML = `<div class="modal-wrap" data-modal-bg><div class="modal" role="dialog" aria-modal="true" style="${wide ? 'max-width:560px' : ''}">${html}</div></div>`;
+  root.innerHTML = `<div class="modal-wrap" data-modal-bg><div class="modal" role="dialog" aria-modal="true" style="${maxWidth ? `max-width:${maxWidth}` : wide ? 'max-width:560px' : ''}">${html}</div></div>`;
   const modal = $('.modal', root);
   const first = $('input:not([type=hidden]):not([type=checkbox]), textarea, select', modal) || $('button', modal);
   setTimeout(() => first && first.focus(), 30);
@@ -1802,6 +1802,7 @@ async function openGroupSettings(gid) {
           <span class="block text-[12px] text-muted">Mỗi cuộc họp trong nhóm có Bảng BD riêng, mở trên máy của người trong nhóm (không lên màn hình trình chiếu, trợ lý không đọc thành tiếng):
             gợi ý trả lời từ tài liệu của nhóm và các cuộc họp trước, hỏi nhanh. Chủ nhóm hỏi và lấy báo cáo trên toàn bộ cuộc họp của nhóm.</span></span></label></div>`
       : (g.bd_mode ? '<p class="text-[12.5px] text-muted mt-4">Nhóm BD: mỗi cuộc họp trong nhóm có Bảng BD riêng (nút Bảng BD trong phòng họp).</p>' : '')}
+    <div id="gs-tpl"></div>
     <div id="gs-kb"></div>
     ${owner ? `<div class="mt-5 pt-4 border-t divider"><h4 class="font-semibold mb-2">Ghi âm trên Google Drive</h4>
         <label class="text-[13px] flex items-center gap-2">Tự xóa sau <input id="gs-days" class="input" type="number" min="1" max="3650" style="width:90px" value="${g.recording_drive_days || ''}" placeholder="30"> ngày</label>
@@ -1845,6 +1846,7 @@ async function openGroupSettings(gid) {
         renderGroupKb($('#gs-kb', m), g);
       });
       renderGroupKb($('#gs-kb', m), g);
+      renderGroupTemplate($('#gs-tpl', m), g);
       renderGroupDrive($('#gs-drive', m), g);
       renderGroupLocal($('#gs-local', m), g);
       m.addEventListener('click', async e => {
@@ -1889,6 +1891,255 @@ async function openMoveMeeting(mid) {
 /* =====================================================================
    TẠO CUỘC HỌP
    ===================================================================== */
+/* =====================================================================
+   MẪU BIÊN BẢN (14/10/2026): biên bản = recap; công ty / nhóm / cá nhân, mỗi loại họp một cấu trúc
+   ===================================================================== */
+const TPL_SCOPE = { builtin: 'Dựng sẵn', company: 'Công ty', group: 'Nhóm', personal: 'Của tôi' };
+const TPL_FMT = { paragraph: 'Đoạn văn', bullets: 'Gạch đầu dòng', table: 'Bảng' };
+function tplOptions(list, sel, gid, { withDefault = true, defaultLabel = 'Theo mặc định' } = {}) {
+  const ok = (list || []).filter(t => t.scope !== 'group' || t.group_id === gid);
+  const grp = (label, arr) => arr.length ? `<optgroup label="${esc(label)}">${arr.map(t => `<option value="${esc(t.id)}" ${String(t.id) === String(sel || '') ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</optgroup>` : '';
+  return (withDefault ? `<option value="">${esc(defaultLabel)}</option>` : '')
+    + grp('Của nhóm', ok.filter(t => t.scope === 'group')) + grp('Của công ty', ok.filter(t => t.scope === 'company'))
+    + grp('Của tôi', ok.filter(t => t.scope === 'personal')) + grp('Dựng sẵn', ok.filter(t => t.scope === 'builtin'));
+}
+function tplSkeleton(t) {
+  const out = ['# BIÊN BẢN CUỘC HỌP: [Tên cuộc họp]', '**Thời gian:** ... | **Chủ trì:** ... | **Thành viên tham dự:** ...', ''];
+  (t.sections || []).forEach((s, i) => {
+    out.push(`## ${i + 1}. ${s.title || '(chưa đặt tên)'}`);
+    const cols = (s.columns || []).filter(Boolean);
+    if (s.format === 'table' && cols.length) out.push(`| ${cols.join(' | ')} |`, `|${cols.map(() => '---').join('|')}|`, `| ${cols.map(() => '...').join(' | ')} |`);
+    else if (s.format === 'paragraph') out.push(s.instructions ? `_${s.instructions}_` : '...');
+    else out.push(`- ${s.instructions || '...'}`);
+    out.push('');
+  });
+  return out.join('\n');
+}
+function tplRow(t, d) {
+  const chips = [t.default_company ? '<span class="chip chip-accent">mặc định công ty</span>' : '',
+    t.default_group ? '<span class="chip chip-accent">mặc định của nhóm</span>' : '',
+    t.scope === 'group' && t.group_name ? `<span class="chip">${esc(t.group_name)}</span>` : ''].join('');
+  return `<li class="cal-row">
+    <div class="min-w-0"><div class="font-medium truncate">${esc(t.name)} ${chips}</div>
+      <div class="text-[12px] text-muted">${t.description ? `${esc(t.description)}${/[.!?]$/.test(t.description) ? '' : '.'} ` : ''}${(t.sections || []).length} mục: ${esc((t.sections || []).map(s => s.title).join(', '))}</div></div>
+    <div class="flex flex-wrap items-center gap-1.5 justify-end">
+      <button type="button" class="btn btn-ghost btn-sm" data-tpl="view" data-id="${esc(t.id)}">Xem</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-tpl="copy" data-id="${esc(t.id)}" title="Tạo bản sao để chỉnh theo ý mình">Nhân bản</button>
+      ${t.can_edit ? `<button type="button" class="btn btn-ghost btn-sm" data-tpl="edit" data-id="${esc(t.id)}">Sửa</button>
+        <button type="button" class="icon-btn" data-tpl="delete" data-id="${esc(t.id)}" aria-label="Xóa mẫu ${esc(t.name)}" title="Xóa mẫu"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>` : ''}
+    </div></li>`;
+}
+async function openTemplates(gid = null) {
+  let d;
+  try { d = await GET(`/api/minutes-templates${gid ? `?group_id=${gid}` : ''}`); } catch (e) { return toast(e.message, 'err'); }
+  const list = d.templates || [];
+  const by = sc => list.filter(t => t.scope === sc);
+  const block = (title, arr, hint) => `<section class="mt-4"><h4 class="font-semibold mb-1">${esc(title)}</h4>
+    ${hint ? `<p class="text-[12px] text-muted mb-2">${hint}</p>` : ''}
+    ${arr.length ? `<ul class="flex flex-col gap-1.5">${arr.map(t => tplRow(t, d)).join('')}</ul>` : '<p class="text-[12.5px] text-muted">Chưa có mẫu nào.</p>'}</section>`;
+  const companyPick = d.can_company ? `<label class="text-[13px] flex flex-wrap items-center gap-2 mt-3">Mẫu mặc định của công ty
+      <select class="input" data-tpl-default="company" style="width:auto;height:32px">${tplOptions(list.filter(t => t.scope === 'builtin' || t.scope === 'company'), d.company_default, null, { defaultLabel: 'Tự chọn theo loại cuộc họp' })}</select></label>` : '';
+  openModal(`<div class="flex flex-wrap items-start justify-between gap-3"><div><h3 class="text-lg font-semibold">Mẫu biên bản</h3>
+      <p class="text-muted text-[13px]">Biên bản là bản recap của cuộc họp. Mỗi loại họp một cấu trúc riêng; AI lập biên bản đúng các mục của mẫu.</p></div>
+      <button type="button" class="btn btn-primary btn-sm" data-tpl="new">Tạo mẫu mới</button></div>
+    <details class="mt-3 text-[12.5px]"><summary class="cursor-pointer text-muted">Ai được làm gì?</summary>
+      <ul class="mt-2 flex flex-col gap-1" style="list-style:disc;padding-left:18px">
+        <li><b>Dựng sẵn</b>: ai cũng dùng và nhân bản được, không ai sửa.</li>
+        <li><b>Công ty</b>: quản trị viên tạo, sửa, đặt mặc định cho cả công ty; mọi người dùng được.</li>
+        <li><b>Nhóm</b>: chủ nhóm tạo, sửa, đặt mặc định cho nhóm; thành viên dùng và nhân bản được.</li>
+        <li><b>Của tôi</b>: ai cũng tạo được, chỉ mình thấy.</li>
+        <li>Chọn mẫu cho một cuộc họp, lập lại biên bản bằng mẫu khác: người tạo cuộc họp hoặc chủ nhóm.</li>
+        <li>Thứ tự áp dụng: mẫu chọn riêng cho cuộc họp, mặc định của nhóm, mặc định của công ty, rồi mẫu dựng sẵn hợp với loại cuộc họp.</li></ul></details>
+    ${companyPick}
+    <div style="max-height:56vh;overflow-y:auto" class="pr-1">
+      ${block('Của nhóm', by('group'), d.owned_groups.length ? 'Chủ nhóm sửa được mẫu của nhóm mình.' : '')}
+      ${block('Của công ty', by('company'), '')}
+      ${block('Của tôi', by('personal'), 'Chỉ anh chị thấy.')}
+      ${block('Dựng sẵn', by('builtin'), 'Muốn chỉnh thì bấm Nhân bản rồi sửa bản sao.')}
+    </div>
+    <div class="flex justify-end mt-4"><button type="button" class="btn btn-ghost" data-act="modal-close">Đóng</button></div>`, {
+    maxWidth: '820px',
+    onMount(m) {
+      m.addEventListener('change', async e => {
+        const sel = e.target.closest('[data-tpl-default="company"]'); if (!sel) return;
+        try { await PUT('/api/minutes-templates-default', { template: sel.value || null }); toast('Đã đặt mẫu mặc định của công ty.'); }
+        catch (err) { toast(err.message, 'err'); }
+      });
+      m.addEventListener('click', async e => {
+        const b = e.target.closest('[data-tpl]'); if (!b) return;
+        const t = list.find(x => String(x.id) === String(b.dataset.id));
+        if (b.dataset.tpl === 'new') return openTemplateEditor(null, d, gid);
+        if (b.dataset.tpl === 'view') return openTemplateView(t, d, gid);
+        if (b.dataset.tpl === 'edit') return openTemplateEditor(t, d, gid);
+        if (b.dataset.tpl === 'copy') {
+          try { const c = await POST(`/api/minutes-templates/${encodeURIComponent(t.id)}/copy`, { scope: 'personal' }); toast(`Đã tạo bản sao "${c.name}" trong mục Của tôi.`); return openTemplateEditor(c, d, gid); }
+          catch (err) { return toast(err.message, 'err'); }
+        }
+        if (b.dataset.tpl === 'delete') {
+          const ok = await confirmDialog({ title: `Xóa mẫu "${t.name}"?`, ok: 'Xóa mẫu', danger: true,
+            body: 'Biên bản đã lập vẫn giữ nguyên. Cuộc họp và nhóm đang dùng mẫu này chuyển sang mẫu mặc định.' });
+          if (ok) { try { await DEL(`/api/minutes-templates/${encodeURIComponent(t.id)}`); toast('Đã xóa mẫu.'); } catch (err) { toast(err.message, 'err'); } }
+          return openTemplates(gid);
+        }
+      });
+    },
+  });
+}
+function openTemplateView(t, d, gid) {
+  openModal(`<h3 class="text-lg font-semibold mb-1">${esc(t.name)}</h3>
+    <p class="text-muted text-[13px] mb-3">${esc(TPL_SCOPE[t.scope] || '')}${t.group_name ? `: ${esc(t.group_name)}` : ''}${t.description ? `. ${esc(t.description)}` : ''}</p>
+    <div class="panel p-4" style="max-height:58vh;overflow-y:auto"><article class="md">${renderMd(tplSkeleton(t))}</article>
+      ${t.instructions ? `<p class="text-[12.5px] text-muted mt-3"><b>Yêu cầu chung:</b> ${esc(t.instructions)}</p>` : ''}</div>
+    <div class="flex justify-end gap-2 mt-4"><button type="button" class="btn btn-ghost" data-tv="back">Quay lại</button>
+      ${t.can_edit ? '<button type="button" class="btn btn-primary" data-tv="edit">Sửa</button>' : ''}</div>`, {
+    maxWidth: '720px',
+    onMount(m) { m.addEventListener('click', e => { const b = e.target.closest('[data-tv]'); if (!b) return; return b.dataset.tv === 'edit' ? openTemplateEditor(t, d, gid) : openTemplates(gid); }); },
+  });
+}
+function openTemplateEditor(t, d, gid) {
+  const isNew = !t || !t.id;
+  const draft = JSON.parse(JSON.stringify(t || { name: '', description: '', instructions: '', scope: 'personal',
+    sections: [{ title: 'Tóm tắt', instructions: '', format: 'paragraph', columns: [] }, { title: 'Việc cần làm', instructions: '', format: 'table', columns: ['Việc', 'Người phụ trách', 'Hạn'] }] }));
+  const scopes = [['personal', 'Của tôi (chỉ mình thấy)']]
+    .concat((d.owned_groups || []).map(g => [`group:${g.id}`, `Nhóm: ${g.name}`]))
+    .concat(d.can_company ? [['company', 'Công ty (mọi người dùng được)']] : []);
+  const secHtml = () => draft.sections.map((s, i) => `<div class="panel p-3" data-sec="${i}">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="num text-muted text-[12px]">${i + 1}.</span>
+        <input class="input flex-1" data-f="title" maxlength="120" value="${esc(s.title)}" placeholder="Tên mục, ví dụ: Quyết định" style="height:32px;min-width:160px">
+        <select class="input" data-f="format" style="width:auto;height:32px">${Object.entries(TPL_FMT).map(([k, v]) => `<option value="${k}" ${s.format === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
+        <button type="button" class="icon-btn" data-sec-act="up" aria-label="Lên" title="Lên" ${i === 0 ? 'disabled' : ''}>&uarr;</button>
+        <button type="button" class="icon-btn" data-sec-act="down" aria-label="Xuống" title="Xuống" ${i === draft.sections.length - 1 ? 'disabled' : ''}>&darr;</button>
+        <button type="button" class="icon-btn" data-sec-act="rm" aria-label="Bỏ mục" title="Bỏ mục">&times;</button></div>
+      ${s.format === 'table' ? `<input class="input mt-2" data-f="columns" value="${esc((s.columns || []).join(', '))}" placeholder="Các cột, cách nhau bằng dấu phẩy: Việc, Người phụ trách, Hạn" style="height:32px">` : ''}
+      <input class="input mt-2" data-f="instructions" maxlength="600" value="${esc(s.instructions || '')}" placeholder="AI cần ghi gì ở mục này (không bắt buộc)" style="height:32px"></div>`).join('');
+  openModal(`<h3 class="text-lg font-semibold mb-1">${isNew ? 'Tạo mẫu biên bản' : `Sửa mẫu "${esc(draft.name)}"`}</h3>
+    <p class="text-muted text-[13px] mb-3">Đặt các mục biên bản cần có theo đúng thứ tự. Mục dạng Bảng giữ đúng các cột anh chị đặt; mục nào cuộc họp không nói tới, AI ghi "Không có trong cuộc họp".</p>
+    <div class="grid gap-4" style="grid-template-columns:minmax(0,1.15fr) minmax(0,0.85fr)">
+      <form id="tpl-form" class="flex flex-col gap-3 min-w-0">
+        <div class="grid grid-cols-2 gap-2"><div><label class="field" for="tpl-name">Tên mẫu</label><input id="tpl-name" class="input" maxlength="120" required value="${esc(draft.name)}" placeholder="Ví dụ: Họp đối tác merchant"></div>
+          <div><label class="field" for="tpl-scope">Phạm vi</label><select id="tpl-scope" class="input" ${isNew ? '' : 'disabled'}>${scopes.map(([v, l]) => `<option value="${esc(v)}" ${(draft.scope === 'group' ? `group:${draft.group_id}` : draft.scope) === v || (isNew && gid && v === `group:${gid}`) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div></div>
+        <div><label class="field" for="tpl-desc">Dùng cho</label><input id="tpl-desc" class="input" maxlength="300" value="${esc(draft.description || '')}" placeholder="Ví dụ: buổi làm việc với merchant về chương trình quà tặng"></div>
+        <details class="panel p-3"><summary class="cursor-pointer text-[13px] font-medium">Soạn nhanh bằng AI</summary>
+          <textarea id="tpl-ai" class="input mt-2" rows="3" maxlength="1500" placeholder="Mô tả biên bản anh chị muốn, ví dụ: họp với merchant, cần ghi đề xuất của merchant, điều kiện hợp tác, việc cần làm của hai bên"></textarea>
+          <div class="flex justify-end mt-2"><button type="button" class="btn btn-ghost btn-sm" data-tpl-ai>Soạn các mục</button></div></details>
+        <div id="tpl-secs" class="flex flex-col gap-2">${secHtml()}</div>
+        <button type="button" class="btn btn-ghost btn-sm self-start" data-sec-add>Thêm mục</button>
+        <div><label class="field" for="tpl-ins">Yêu cầu chung (không bắt buộc)</label><textarea id="tpl-ins" class="input" rows="2" maxlength="1500" placeholder="Ví dụ: viết ngắn gọn, số liệu đưa vào bảng, không ghi số điện thoại">${esc(draft.instructions || '')}</textarea></div>
+        <div class="flex justify-end gap-2"><button type="button" class="btn btn-ghost" data-tpl-back>Quay lại</button><button type="submit" class="btn btn-primary">${isNew ? 'Lưu mẫu' : 'Lưu thay đổi'}</button></div>
+      </form>
+      <div class="min-w-0"><div class="text-[12px] text-muted mb-1">Xem trước cấu trúc biên bản</div>
+        <div id="tpl-preview" class="panel p-3 md text-[12.5px]" style="max-height:62vh;overflow-y:auto"></div></div>
+    </div>`, {
+    maxWidth: '1040px',
+    onMount(m) {
+      const pv = () => { $('#tpl-preview', m).innerHTML = renderMd(tplSkeleton(draft)); };
+      const redraw = () => { $('#tpl-secs', m).innerHTML = secHtml(); pv(); };
+      const read = () => {
+        draft.name = $('#tpl-name', m).value; draft.description = $('#tpl-desc', m).value; draft.instructions = $('#tpl-ins', m).value;
+        $$('[data-sec]', m).forEach(box => {
+          const s = draft.sections[parseInt(box.dataset.sec, 10)]; if (!s) return;
+          s.title = $('[data-f="title"]', box).value; s.format = $('[data-f="format"]', box).value; s.instructions = $('[data-f="instructions"]', box).value;
+          const c = $('[data-f="columns"]', box); if (c) s.columns = c.value.split(',').map(x => x.trim()).filter(Boolean);
+          if (s.format === 'table' && !(s.columns || []).length) s.columns = ['Nội dung', 'Người phụ trách', 'Hạn'];
+        });
+      };
+      pv();
+      m.addEventListener('input', () => { read(); pv(); });
+      m.addEventListener('change', e => { if (e.target.matches('[data-f="format"]')) { read(); redraw(); } });
+      m.addEventListener('click', async e => {
+        if (e.target.closest('[data-tpl-back]')) return openTemplates(gid);
+        if (e.target.closest('[data-sec-add]')) { read(); draft.sections.push({ title: '', instructions: '', format: 'bullets', columns: [] }); return redraw(); }
+        const a = e.target.closest('[data-sec-act]');
+        if (a) {
+          read();
+          const i = parseInt(a.closest('[data-sec]').dataset.sec, 10), S2 = draft.sections;
+          if (a.dataset.secAct === 'rm') S2.splice(i, 1);
+          if (a.dataset.secAct === 'up' && i > 0) [S2[i - 1], S2[i]] = [S2[i], S2[i - 1]];
+          if (a.dataset.secAct === 'down' && i < S2.length - 1) [S2[i + 1], S2[i]] = [S2[i], S2[i + 1]];
+          return redraw();
+        }
+        const ai = e.target.closest('[data-tpl-ai]');
+        if (ai) {
+          const desc = $('#tpl-ai', m).value.trim(); if (!desc) return toast('Mô tả biên bản anh chị muốn trước đã.', 'err');
+          ai.disabled = true; ai.innerHTML = '<span class="spinner"></span>Đang soạn...';
+          try {
+            const r = await POST('/api/minutes-templates-draft', { description: desc });
+            read();
+            draft.sections = r.sections; if (!draft.name.trim()) draft.name = r.name; if (!draft.description.trim()) draft.description = r.description || '';
+            if (!draft.instructions.trim()) draft.instructions = r.instructions || '';
+            $('#tpl-name', m).value = draft.name; $('#tpl-desc', m).value = draft.description; $('#tpl-ins', m).value = draft.instructions;
+            redraw(); toast('AI đã soạn các mục. Anh chị xem, sửa rồi bấm Lưu.');
+          } catch (err) { toast(err.message, 'err'); }
+          finally { ai.disabled = false; ai.textContent = 'Soạn các mục'; }
+        }
+      });
+      $('#tpl-form', m).addEventListener('submit', async e => {
+        e.preventDefault(); read();
+        const btn = $('button[type=submit]', m); btn.disabled = true;
+        const body = { name: draft.name, description: draft.description, instructions: draft.instructions, sections: draft.sections };
+        try {
+          if (isNew) {
+            const sc = $('#tpl-scope', m).value;
+            await POST('/api/minutes-templates', { ...body, scope: sc.startsWith('group:') ? 'group' : sc, group_id: sc.startsWith('group:') ? parseInt(sc.slice(6), 10) : null });
+          } else await PUT(`/api/minutes-templates/${encodeURIComponent(t.id)}`, body);
+          toast(isNew ? 'Đã lưu mẫu biên bản.' : 'Đã lưu thay đổi.');
+          openTemplates(gid);
+        } catch (err) { toast(err.message, 'err', 7000); btn.disabled = false; }
+      });
+    },
+  });
+}
+async function renderGroupTemplate(box, g) {
+  if (!box) return;
+  let d;
+  try { d = await GET(`/api/minutes-templates?group_id=${g.id}`); } catch (e) { box.innerHTML = ''; return; }
+  const cur = (d.templates || []).find(t => String(t.id) === String(g.minutes_template || ''));
+  box.innerHTML = `<div class="mt-5 pt-4 border-t divider"><h4 class="font-semibold mb-1">Mẫu biên bản của nhóm</h4>
+    ${g.role === 'owner' ? `<select class="input" data-gt style="height:34px">${tplOptions(d.templates, g.minutes_template, g.id, { defaultLabel: 'Theo mặc định của công ty' })}</select>`
+      : `<p class="text-[13px]">${cur ? esc(cur.name) : 'Theo mặc định của công ty'}</p>`}
+    <p class="text-[12px] text-muted mt-1">Cuộc họp trong nhóm lập biên bản theo mẫu này, trừ khi người tạo cuộc họp chọn mẫu khác.
+      <button type="button" class="link" data-gt-manage>Quản lý mẫu biên bản</button></p></div>`;
+  const sel = $('[data-gt]', box);
+  if (sel) sel.addEventListener('change', async () => {
+    try { await PUT(`/api/groups/${g.id}/minutes-template`, { template: sel.value || null }); g.minutes_template = sel.value; toast('Đã đặt mẫu biên bản của nhóm.'); }
+    catch (err) { toast(err.message, 'err'); }
+  });
+  $('[data-gt-manage]', box).addEventListener('click', () => openTemplates(g.id));
+}
+async function openMeetingTemplate(R, regenerate) {
+  const m0 = R.meeting;
+  let d;
+  try { d = await GET(`/api/minutes-templates${m0.group_id ? `?group_id=${m0.group_id}` : ''}`); } catch (e) { return toast(e.message, 'err'); }
+  const minutes = [...(R.artifacts || [])].reverse().find(a => a.kind === 'minutes');
+  openModal(`<h3 class="text-lg font-semibold mb-1">${regenerate ? 'Lập lại biên bản' : 'Mẫu biên bản cho cuộc họp này'}</h3>
+    <p class="text-muted text-[13px] mb-3">${regenerate ? `AI lập biên bản mới theo mẫu anh chị chọn (biên bản cũ vẫn giữ trong danh sách phiên bản).${minutes && minutes.meta && minutes.meta.template_name ? ` Bản hiện tại theo mẫu "${esc(minutes.meta.template_name)}".` : ''}`
+      : 'Biên bản tự lập khi kết thúc cuộc họp, theo mẫu này.'}</p>
+    <form id="mtpl" class="flex flex-col gap-3"><select class="input" id="mtpl-sel">${tplOptions(d.templates, m0.minutes_template, m0.group_id, { defaultLabel: 'Theo mặc định của nhóm / công ty' })}</select>
+      <div class="flex justify-between gap-2"><button type="button" class="link text-[12.5px]" data-mtpl-manage>Quản lý mẫu biên bản</button>
+        <div class="flex gap-2"><button type="button" class="btn btn-ghost" data-act="modal-close">Hủy</button>
+        <button type="submit" class="btn btn-primary">${regenerate ? 'Lập lại biên bản' : 'Lưu'}</button></div></div></form>`, {
+    onMount(m) {
+      $('[data-mtpl-manage]', m).addEventListener('click', () => openTemplates(m0.group_id || null));
+      $('#mtpl', m).addEventListener('submit', async e => {
+        e.preventDefault();
+        const ref = $('#mtpl-sel', m).value || null;
+        const btn = $('button[type=submit]', m); btn.disabled = true;
+        try {
+          if (regenerate) {
+            const r = await POST(`/api/meetings/${R.id}/minutes`, { template: ref });
+            closeModal(); toast(`Đang lập lại biên bản theo mẫu "${r.template}"...`);
+            R.meeting.minutes_status = 'pending'; switchTab('docs'); if (typeof watchMinutes === 'function') watchMinutes(R);
+          } else {
+            const r = await PUT(`/api/meetings/${R.id}/minutes-template`, { template: ref });
+            R.meeting.minutes_template = r.minutes_template; closeModal(); toast(`Biên bản sẽ lập theo mẫu "${r.resolved}".`);
+          }
+        } catch (err) { toast(err.message, 'err', 7000); btn.disabled = false; }
+      });
+    },
+  });
+}
+
 async function openCreateMeeting() {
   if (!S.groupsLoaded) await ensureGroups();
   if (!S.voices.length) { try { S.voices = (await GET('/api/voices')).voices || []; } catch (e) { /* bỏ qua */ } }
@@ -1908,6 +2159,8 @@ async function openCreateMeeting() {
       <div><label class="field" for="cm-attendees">Người tham dự (tùy chọn, cách nhau bằng dấu phẩy)</label>
         <input id="cm-attendees" class="input" placeholder="Ví dụ: Hương, Lê Văn Tuấn, khách Vinmart">
         <p class="text-[12px] text-muted mt-1">Giúp nhận dạng tên chính xác hơn và AI đoán đúng ai đang nói.</p></div>
+      <div><label class="field" for="cm-tpl">Mẫu biên bản</label>
+        <select id="cm-tpl" class="input"><option value="">Theo mặc định của nhóm / công ty</option></select></div>
       <div><label class="field" for="cm-agenda">Chương trình (mỗi dòng một mục)</label>
         <textarea id="cm-agenda" class="input" rows="3" placeholder="Đánh giá tiến độ migrate Postgres&#10;Chốt kế hoạch Mega Sale 10.10"></textarea></div>
       <div class="flex justify-end gap-2 pt-1">
@@ -1916,6 +2169,14 @@ async function openCreateMeeting() {
       </div>
     </form>`, {
     onMount(m) {
+      let tpls = [];
+      const fillTpl = () => {
+        const gid = $('#cm-group', m) ? (parseInt($('#cm-group', m).value, 10) || null) : null;
+        const keep = $('#cm-tpl', m).value;
+        $('#cm-tpl', m).innerHTML = tplOptions(tpls, keep, gid, { defaultLabel: 'Theo mặc định của nhóm / công ty' });
+      };
+      GET('/api/minutes-templates').then(r => { tpls = r.templates || []; fillTpl(); }).catch(() => { /* để mặc định */ });
+      if ($('#cm-group', m)) $('#cm-group', m).addEventListener('change', fillTpl);
       $('#create-form', m).addEventListener('submit', async e => {
         e.preventDefault();
         const btn = $('button[type=submit]', m); btn.disabled = true;
@@ -1927,6 +2188,7 @@ async function openCreateMeeting() {
             expected_attendees: $('#cm-attendees', m).value.split(',').map(s => s.trim()).filter(Boolean),
             agenda: $('#cm-agenda', m).value.split('\n').map(s => s.trim()).filter(Boolean),
             group_id: $('#cm-group', m) ? (parseInt($('#cm-group', m).value, 10) || null) : null,
+            minutes_template: $('#cm-tpl', m).value || null,
           });
           closeModal();
           toast('Đã tạo cuộc họp. Bấm "Bật mic" để bắt đầu ghi.');
@@ -2676,8 +2938,11 @@ async function renderArtifactPane() {
     pane.innerHTML = `${dashHtml(d, false)}<div class="flex justify-end mt-3"><button class="btn btn-primary btn-sm" data-act="stage-show" data-aid="${art.id}">Trình chiếu</button></div>`;
     mountDash(pane, d);
   } else if (art.kind === 'minutes' || art.kind === 'report') {
+    const tplName = art.kind === 'minutes' && art.meta && art.meta.template_name;
     pane.innerHTML = `<article class="md">${renderMd(art.content)}</article>
-      <div class="flex justify-end mt-3"><button class="btn btn-ghost btn-sm" data-act="stage-show" data-aid="${art.id}">Trình chiếu</button></div>`;
+      <div class="flex flex-wrap items-center justify-end gap-2 mt-3">${tplName ? `<span class="text-[12px] text-muted mr-auto">Theo mẫu "${esc(tplName)}"</span>` : ''}
+        ${art.kind === 'minutes' && R.meeting.status === 'ended' ? '<button class="btn btn-ghost btn-sm" data-act="minutes-regen">Lập lại bằng mẫu khác</button>' : ''}
+        <button class="btn btn-ghost btn-sm" data-act="stage-show" data-aid="${art.id}">Trình chiếu</button></div>`;
   } else if (art.kind === 'diagram') {
     pane.innerHTML = `<div class="mm-host mm-panel"><div class="flex items-center gap-2 text-muted p-4"><span class="spinner"></span>Đang vẽ sơ đồ...</div></div>
       <div class="flex justify-end mt-3"><button class="btn btn-primary btn-sm" data-act="stage-show" data-aid="${art.id}">Trình chiếu</button></div>`;
@@ -5256,7 +5521,10 @@ function openSettings() {
   const myllm = AUTH.required ? `<div class="mb-5 pb-4 border-b divider">
       <div class="flex items-center justify-between gap-2 mb-1"><h4 class="font-semibold">Gói AI của tôi</h4><span class="text-[12px] text-muted">Claude.ai hoặc ChatGPT của riêng bạn</span></div>
       <div id="myllm-box" data-llm-scope="me" class="text-[13px]"><div class="flex items-center gap-2 text-muted"><span class="spinner"></span>Đang kiểm tra...</div></div></div>` : '';
-  openModal(`${acct}${gdrive}${wiki}${myllm}
+  const tplSec = `<div class="mb-5 pb-4 border-b divider"><div class="flex items-center justify-between gap-2"><h4 class="font-semibold">Mẫu biên bản</h4>
+      <button type="button" class="btn btn-ghost btn-sm" data-act="tpl-manage">Quản lý mẫu</button></div>
+      <p class="text-[12.5px] text-muted mt-1">Biên bản là bản recap của cuộc họp. Tạo mẫu cho từng loại họp (daily, họp khách, phỏng vấn...), đặt mặc định cho nhóm hoặc cả công ty.</p></div>`;
+  openModal(`${acct}${gdrive}${wiki}${tplSec}${myllm}
     <h3 class="text-lg font-semibold mb-1">Cài đặt trợ lý</h3>
     <p class="text-muted text-[13px] mb-4">Đặt tên để gọi trợ lý trong cuộc họp thay cho "Jarvis".</p>
     <form id="as-form" class="flex flex-col gap-4">
@@ -5826,6 +6094,8 @@ document.addEventListener('click', async e => {
   const mid = el.dataset.mid ? parseInt(el.dataset.mid, 10) : null;
   switch (act) {
     case 'create-meeting': return openCreateMeeting();
+    case 'tpl-manage': return openTemplates();
+    case 'minutes-regen': if (S.room) openMeetingTemplate(S.room, true); return;
     case 'hub-group': location.hash = el.dataset.gid ? `#/g/${el.dataset.gid}` : '#/'; return;
     case 'create-group': return openCreateGroup();
     case 'drive-save': return saveToDrive(S.room);
@@ -5848,6 +6118,7 @@ document.addEventListener('click', async e => {
       const items = [{ id: 'reanalyze', text: 'Phân tích lại người nói' }, { id: 'move', text: 'Chuyển vào nhóm...' }, { id: 'export', text: 'Xuất Markdown' }, { id: 'export-data', text: 'Xuất dữ liệu phân tích (JSON)' }];
       if (AUTH.required && R.meeting && R.meeting.status === 'ended') items.push({ id: 'drive-save', text: 'Lưu lên Google Drive' });
       if ((R.artifacts || []).some(a => a.kind === 'minutes')) items.push({ id: 'dl-docx', text: 'Tải biên bản (.docx)' });
+      if (R.meeting) items.push(R.meeting.status === 'ended' ? { id: 'minutes-regen', text: 'Lập lại biên bản...' } : { id: 'meeting-tpl', text: 'Mẫu biên bản...' });
       if (R.recording && R.recording.runs) items.push({ id: 'dl-mp3', text: 'Tải ghi âm (.mp3)' });
       if (R.recording && R.recording.runs) items.push({ id: 'rec-delete', text: `Xóa bản ghi âm (${fmt.dur(R.recording.seconds || 0)})`, danger: true });
       if (R.meet && (R.meet.bot || (R.meet.people || []).length)) items.unshift({ id: 'meet-people', text: 'Người trong Google Meet...' });
@@ -5857,6 +6128,8 @@ document.addEventListener('click', async e => {
       const c = await openMenu(el, items);
       if (c === 'meet-people') openMeetPeople();
       if (c === 'meet-join') openRoomMeetJoin();
+      if (c === 'minutes-regen') openMeetingTemplate(R, true);
+      if (c === 'meeting-tpl') openMeetingTemplate(R, false);
       if (c === 'rec-delete') deleteRecording();
       if (c === 'move') openMoveMeeting(R.id);
       if (c === 'drive-save') saveToDrive(R);

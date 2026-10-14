@@ -804,29 +804,8 @@ async def _web_search_tool(query: str, on_progress, rewrite: bool, max_uses: int
 # ==============================================================================
 # 1. BIÊN BẢN CUỘC HỌP (MEETING MINUTES & ACTION ITEMS)
 # ==============================================================================
-MINUTES_SYSTEM = """Bạn là Thư ký Cuộc họp Thông minh (Executive Meeting Scribe).
-Nhiệm vụ: Phân tích toàn bộ transcript cuộc họp và dữ liệu MCP để soạn thảo một Biên bản Cuộc họp chuyên nghiệp.
-
-Cấu trúc bắt buộc (định dạng Markdown):
-# BIÊN BẢN CUỘC HỌP: [Tiêu đề cuộc họp]
-**Thời gian:** [Thời gian] | **Chủ trì:** [Host] | **Thành viên tham dự:** [Danh sách]
-
-## 1. Tóm Tắt Điều Hành (Executive Summary)
-(2-3 đoạn ngắn nêu bật trọng tâm, các vấn đề nổi cộm và mục tiêu đạt được)
-
-## 2. Các Quyết Định Quan Trọng Đã Thống Nhất (Key Decisions)
-- [Quyết định 1]: Chi tiết, lý do, người đề xuất.
-- [Quyết định 2]: ...
-
-## 3. Bảng Phân Công Nhiệm Vụ (Action Items Matrix)
-| STT | Nhiệm vụ (Action Item) | Người phụ trách (Assignee) | Hạn chót (Deadline) | Mức độ ưu tiên | Ghi chú & Căn cứ |
-|---|---|---|---|---|---|
-| 1 | ... | ... | ... | Cao / TB / Thấp | Trích dẫn ngắn |
-
-## 4. Vấn Đề Tồn Đọng / Rủi Ro Cần Theo Dõi (Open Questions & Risks)
-- ...
-
-Yêu cầu: Viết tiếng Việt chuẩn xác, tên người nói và nhiệm vụ phải đối chiếu đúng với nhân sự công ty."""
+# Cấu trúc biên bản lấy từ mẫu biên bản (meeting/minutes_templates.py, bản 14/10/2026): mẫu chọn riêng cho cuộc họp,
+# mặc định của nhóm / công ty, hoặc mẫu dựng sẵn hợp với loại cuộc họp. "Biên bản tiêu chuẩn" giữ cấu trúc cũ.
 
 
 def _fmt_date(ts: Any) -> str:
@@ -860,10 +839,14 @@ MINUTES_MAX_TOKENS = 8000           # phần chữ của biên bản (cuộc h�
 
 async def generate_meeting_minutes(meeting_id: int, segments: List[Dict[str, Any]],
                                    title: str = "Cuộc họp nội bộ", meeting: Optional[Dict[str, Any]] = None,
-                                   speakers: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+                                   speakers: Optional[List[Dict[str, Any]]] = None,
+                                   template: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """template: mẫu biên bản (None = mẫu của cuộc họp theo thứ tự ưu tiên trong minutes_templates.resolve)."""
+    from meeting import minutes_templates
     set_meeting(meeting_id, "biên bản")
     transcript_text = compact_transcript(segments) or "(Chưa có nội dung)"
     meeting = meeting or {}
+    tpl = template or minutes_templates.resolve(meeting)
     people = "\n".join(
         f"- {p.get('label')}" + (f" ({p.get('role')})" if p.get("role") else "")
         + f": {p.get('n_segments', 0)} câu" for p in (speakers or [])) or "(không rõ)"
@@ -872,9 +855,9 @@ async def generate_meeting_minutes(meeting_id: int, segments: List[Dict[str, Any
     prompt = (f"Tiêu đề: {title}\nThời gian bắt đầu: {_fmt_date(meeting.get('started_at'))}\n"
               f"Loại cuộc họp: {meeting.get('meeting_type', '')}\nChương trình:\n{agenda}\n\n"
               f"Người nói trong buổi họp (nhãn 'Người nói N' là người chưa xác định được tên):\n{people}\n\n"
-              f"Transcript cuộc họp:\n{transcript_text}\n\nHãy lập biên bản cuộc họp chi tiết theo cấu trúc. "
-              "Ngày tháng ghi theo dd/mm/yyyy.")
-    content = await _call_llm(MINUTES_SYSTEM, prompt, max_tokens=MINUTES_MAX_TOKENS)
+              f"Transcript cuộc họp:\n{transcript_text}\n\nHãy lập biên bản cuộc họp theo đúng mẫu "
+              f"\"{tpl['name']}\". Ngày tháng ghi theo dd/mm/yyyy.")
+    content = await _call_llm(minutes_templates.render_system(tpl), prompt, max_tokens=MINUTES_MAX_TOKENS)
     if not (content or "").strip():
         # không lưu biên bản rỗng: báo lỗi để cuộc họp hiện "lập biên bản lỗi" và lập lại được, thay vì "xong" mà trống
         raise RuntimeError("AI trả về biên bản rỗng, anh chị bấm lập lại biên bản giúp em")
@@ -886,15 +869,10 @@ async def generate_meeting_minutes(meeting_id: int, segments: List[Dict[str, Any
         except Exception as e:
             log.warning("meeting.artifacts: so với các buổi trước của nhóm lỗi: %s", e)
 
-    # Lưu vào DB
-    aid = db.save_artifact(
-        meeting_id=meeting_id,
-        kind="minutes",
-        title=f"Biên bản: {title}",
-        content=content,
-        prompt_trigger="Tự động lập biên bản"
-    )
-    return {"id": aid, "kind": "minutes", "title": f"Biên bản: {title}", "content": content}
+    meta = {"template_id": tpl["id"], "template_name": tpl["name"], "template_version": tpl.get("version", 1)}
+    aid = db.save_artifact(meeting_id=meeting_id, kind="minutes", title=f"Biên bản: {title}", content=content,
+                           prompt_trigger=f"Lập biên bản theo mẫu {tpl['name']}", meta=meta)
+    return {"id": aid, "kind": "minutes", "title": f"Biên bản: {title}", "content": content, "meta": meta}
 
 
 # ==============================================================================

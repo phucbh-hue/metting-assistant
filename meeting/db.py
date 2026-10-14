@@ -669,7 +669,8 @@ def get_inferences(meeting_id: int, status: Optional[str] = None) -> List[Dict[s
 
 # ----------------------------------------------------------- AI ARTIFACTS ---
 def save_artifact(meeting_id: int, kind: str, title: str, content: str,
-                  prompt_trigger: str = "", parent_id: Optional[int] = None) -> int:
+                  prompt_trigger: str = "", parent_id: Optional[int] = None,
+                  meta: Optional[Dict[str, Any]] = None) -> int:
     db = _get_db()
     latest = db["ai_artifacts"].find_one({"meeting_id": meeting_id, "title": title}, sort=[("version", -1)])
     cur_v = latest.get("version", 0) if latest else 0
@@ -683,7 +684,8 @@ def save_artifact(meeting_id: int, kind: str, title: str, content: str,
         "version": cur_v + 1,
         "parent_id": parent_id,
         "prompt_trigger": prompt_trigger,
-        "created_at": time.time()
+        "created_at": time.time(),
+        **({"meta": dict(meta)} if meta else {}),
     })
     return aid
 

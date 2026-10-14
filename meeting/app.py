@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field  # noqa: E402
 
 from meeting import (artifacts, auth, bd, cli_llm, db, decks, drive_sync, envfile, gcalendar,  # noqa: E402
                      google_oauth, group_chat, group_kb, groups, live, llm, mcp, meet_bots, recall, recap_export,
-                     recording, tts, user_llm, user_prefs, voice, websearch, wikibox)
+                     minutes_templates, recording, tts, user_llm, user_prefs, voice, websearch, wikibox)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("meeting.app")
@@ -174,6 +174,7 @@ class MeetingCreate(BaseModel):
     vocab: Optional[List[str]] = None
     source: str = "mic"
     group_id: Optional[int] = None
+    minutes_template: Optional[str] = Field(None, max_length=40)       # mẫu biên bản riêng cho cuộc họp này
 
 
 class RenameReq(BaseModel):
@@ -983,6 +984,12 @@ def create_meeting(req: MeetingCreate, request: Request):
     )
     if req.group_id is not None:
         groups.set_meeting_group(mid, req.group_id)
+    if req.minutes_template:
+        try:
+            minutes_templates.usable_for(_user(request), req.minutes_template, {"group_id": req.group_id})
+            db.update_meeting(mid, {"minutes_template": str(req.minutes_template)}, True)
+        except minutes_templates.TemplateError as e:
+            log.info("meeting.app: bỏ qua mẫu biên bản khi tạo cuộc họp %s: %s", mid, e)
     _MEETING_KEYS.pop(mid, None)
     return {"success": True, "meeting_id": mid, "title": title, "group_id": req.group_id}
 
@@ -1132,6 +1139,145 @@ async def google_disconnect(request: Request):
     if u:
         await google_oauth.disconnect(u["email"])
     return {"available": auth.ENABLED and google_oauth.configured(), **google_oauth.status((u or {}).get("email"))}
+
+
+# ==============================================================================
+# MẪU BIÊN BẢN (biên bản = recap của cuộc họp): công ty / nhóm / cá nhân, phân quyền ở meeting.minutes_templates
+# ==============================================================================
+class TemplateBody(BaseModel):
+    name: str = Field(..., max_length=200)
+    description: str = Field("", max_length=500)
+    scope: str = Field("personal", max_length=20)
+    group_id: Optional[int] = None
+    sections: List[Dict[str, Any]] = Field(default_factory=list, max_length=20)
+    instructions: str = Field("", max_length=2000)
+
+
+class TemplatePatch(BaseModel):
+    name: Optional[str] = Field(None, max_length=200)
+    description: Optional[str] = Field(None, max_length=500)
+    sections: Optional[List[Dict[str, Any]]] = Field(None, max_length=20)
+    instructions: Optional[str] = Field(None, max_length=2000)
+
+
+class TemplateRefReq(BaseModel):
+    template: Optional[str] = Field(None, max_length=40)
+
+
+class TemplateCopyReq(BaseModel):
+    scope: str = Field("personal", max_length=20)
+    group_id: Optional[int] = None
+    name: str = Field("", max_length=200)
+
+
+class TemplateDraftReq(BaseModel):
+    description: str = Field(..., max_length=1500)
+
+
+def _tpl_call(fn, *args):
+    try:
+        return fn(*args)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Không tìm thấy mẫu biên bản")
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except minutes_templates.TemplateError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/minutes-templates")
+def list_minutes_templates(request: Request, group_id: Optional[int] = None):
+    """Mẫu anh chị thấy được (kèm quyền sửa, mẫu mặc định), các nhóm anh chị làm chủ (để tạo mẫu của nhóm)."""
+    u = _user(request)
+    email = (u or {}).get("email")
+    if group_id is not None and groups.role_of(groups.get_group(group_id), email) is None and auth.ENABLED:
+        raise HTTPException(status_code=404, detail="Không tìm thấy nhóm")
+    owned = [{"id": g["id"], "name": g["name"]} for g in groups.list_groups_for(email)
+             if not auth.ENABLED or groups.role_of(g, email) == "owner"]
+    return {"templates": [minutes_templates.public(t) for t in minutes_templates.visible(u, group_id)],
+            "company_default": minutes_templates.company_default(), "group_default": minutes_templates.group_default(group_id),
+            "can_company": minutes_templates._admin(u), "owned_groups": owned}
+
+
+@app.post("/api/minutes-templates")
+def create_minutes_template(req: TemplateBody, request: Request):
+    return minutes_templates.public(_tpl_call(minutes_templates.create, _user(request), req.model_dump()))
+
+
+@app.put("/api/minutes-templates/{ref}")
+def update_minutes_template(ref: str, req: TemplatePatch, request: Request):
+    data = {k: v for k, v in req.model_dump().items() if v is not None}
+    return minutes_templates.public(_tpl_call(minutes_templates.update, _user(request), ref, data))
+
+
+@app.delete("/api/minutes-templates/{ref}")
+def delete_minutes_template(ref: str, request: Request):
+    return {"success": _tpl_call(minutes_templates.delete, _user(request), ref)}
+
+
+@app.post("/api/minutes-templates/{ref}/copy")
+def copy_minutes_template(ref: str, req: TemplateCopyReq, request: Request):
+    return minutes_templates.public(_tpl_call(minutes_templates.duplicate, _user(request), ref, req.scope, req.group_id,
+                                              req.name))
+
+
+@app.post("/api/minutes-templates-draft")
+async def draft_minutes_template(req: TemplateDraftReq):
+    """AI soạn mẫu từ mô tả (chưa lưu)."""
+    try:
+        return await minutes_templates.draft(req.description)
+    except minutes_templates.TemplateError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.put("/api/minutes-templates-default")
+def set_company_minutes_template(req: TemplateRefReq, request: Request):
+    return {"company_default": _tpl_call(minutes_templates.set_company_default, _user(request), req.template)}
+
+
+@app.put("/api/groups/{gid}/minutes-template")
+def set_group_minutes_template(gid: int, req: TemplateRefReq, request: Request):
+    return {"group_default": _tpl_call(minutes_templates.set_group_default, _user(request), gid, req.template)}
+
+
+@app.put("/api/meetings/{mid}/minutes-template")
+async def set_meeting_minutes_template(mid: int, req: TemplateRefReq, request: Request):
+    """Mẫu biên bản riêng cho cuộc họp này (người tạo cuộc họp hoặc chủ nhóm). None = theo mặc định."""
+    u = _user(request)
+    m = db.get_meeting(mid)
+    if not m:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc họp")
+    if not _can_manage_meeting(u, m):
+        raise HTTPException(status_code=403, detail="Chỉ người tạo cuộc họp hoặc chủ nhóm chọn được mẫu biên bản")
+    ref = str(req.template or "")
+    if ref:
+        _tpl_call(minutes_templates.usable_for, u, ref, m)
+    db.update_meeting(mid, {"minutes_template": ref}, True)
+    s = live.SESSIONS.get(mid)
+    if s is not None:
+        s.meeting["minutes_template"] = ref
+    return {"minutes_template": ref, "resolved": minutes_templates.resolve({**m, "minutes_template": ref})["name"]}
+
+
+@app.post("/api/meetings/{mid}/minutes")
+async def regenerate_meeting_minutes(mid: int, req: TemplateRefReq, request: Request):
+    """Lập lại biên bản của cuộc họp đã kết thúc (bằng mẫu khác nếu chọn): ra phiên bản mới, chạy nền."""
+    u = _user(request)
+    m = db.get_meeting(mid)
+    if not m:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc họp")
+    if not _can_manage_meeting(u, m):
+        raise HTTPException(status_code=403, detail="Chỉ người tạo cuộc họp hoặc chủ nhóm lập lại được biên bản")
+    if m.get("status") != "ended":
+        raise HTTPException(status_code=400, detail="Cuộc họp chưa kết thúc: biên bản tự lập khi kết thúc")
+    if not artifacts.llm_available():
+        raise HTTPException(status_code=400, detail="Chưa cấu hình AI để lập biên bản")
+    tpl = _tpl_call(minutes_templates.usable_for, u, req.template, m) if req.template else minutes_templates.resolve(m)
+    s = await _session_or_404(mid)
+    try:
+        return await s.regenerate_minutes(tpl)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ==============================================================================
@@ -1425,7 +1571,8 @@ def _group_public(g: Dict[str, Any], email: Optional[str]) -> Dict[str, Any]:
     return {"id": g["id"], "name": g["name"], "owner": g.get("owner"), "members": g.get("members") or [],
             "role": groups.role_of(g, email), "meeting_count": g.get("meeting_count"),
             "recording_drive_days": g.get("recording_drive_days"), "created_at": g.get("created_at"), "drive": info,
-            "bd_mode": bool(g.get("bd_mode")), "doc_count": group_kb.signature(g["id"])[0]}
+            "bd_mode": bool(g.get("bd_mode")), "doc_count": group_kb.signature(g["id"])[0],
+            "minutes_template": g.get("minutes_template") or ""}
 
 
 def _group_for(gid: int, request: Request, need_owner: bool = False) -> Dict[str, Any]:

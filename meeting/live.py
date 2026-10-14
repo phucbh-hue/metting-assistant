@@ -2386,6 +2386,38 @@ class MeetingSession:
                              "minutes_status": status})
             self.dispose_if_idle()
 
+    async def regenerate_minutes(self, template: Dict[str, Any]) -> Dict[str, Any]:
+        """Lập lại biên bản bằng một mẫu khác (chạy nền như lúc kết thúc cuộc họp, ra phiên bản mới của biên bản)."""
+        if self.meeting.get("minutes_status") == "pending":
+            raise ValueError("Biên bản đang được lập, anh chị chờ xong rồi lập lại")
+        if not self.segments:
+            raise ValueError("Cuộc họp chưa có lời nói nào để lập biên bản")
+        self.meeting["minutes_status"] = "pending"
+        await asyncio.to_thread(db.update_meeting, self.id, {"minutes_status": "pending"}, True)
+        await self.emit({"type": "meeting_status", "status": self.meeting.get("status"), "meeting": self.meeting,
+                         "minutes_status": "pending"})
+        asyncio.create_task(self._regenerate(template))
+        return {"minutes_status": "pending", "template": template.get("name")}
+
+    async def _regenerate(self, template: Dict[str, Any]):
+        status = "failed"
+        try:
+            art = await artifacts.generate_meeting_minutes(self.id, self.segments, self.title, meeting=self.meeting,
+                                                           speakers=self.public_speakers(), template=template)
+            status = "done"
+            await self.emit({"type": "artifact_created", "artifact": art})
+            from meeting import drive_sync
+            drive_sync.schedule(self.id)
+        except Exception as e:
+            log.warning("meeting.live: lập lại biên bản lỗi: %s", e)
+            await self.emit({"type": "error", "text": f"Không lập lại được biên bản: {e}"})
+        finally:
+            self.meeting["minutes_status"] = status
+            await asyncio.to_thread(db.update_meeting, self.id, {"minutes_status": status}, True)
+            await self.emit({"type": "meeting_status", "status": self.meeting.get("status"), "meeting": self.meeting,
+                             "minutes_status": status})
+            self.dispose_if_idle()
+
     def dispose_if_idle(self):
         if self.is_live() or self.subscribers or self.audio_owner is not None:
             return
