@@ -37,6 +37,20 @@ class RecallBusy(RecallError):
     """Lỗi tạm thời (mạng, 429, 5xx, hết bot dự phòng 507): thử lại lượt sau."""
 
 
+class RecallAccount(RecallError):
+    """Lỗi của tài khoản Recall (hết credit, key sai): mọi bot đều không vào được cho tới khi quản trị viên xử lý."""
+
+
+NO_CREDIT = ("Tài khoản Recall.ai của công ty đã hết credit nên bot không vào được Google Meet. Quản trị viên nạp thêm "
+             "credit trong trang quản trị Recall.ai (mục Billing), rồi bấm Mời bot vào lại.")
+_account_problem: Dict[str, Any] = {}          # lỗi tài khoản gần nhất: hiện cảnh báo trên trang chủ cho mọi người
+
+
+def account_problem() -> Optional[Dict[str, Any]]:
+    """{"text", "at"} khi lần gọi Recall gần nhất báo lỗi tài khoản (hết credit, key sai); None khi bình thường."""
+    return dict(_account_problem) if _account_problem else None
+
+
 def api_key() -> str:
     return (os.getenv("RECALLAI_API_KEY") or os.getenv("RECALL_API_KEY") or "").strip()
 
@@ -89,10 +103,17 @@ async def _req(method: str, path: str, body: Optional[Dict[str, Any]] = None) ->
         raise RecallBusy(f"Không kết nối được Recall: {e}")
     if r.status_code in (429, 502, 503, 504, 507):
         raise RecallBusy(f"Recall đang bận ({r.status_code}), thử lại sau")
+    if r.status_code == 402 or (r.status_code >= 400 and "insufficient_credit" in r.text):
+        _account_problem.update(text=NO_CREDIT, at=time.time())
+        raise RecallAccount(NO_CREDIT)
     if r.status_code in (401, 403):
-        raise RecallError("API key Recall sai hoặc đã bị thu hồi (RECALLAI_API_KEY)")
+        _account_problem.update(text="API key Recall sai hoặc đã bị thu hồi (RECALLAI_API_KEY): báo quản trị viên",
+                                at=time.time())
+        raise RecallAccount(_account_problem["text"])
     if r.status_code >= 400:
         raise RecallError(f"Recall từ chối ({r.status_code}): {r.text[:300]}")
+    if method == "POST" and path == "/bot/":
+        _account_problem.clear()                 # tạo được bot: tài khoản đã ổn trở lại
     if not r.content:
         return {}
     try:
@@ -203,13 +224,25 @@ PHASE = {"ready": "scheduled", "joining_call": "joining", "in_waiting_room": "wa
 
 
 def last_status(bot: Dict[str, Any]) -> Dict[str, Any]:
+    """Trạng thái cuối của bot + lý do. Trạng thái cuối thường là "done" (không có sub_code): lý do thật (chờ phòng chờ
+    quá lâu, bị từ chối, Meet chặn khách...) nằm ở bước call_ended / fatal ngay trước, nên lấy sub_code gần nhất."""
     changes = [c for c in (bot.get("status_changes") or []) if isinstance(c, dict)]
     last = changes[-1] if changes else {}
-    code = str(last.get("code") or "").removeprefix("bot.")
-    return {"code": code, "sub_code": str(last.get("sub_code") or ""), "message": str(last.get("message") or ""),
-            "at": str(last.get("created_at") or ""),
-            "joined": any(str(c.get("code") or "").removeprefix("bot.") in ("in_call_not_recording", "in_call_recording")
-                          for c in changes)}
+    codes = [str(c.get("code") or "").removeprefix("bot.") for c in changes]
+    code = codes[-1] if codes else ""
+    reason = next((str(c.get("sub_code")) for c in reversed(changes) if c.get("sub_code")), "")
+    return {"code": code, "sub_code": str(last.get("sub_code") or "") or (reason if code in ("done", "call_ended") else ""),
+            "reason": reason, "message": str(last.get("message") or ""), "at": str(last.get("created_at") or ""),
+            "joined": any(c in ("in_call_not_recording", "in_call_recording") for c in codes),
+            "waited": "in_waiting_room" in codes}
+
+
+def not_joined_text(st: Dict[str, Any]) -> str:
+    """Bot kết thúc mà chưa từng vào cuộc họp: câu giải thích cho người dùng."""
+    why = SUB_TEXT.get(st.get("reason") or "", (st.get("reason") or "").replace("_", " "))
+    if not why:
+        why = "bot đã chờ ở phòng chờ nhưng chưa ai bấm Cho vào" if st.get("waited") else "chưa vào được cuộc họp"
+    return f"Bot không vào được cuộc họp ({why})"
 
 
 def phase(code: str) -> str:
@@ -219,4 +252,4 @@ def phase(code: str) -> str:
 def status_text(code: str, sub_code: str = "") -> str:
     text = STATUS_TEXT.get(code, f"Trạng thái bot: {code}" if code else "Bot đã được hẹn")
     sub = SUB_TEXT.get(sub_code, sub_code.replace("_", " ") if sub_code else "")
-    return f"{text} ({sub})" if sub and code in ("call_ended", "fatal", "recording_permission_denied") else text
+    return f"{text} ({sub})" if sub and code in ("call_ended", "done", "fatal", "recording_permission_denied") else text

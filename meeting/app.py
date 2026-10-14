@@ -1165,7 +1165,7 @@ def _calendar_payload(email: str, events: List[Dict[str, Any]], error: str = "")
     st = google_oauth.status(email)
     skip = set(prefs.get("skip_events") or [])
     series_groups = prefs.get("series_groups") or {}
-    out = {"available": google_oauth.configured(), "bot_ready": meet_bots.enabled(),
+    out = {"available": google_oauth.configured(), "bot_ready": meet_bots.enabled(), "bot_problem": recall.account_problem(),
            "connected": bool(st.get("connected")), "calendar": bool(st.get("calendar")),
            "autojoin": bool(prefs.get("calendar_autojoin")), "error": error or prefs.get("calendar_error") or "",
            "events": []}
@@ -1254,6 +1254,64 @@ async def calendar_retry(eid: str, request: Request):
         raise HTTPException(status_code=400, detail="Server chưa cấu hình bot (RECALLAI_API_KEY, PUBLIC_BASE_URL)")
     await meet_bots.retry(u["email"], ev, u.get("name") or "")
     return await calendar_upcoming(request)
+
+
+class MeetJoinReq(BaseModel):
+    meet_url: str = Field(..., max_length=300)
+    title: str = Field("", max_length=200)
+    group_id: Optional[int] = None
+    meeting_id: Optional[int] = None
+
+
+@app.get("/api/meet-bots")
+async def meet_bots_mine(request: Request):
+    """Bot anh chị mời bằng link Google Meet trong 12 giờ gần đây, máy chủ có bot không, lỗi tài khoản Recall (hết credit)."""
+    u = _user(request)
+    if not auth.ENABLED or not u:
+        return {"available": False, "items": []}
+    items = await asyncio.to_thread(meet_bots.manual_for, u["email"])
+    return {"available": True, "bot_ready": meet_bots.enabled(), "problem": recall.account_problem(), "items": items}
+
+
+@app.post("/api/meet-bots/join")
+async def meet_bot_join(req: MeetJoinReq, request: Request):
+    """Mời bot vào ngay một cuộc họp Google Meet bằng link (cuộc họp không có trên lịch, không cần kết nối Lịch).
+    meeting_id: bot chép vào cuộc họp đang mở trong ứng dụng (họp kết hợp: mic trong phòng + người online qua Meet)."""
+    u = _me(request)
+    if not meet_bots.enabled():
+        raise HTTPException(status_code=400, detail="Server chưa cấu hình bot (RECALLAI_API_KEY, PUBLIC_BASE_URL)")
+    gid = req.group_id
+    if req.meeting_id is not None:
+        m = await asyncio.to_thread(db.get_meeting, req.meeting_id)
+        g = groups.get_group(m["group_id"]) if m and m.get("group_id") else None
+        if m is None or not auth.can_access(u, m, g):
+            raise HTTPException(status_code=404, detail="Không tìm thấy cuộc họp")
+        if m.get("status") == "ended":
+            raise HTTPException(status_code=400, detail="Cuộc họp đã kết thúc")
+        gid = None
+    elif gid is not None:
+        g = await asyncio.to_thread(groups.get_group, gid)
+        if g is None or groups.role_of(g, u["email"]) not in ("owner", "member"):
+            raise HTTPException(status_code=404, detail="Không tìm thấy nhóm")
+    try:
+        rec = await meet_bots.join_now(u["email"], u.get("name") or "", req.meet_url, req.title, gid, req.meeting_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"bot": dict(meet_bots.public(rec), title=rec.get("title"), meet_url=rec.get("meet_url"), manual=True),
+            "problem": recall.account_problem()}
+
+
+@app.post("/api/meet-bots/{rid}/leave")
+async def meet_bot_leave(rid: str, request: Request):
+    """Cho bot rời cuộc họp Google Meet (hoặc hủy bot đang xin vào)."""
+    u = _me(request)
+    try:
+        rec = await meet_bots.leave(rid, u["email"], admin=auth.is_admin(u))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Không tìm thấy bot")
+    except recall.RecallError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"bot": dict(meet_bots.public(rec), title=rec.get("title"), meet_url=rec.get("meet_url"))}
 
 
 @app.put("/api/meetings/{mid}/meet-people/{stream}")

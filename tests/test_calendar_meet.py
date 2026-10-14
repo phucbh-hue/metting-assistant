@@ -51,6 +51,7 @@ class FakeRecall:
 
     def __init__(self, region="ap-northeast-1"):
         self.region, self.bots, self.calls, self.busy, self.n = region, {}, [], 0, 0
+        self.no_credit = False
 
     def status(self, bid, code, sub_code=None):
         self.bots[bid]["status_changes"].append({"code": code, "sub_code": sub_code, "message": "",
@@ -64,6 +65,9 @@ class FakeRecall:
         if path == "/api/v1/bot/" and req.method == "GET":
             return httpx.Response(200, json={"results": [], "next": None})
         if path == "/api/v1/bot/" and req.method == "POST":
+            if self.no_credit:
+                return httpx.Response(402, json={"code": "insufficient_credit_balance",
+                                                 "detail": "Insufficient credit balance to add a bot."})
             if self.busy:
                 self.busy -= 1
                 return httpx.Response(507, json={"detail": "No ad-hoc bots available"})

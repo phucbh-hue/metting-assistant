@@ -62,6 +62,21 @@ def meet_code(url: str) -> str:
     return (url or "").rstrip("/").rsplit("/", 1)[-1].lower()
 
 
+_MEET_RE = re.compile(r"^(?:https?://)?meet\.google\.com/([a-z]{3}-[a-z]{4}-[a-z]{3})(?:[/?#].*)?$", re.I)
+_CODE_RE = re.compile(r"^[a-z]{3}-[a-z]{4}-[a-z]{3}$", re.I)
+MANUAL_HOURS = 4                 # bot mời bằng link: coi như buổi họp dài tối đa 4 giờ (sau đó không đọc trạng thái nữa)
+
+
+def normalize_meet_url(text: str) -> str:
+    """Link Google Meet (hoặc chỉ mã abc-defg-hij) -> https://meet.google.com/abc-defg-hij. Sai dạng: ValueError."""
+    t = (text or "").strip()
+    m = _MEET_RE.match(t)
+    code = m.group(1) if m else (t if _CODE_RE.match(t) else "")
+    if not code:
+        raise ValueError("Link Google Meet chưa đúng dạng (ví dụ: https://meet.google.com/abc-defg-hij)")
+    return f"https://meet.google.com/{code.lower()}"
+
+
 def key_of(meet_url: str, start: float) -> str:
     return f"{meet_code(meet_url)}|{int(start // 60)}"
 
@@ -148,6 +163,12 @@ async def ensure_bot(email: str, ev: Dict[str, Any], owner_name: str = "", now: 
     key = key_of(ev["meet_url"], ev["start"])
     lock = _locks.setdefault(key, asyncio.Lock())
     async with lock:
+        manual = _col().find_one({"manual": True, "meet_url": ev["meet_url"], "status": {"$in": list(ACTIVE)},
+                                  "end": {"$gt": now}})
+        if manual is not None:                    # đã có người dán link mời bot vào đúng cuộc họp này: không gọi bot thứ hai
+            if manual["owner"] != email and email not in (manual.get("also") or []):
+                _col().update_one({"rid": manual["rid"]}, {"$addToSet": {"also": email}})
+            return strip(manual)
         rec = _col().find_one({"key": key, "status": {"$ne": "cancelled"}}, sort=[("created_at", -1)])
         if rec is not None:
             if rec["owner"] != email and email not in (rec.get("also") or []):
@@ -184,6 +205,68 @@ async def retry(email: str, ev: Dict[str, Any], owner_name: str = "") -> Dict[st
         _col().update_one({"rid": rec["rid"]}, {"$set": {"meeting_id": keep}})
         rec["meeting_id"] = keep
     return rec
+
+
+async def join_now(email: str, owner_name: str, meet_url: str, title: str = "", group_id: Optional[int] = None,
+                   meeting_id: Optional[int] = None, now: Optional[float] = None) -> Dict[str, Any]:
+    """Mời bot vào ngay một cuộc họp Google Meet không có trên lịch (dán link). Không cần kết nối Lịch Google.
+
+    meeting_id: bot chép vào cuộc họp đang mở trong ứng dụng (họp kết hợp: mic trong phòng + người online qua Meet);
+    không có thì gói âm thanh đầu tiên tạo cuộc họp mới (tên `title`, nhóm `group_id`). Người gọi kiểm tra quyền."""
+    now = now or time.time()
+    url = normalize_meet_url(meet_url)
+    code = meet_code(url)
+    lock = _locks.setdefault("join:" + code, asyncio.Lock())
+    async with lock:
+        cur = _col().find_one({"meet_url": url, "status": {"$in": list(ACTIVE)}, "end": {"$gt": now},
+                               "start": {"$lte": now + recall.SCHEDULE_LEAD_S}}, sort=[("created_at", -1)])
+        if cur is not None:
+            if cur["owner"] == email or email in (cur.get("also") or []):
+                return strip(cur)                 # bấm lại: dùng bot đang có
+            raise ValueError(f"Bot đã được mời vào cuộc họp này rồi (do {cur.get('owner_name') or cur['owner']} mời)")
+        rec = {"rid": secrets.token_hex(8), "token": secrets.token_urlsafe(24), "key": key_of(url, now), "owner": email,
+               "also": [], "owner_name": owner_name, "event_id": f"manual:{code}:{int(now)}", "series": "", "manual": True,
+               "meet_url": url, "title": (title or "").strip()[:200] or f"Google Meet {code}", "start": now,
+               "end": now + MANUAL_HOURS * 3600, "attendees": [], "description": "", "group_id": group_id,
+               "bot_id": "", "status": "pending", "status_msg": "Đang mời bot", "code": "", "sub_code": "",
+               "meeting_id": int(meeting_id) if meeting_id else None, "ws_open": False, "ws_closed_at": None,
+               "polled_at": 0.0, "created_at": now, "updated_at": now}
+        _col().insert_one(dict(rec))
+        rec = await _create(rec, owner_name, now)
+        await _notify(rec)
+        return strip(rec)
+
+
+async def leave(rid: str, email: str, admin: bool = False) -> Dict[str, Any]:
+    """Cho bot rời (hoặc hủy bot đang xin vào). Người mời, người cùng tham dự, hoặc quản trị viên. Không có: KeyError."""
+    rec = _col().find_one({"rid": str(rid or "")[:32]})
+    if rec is None or not (admin or rec["owner"] == email or email in (rec.get("also") or [])):
+        raise KeyError(rid)
+    rec = strip(rec, True)
+    if rec.get("status") not in ACTIVE:
+        return strip(rec)
+    if rec.get("bot_id"):
+        await recall.remove(rec["bot_id"])
+    rec = _update(rec, status="ended" if rec.get("meeting_id") else "cancelled", left_at=time.time(),
+                  status_msg="Đã cho bot rời cuộc họp")
+    await _notify(rec)
+    return strip(rec)
+
+
+def manual_for(email: str, now: Optional[float] = None, hours: float = 12) -> List[Dict[str, Any]]:
+    """Bot anh chị mời bằng link trong `hours` giờ gần đây (mới nhất trước) để hiện trên trang chủ."""
+    now = now or time.time()
+    rows = _col().find({"manual": True, "status": {"$ne": "cancelled"}, "created_at": {"$gte": now - hours * 3600},
+                        "$or": [{"owner": email}, {"also": email}]}).sort("created_at", -1).limit(5)
+    return [dict(public(r), title=r.get("title"), meet_url=r.get("meet_url"), manual=True) for r in rows]
+
+
+async def _retry_pending_manual(now: float) -> None:
+    """Bot mời bằng link mà Recall đang bận lúc mời: thử lại ở lượt sau (bot theo lịch đã có ensure_bot làm việc này)."""
+    for rec in [strip(r, True) for r in _col().find({"manual": True, "status": "pending", "bot_id": "",
+                                                     "end": {"$gt": now}})]:
+        rec = await _create(rec, rec.get("owner_name") or "", now)
+        await _notify(rec)
 
 
 def _wants(email: str, rec: Dict[str, Any]) -> bool:
@@ -235,13 +318,15 @@ async def tick(now: Optional[float] = None) -> None:
                     await ensure_bot(email, ev, prefs.get("name") or "", now)
                 except Exception:
                     log.exception("meeting.meet_bots: hẹn bot lỗi")
+    await _retry_pending_manual(now)
     await reconcile(fetched, now)
     await watch(now)
 
 
 async def reconcile(fetched: Dict[str, List[Dict[str, Any]]], now: float) -> None:
-    """Bot chưa vào mà buổi họp không còn hợp lệ với người hẹn: hủy (hoặc chuyển cho người cùng tham dự)."""
-    for rec in [strip(r, True) for r in _col().find({"status": {"$in": list(NOT_JOINED)}})]:
+    """Bot chưa vào mà buổi họp không còn hợp lệ với người hẹn: hủy (hoặc chuyển cho người cùng tham dự).
+    Bot mời bằng link (manual) không theo lịch nên không đối chiếu ở đây."""
+    for rec in [strip(r, True) for r in _col().find({"status": {"$in": list(NOT_JOINED)}, "manual": {"$ne": True}})]:
         owner = rec["owner"]
         prefs = user_prefs.get(owner)
         reason = ""
@@ -262,7 +347,8 @@ async def reconcile(fetched: Dict[str, List[Dict[str, Any]]], now: float) -> Non
             await _notify(rec)
     # Bot đã được điều đi / đang ở trong cuộc họp mà người hẹn bấm Bỏ qua buổi này: bot rời ngay (tắt công tắc chung thì
     # chỉ áp dụng cho các buổi sau, không đuổi bot khỏi buổi đang họp)
-    for rec in [strip(r, True) for r in _col().find({"status": {"$in": ["joining", "waiting", "in_call"]}})]:
+    for rec in [strip(r, True) for r in _col().find({"status": {"$in": ["joining", "waiting", "in_call"]},
+                                                     "manual": {"$ne": True}})]:
         prefs = user_prefs.get(rec["owner"])
         if rec["event_id"] not in (prefs.get("skip_events") or []) or rec.get("left_at"):
             continue
@@ -298,23 +384,31 @@ async def watch(now: float) -> None:
         st = recall.last_status(bot)
         ph = recall.phase(st["code"])
         msg = recall.status_text(st["code"], st["sub_code"])
+        no_audio = ("Bot đã vào cuộc họp nhưng chưa gửi được âm thanh về server (quản trị viên kiểm tra PUBLIC_BASE_URL "
+                    "và server có nhận kết nối WebSocket từ Recall không)")
         if ph == "in_call" and not rec.get("ws_open") and not rec.get("meeting_id") and now - rec["start"] > 180:
-            msg = ("Bot đã vào cuộc họp nhưng chưa gửi được âm thanh về server (quản trị viên kiểm tra PUBLIC_BASE_URL "
-                   "và server có nhận kết nối WebSocket từ Recall không)")
+            msg = no_audio
+        if ph in ("ended", "failed") and not rec.get("ws_open"):
+            # "Bot đã xong" che mất lý do: chưa từng vào thì nói vì sao (chưa ai cho vào, Meet chặn khách...)
+            if not st["joined"]:
+                msg = recall.not_joined_text(st)
+            elif not rec.get("meeting_id"):
+                msg = no_audio
         rec = _update(rec, polled_at=now, code=st["code"], sub_code=st["sub_code"], status_msg=msg,
                       status=ph if ph in ("scheduled", "joining", "waiting", "in_call") else rec["status"])
         if ph in ("ended", "failed") and not rec.get("ws_open"):
-            await finish(rec, failed=ph == "failed" and not st["joined"])
+            await finish(rec, failed=not st["joined"])
         else:
             await _notify(rec)
 
 
 async def finish(rec: Dict[str, Any], failed: bool = False) -> None:
-    """Bot đã rời: kết thúc cuộc họp (lập biên bản, lưu Drive) nếu trong phòng không ai còn bật mic; xóa media trên Recall."""
-    rec = _update(rec, status="failed" if failed and not rec.get("meeting_id") else "ended")
+    """Bot đã rời: kết thúc cuộc họp (lập biên bản, lưu Drive) nếu trong phòng không ai còn bật mic; xóa media trên Recall.
+    failed: bot chưa từng vào cuộc họp. Khi đó cuộc họp đang mở trong ứng dụng (bot mời từ phòng họp) vẫn giữ nguyên."""
+    rec = _update(rec, status="failed" if failed else "ended")
     await _notify(rec)
     mid = rec.get("meeting_id")
-    if mid:
+    if mid and not failed:
         from meeting import live
         s = await live.get_session(int(mid))
         if s is not None and s.is_live():

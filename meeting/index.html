@@ -113,6 +113,8 @@
     .cal-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; padding: 10px 12px;
       border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, .03); }
     @media (max-width: 640px) { .cal-row { grid-template-columns: minmax(0, 1fr); } }
+    .mb-join { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto auto; gap: 8px; }
+    @media (max-width: 760px) { .mb-join { grid-template-columns: minmax(0, 1fr); } }
     .bd-grid { display: grid; grid-template-columns: minmax(250px, 330px) minmax(0, 1fr); }
     @media (max-width: 860px) {
       .bd-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 30%) minmax(0, 1fr); }
@@ -549,6 +551,7 @@
           <p id="hub-summary" class="text-muted mb-5"></p>
           <div id="hub-storage"></div>
           <div id="hub-recap"></div>
+          <div id="hub-meetbot"></div>
           <div id="hub-calendar"></div>
           <div id="hub-live"></div>
           <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
@@ -1078,7 +1081,7 @@ async function loadHub() {
   }
   if (gid !== S.groupId) return;                     // đã chuyển sang nhóm khác trong lúc tải
   renderHub();
-  if (AUTH.required && !gid) loadCalendar();
+  if (AUTH.required && !gid) { loadCalendar(); loadMeetBots(); }
 }
 /** Tải danh sách nhóm một lần (mở thẳng link phòng họp vẫn biết tên nhóm). */
 async function ensureGroups() {
@@ -1160,6 +1163,7 @@ function renderHub() {
   renderGroupNav();
   renderRecapNotice();
   renderCalendar();
+  renderMeetJoin();
   $('#hub-storage').innerHTML = storageNotice(S.storage);
   const st = S.stats;
   if (S.groupId) {
@@ -1312,8 +1316,94 @@ function renderCalendar() {
   };
 }
 setInterval(() => {                                           // trạng thái bot đổi theo phút: tự tải lại khi đang xem trang chủ
-  if (AUTH.required && S.view === 'hub' && !S.groupId && document.visibilityState === 'visible') loadCalendar();
+  if (AUTH.required && S.view === 'hub' && !S.groupId && document.visibilityState === 'visible') { loadCalendar(); loadMeetBots(); }
 }, 60000);
+
+/* ---------- mời bot bằng link Google Meet: cuộc họp không có trên lịch, không cần kết nối Lịch ---------- */
+const MB = { data: null, fastUntil: 0 };
+async function loadMeetBots() {
+  if (!AUTH.required) return;
+  try { MB.data = await GET('/api/meet-bots'); } catch (e) { MB.data = { available: true, items: [], error: e.message }; }
+  if (S.view === 'hub' && !S.groupId) renderMeetJoin();
+}
+setInterval(() => {                                           // vừa mời: xem trạng thái dày hơn (bot xin vào trong 1-2 phút)
+  if (Date.now() < MB.fastUntil && S.view === 'hub' && document.visibilityState === 'visible') loadMeetBots();
+}, 8000);
+function mbRow(b) {
+  const [txt, cls] = BOT_STATUS[b.status] || ['Bot Meet', ''];
+  const active = ['pending', 'scheduled', 'joining', 'waiting', 'in_call'].includes(b.status);
+  return `<li class="cal-row">
+    <div class="min-w-0"><div class="font-medium truncate">${esc(b.title || 'Google Meet')}</div>
+      <div class="text-[12px] text-muted">${esc((b.meet_url || '').replace('https://', ''))}${b.status_msg ? `. ${esc(b.status_msg)}` : ''}</div></div>
+    <div class="flex flex-wrap items-center gap-2 justify-end">
+      <span class="chip ${cls}">${esc(txt)}</span>
+      ${b.meeting_id ? `<a class="btn btn-ghost btn-sm" href="#/m/${b.meeting_id}">Mở cuộc họp</a>` : ''}
+      ${active ? `<button type="button" class="btn btn-ghost btn-sm" data-mb-leave="${esc(b.rid)}">Cho bot rời</button>` : ''}
+    </div></li>`;
+}
+function renderMeetJoin() {
+  const box = $('#hub-meetbot'); if (!box) return;
+  const d = MB.data;
+  if (!AUTH.required || S.groupId || !d || d.available === false) { box.innerHTML = ''; return; }
+  const groupsOpt = (S.groups || []).filter(g => g.role === 'owner' || g.role === 'member');
+  const items = d.items || [];
+  box.innerHTML = `<section class="mb-6">
+    <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2"><h2 class="font-semibold">Mời bot vào Google Meet</h2>
+      <span class="text-[12.5px] text-muted">Cuộc họp không có trên lịch? Dán link, bot xin vào ngay và chép lời.</span></div>
+    ${d.problem ? `<div class="notice notice-warn mb-2"><p>${esc(d.problem.text)}</p></div>` : ''}
+    ${d.bot_ready ? '' : '<p class="text-[12.5px] text-muted mb-2">Server chưa cấu hình bot vào Google Meet (RECALLAI_API_KEY, PUBLIC_BASE_URL): báo quản trị viên.</p>'}
+    <form id="mb-form" class="mb-join" autocomplete="off">
+      <input class="input" name="url" type="text" inputmode="url" placeholder="https://meet.google.com/abc-defg-hij" aria-label="Link Google Meet" required>
+      <input class="input" name="title" type="text" maxlength="200" placeholder="Tên cuộc họp (không bắt buộc)" aria-label="Tên cuộc họp">
+      <select class="input" name="group" aria-label="Nhóm cho cuộc họp" style="width:auto"><option value="">Không nhóm</option>${groupsOpt.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select>
+      <button class="btn btn-primary" type="submit" ${d.bot_ready ? '' : 'disabled'}>Mời bot vào</button>
+    </form>
+    ${items.length ? `<ul class="flex flex-col gap-1.5 mt-3">${items.map(mbRow).join('')}</ul>` : ''}
+    <p class="text-[12px] text-muted mt-2">Bot xin vào như khách: người trong cuộc họp bấm Cho vào (Admit). Họp kết hợp có người trong phòng: mở cuộc họp trong ứng dụng, bật mic, rồi mời bot từ menu ⋯ của phòng họp.</p>
+  </section>`;
+  $('#mb-form', box).addEventListener('submit', async e => {
+    e.preventDefault();
+    const f = e.currentTarget, btn = $('button[type=submit]', f);
+    btn.disabled = true;
+    try {
+      const r = await POST('/api/meet-bots/join', { meet_url: f.url.value.trim(), title: f.title.value.trim(),
+        group_id: f.group.value ? parseInt(f.group.value, 10) : null });
+      toast(r.bot && r.bot.status === 'failed' ? r.bot.status_msg : 'Đã mời bot. Người trong cuộc họp bấm Cho vào khi bot xin vào.',
+        r.bot && r.bot.status === 'failed' ? 'err' : 'info', 7000);
+      MB.fastUntil = Date.now() + 3 * 60000;
+      await loadMeetBots();
+    } catch (err) { toast(err.message, 'err', 7000); btn.disabled = false; }
+  });
+  box.onclick = async e => {
+    const b = e.target.closest('[data-mb-leave]'); if (!b) return;
+    b.disabled = true;
+    try { await POST(`/api/meet-bots/${encodeURIComponent(b.dataset.mbLeave)}/leave`, {}); toast('Đã cho bot rời cuộc họp.'); }
+    catch (err) { toast(err.message, 'err'); }
+    loadMeetBots();
+  };
+}
+function openRoomMeetJoin() {
+  const R = S.room; if (!R) return;
+  openModal(`<h3 class="text-lg font-semibold mb-1">Mời bot vào Google Meet</h3>
+    <p class="text-muted text-[13px] mb-3">Họp kết hợp: người trong phòng nói qua mic của ứng dụng, người online nói qua Google Meet. Bot vào Meet,
+      chép lời từng người online vào chính cuộc họp này. Máy trong phòng cũng vào Meet thì chọn "Bỏ qua" cho máy đó ở mục Người trong Google Meet.</p>
+    <form id="room-mb" class="flex flex-col gap-3">
+      <input class="input" name="url" type="text" inputmode="url" placeholder="https://meet.google.com/abc-defg-hij" aria-label="Link Google Meet" required autofocus>
+      <div class="flex justify-end gap-2"><button type="button" class="btn btn-ghost" data-act="modal-close">Hủy</button>
+        <button type="submit" class="btn btn-primary">Mời bot vào</button></div>
+    </form>`, { onMount(m) {
+    $('#room-mb', m).addEventListener('submit', async e => {
+      e.preventDefault();
+      const btn = $('button[type=submit]', e.currentTarget); btn.disabled = true;
+      try {
+        const r = await POST('/api/meet-bots/join', { meet_url: e.currentTarget.url.value.trim(), meeting_id: R.id });
+        closeModal();
+        toast(r.bot && r.bot.status === 'failed' ? r.bot.status_msg : 'Đã mời bot. Người trong Meet bấm Cho vào khi bot xin vào.',
+          r.bot && r.bot.status === 'failed' ? 'err' : 'info', 7000);
+      } catch (err) { toast(err.message, 'err', 7000); btn.disabled = false; }
+    });
+  } });
+}
 
 /* ---------- phòng họp từ Google Meet: trạng thái bot, người trong Meet ---------- */
 function meetChip(R) {
@@ -5689,9 +5779,12 @@ document.addEventListener('click', async e => {
       if (R.recording && R.recording.runs) items.push({ id: 'dl-mp3', text: 'Tải ghi âm (.mp3)' });
       if (R.recording && R.recording.runs) items.push({ id: 'rec-delete', text: `Xóa bản ghi âm (${fmt.dur(R.recording.seconds || 0)})`, danger: true });
       if (R.meet && (R.meet.bot || (R.meet.people || []).length)) items.unshift({ id: 'meet-people', text: 'Người trong Google Meet...' });
+      const botOn = R.meet && R.meet.bot && ['pending', 'scheduled', 'joining', 'waiting', 'in_call'].includes(R.meet.bot.status);
+      if (AUTH.required && R.meeting && R.meeting.status !== 'ended' && !botOn) items.unshift({ id: 'meet-join', text: 'Mời bot vào Google Meet...' });
       items.push({ id: 'delete', text: 'Xóa cuộc họp', danger: true });
       const c = await openMenu(el, items);
       if (c === 'meet-people') openMeetPeople();
+      if (c === 'meet-join') openRoomMeetJoin();
       if (c === 'rec-delete') deleteRecording();
       if (c === 'move') openMoveMeeting(R.id);
       if (c === 'drive-save') saveToDrive(R);
