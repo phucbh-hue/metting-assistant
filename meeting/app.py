@@ -1379,6 +1379,8 @@ async def wikibox_connect(req: GoogleConnectReq, request: Request):
     email = _wiki_email(request)
     try:
         return {"url": await wikibox.auth_url(email, _safe_return(req.return_to, request), _base_url(request))}
+    except wikibox.OAuthBlocked as e:              # cấu hình phía WikiBox: giao diện mở ô dán API key
+        raise HTTPException(status_code=409, detail=str(e))
     except wikibox.WikiboxError as e:
         raise HTTPException(status_code=503, detail=str(e))
 

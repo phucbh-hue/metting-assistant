@@ -51,6 +51,18 @@ class NeedConnect(WikiboxError):
     """Chưa kết nối WikiBox, hoặc kết nối đã bị thu hồi."""
 
 
+class OAuthBlocked(WikiboxError):
+    """WikiBox chưa cho địa chỉ của server này đăng nhập OAuth (thật 14/10/2026: invalid_redirect_uri vì origin
+    https://urbox-meeting-api.onrender.com không có trong "Origin redirect được phép" của WikiBox)."""
+
+    def __init__(self, origin: str):
+        self.origin = origin
+        super().__init__(
+            f"WikiBox chưa cho phép {origin} đăng nhập bằng OAuth. Quản trị viên WikiBox thêm {origin} vào danh sách "
+            "\"Origin redirect được phép\" (trang quản trị WikiBox, cấu hình nền tảng, mục MCP OAuth). Trong lúc chờ, "
+            "anh chị dùng API key cá nhân: WikiBox > Tùy chỉnh cá nhân > WikiBox MCP > Tạo key mới.")
+
+
 def base_url() -> str:
     return (os.getenv("WIKIBOX_URL") or "https://wiki.urbox.dev").strip().rstrip("/")
 
@@ -165,7 +177,15 @@ async def _client(redirect_uri: str) -> str:
         except httpx.HTTPError as e:
             raise WikiboxError(f"Không kết nối được WikiBox: {e}")
     if r.status_code >= 400:
-        raise WikiboxError(f"WikiBox từ chối đăng ký ứng dụng ({r.status_code}): {r.text[:160]}")
+        try:
+            body = r.json() or {}
+        except ValueError:
+            body = {}
+        if body.get("error") == "invalid_redirect_uri":
+            u = urlparse(redirect_uri)
+            raise OAuthBlocked(f"{u.scheme}://{u.netloc}")
+        why = body.get("error_description") or body.get("error") or r.text[:200]
+        raise WikiboxError(f"WikiBox từ chối đăng ký ứng dụng ({r.status_code}): {why}")
     cid = str((r.json() or {}).get("client_id") or "")
     if not cid:
         raise WikiboxError("WikiBox không trả về client_id khi đăng ký ứng dụng")

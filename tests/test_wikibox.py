@@ -40,7 +40,7 @@ class FakeWiki:
 
     def __init__(self):
         self.registered, self.tokens, self.revoked, self.schemes = [], [], [], set()
-        self.n, self.refresh_fail = 0, False
+        self.n, self.refresh_fail, self.allowed = 0, False, None      # allowed: origin được phép (None = mọi origin)
 
     def __call__(self, req: httpx.Request) -> httpx.Response:
         self.schemes.add(req.url.scheme)
@@ -55,7 +55,13 @@ class FakeWiki:
                                              "revocation_endpoint": "http://wiki.test/api/v1/oauth/revoke",
                                              "code_challenge_methods_supported": ["S256"]})
         if path == "/api/v1/oauth/register":
-            self.registered.append(json.loads(req.content))
+            body = json.loads(req.content)
+            uri = body["redirect_uris"][0]
+            origin = "{0.scheme}://{0.netloc}".format(urlparse(uri))
+            if self.allowed is not None and origin not in self.allowed:     # câu lỗi thật của WikiBox 14/10/2026
+                return httpx.Response(400, json={"error": "invalid_redirect_uri", "error_description":
+                                                 f'redirect_uri "{uri}" origin "{origin}" is not in the allowed redirect origins'})
+            self.registered.append(body)
             return httpx.Response(201, json={"client_id": f"cid-{len(self.registered)}"})
         if path == "/api/v1/oauth/token":
             form = dict(parse_qsl(req.content.decode()))
@@ -154,6 +160,18 @@ class OAuthTests(WikiBase):
         with self.assertRaises(wikibox.NeedConnect):
             asyncio.run(wikibox.access_token(wikibox.LOCAL))
         self.assertFalse(wikibox.connected(wikibox.LOCAL))
+
+    def test_origin_not_allowed_by_wikibox_explains_what_to_do(self):
+        self.wiki.allowed = {"http://localhost:8080"}
+        with self.assertRaises(wikibox.OAuthBlocked) as cm:
+            asyncio.run(wikibox.auth_url(None, "", "https://urbox-meeting-api.onrender.com"))
+        msg = str(cm.exception)
+        self.assertIn("https://urbox-meeting-api.onrender.com", msg)
+        self.assertIn("Origin redirect được phép", msg)
+        self.assertIn("API key", msg)
+        self.assertEqual(self.wiki.registered, [])
+        url = asyncio.run(wikibox.auth_url(None, "", "http://localhost:8080"))      # origin được phép thì vẫn chạy
+        self.assertIn("client_id=cid-1", url)
 
     def test_needs_a_server_secret_to_store_tokens(self):
         with mock.patch.dict(os.environ, {"AUTH_SECRET": "", "GOOGLE_TOKEN_KEY": "", "WIKIBOX_TOKEN_KEY": ""}):
@@ -263,6 +281,11 @@ class WikiApiTests(WikiBase):
         self.assertTrue(st["connected"])
         r = self.client.post("/api/wikibox/test", json={"query": "đổi trả"}).json()
         self.assertEqual((r["search_tool"], r["hits"][0]["title"]), ("search_documents", "Chính sách đổi trả voucher"))
+        self.wiki.allowed = {"https://khac.example.com"}
+        r = self.client.post("/api/wikibox/connect", json={"return_to": ""})
+        self.assertEqual(r.status_code, 409)                                    # giao diện mở ô dán API key
+        self.assertIn("Origin redirect được phép", r.json()["detail"])
+        self.wiki.allowed = None
         url = self.client.post("/api/wikibox/connect", json={"return_to": ""}).json()["url"]
         state = parse_qs(urlparse(url).query)["state"][0]
         r = self.client.get(f"/api/wikibox/callback?error=access_denied&state={state}", follow_redirects=False)

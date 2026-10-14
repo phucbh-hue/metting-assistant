@@ -956,7 +956,9 @@ async function api(method, url, body) {
   try { data = await res.json(); } catch (e) { /* không phải JSON */ }
   if (!res.ok) {
     const d = data && data.detail;
-    throw new Error(typeof d === 'string' ? d : (Array.isArray(d) ? d.map(x => x.msg).join('; ') : `Lỗi ${res.status}`));
+    const err = new Error(typeof d === 'string' ? d : (Array.isArray(d) ? d.map(x => x.msg).join('; ') : `Lỗi ${res.status}`));
+    err.status = res.status;
+    throw err;
   }
   return data;
 }
@@ -5478,6 +5480,7 @@ async function renderDriveSettings(box) {
   };
 }
 /* ---------- Kho tri thức WikiBox (MCP thật): mỗi người kết nối bằng tài khoản WikiBox của mình ---------- */
+let WB_NOTE = '';           // WikiBox chưa cho địa chỉ này đăng nhập OAuth: hướng dẫn giữ trên khung, mở sẵn ô dán API key
 async function renderWikiboxSettings(box) {
   if (!box) return;
   let st;
@@ -5497,9 +5500,10 @@ async function renderWikiboxSettings(box) {
       <div data-wb-out class="mt-2"></div>`
     : `<p class="text-muted mb-2">Kết nối kho tri thức của công ty trên ${esc(host)} để trợ lý và Bảng BD trả lời từ tài liệu thật (sản phẩm, quy trình, chính sách) thay cho dữ liệu mẫu.
          Chạy dưới quyền của anh chị trên WikiBox: chỉ đọc được tài liệu anh chị được xem, không sửa gì.</p>
-       <div class="flex flex-wrap gap-2"><button type="button" class="btn btn-primary btn-sm" data-wb="connect">Kết nối WikiBox</button>
-         <button type="button" class="btn btn-ghost btn-sm" data-wb="key">Dùng API key</button></div>
-       <form data-wb-form="key" class="hidden mt-2 flex gap-2"><input class="input" name="k" type="password" autocomplete="off" maxlength="500" required
+       ${WB_NOTE ? `<div class="notice notice-warn mb-2"><p>${esc(WB_NOTE)}</p></div>` : ''}
+       <div class="flex flex-wrap gap-2"><button type="button" class="btn ${WB_NOTE ? 'btn-ghost' : 'btn-primary'} btn-sm" data-wb="connect">Kết nối WikiBox</button>
+         <button type="button" class="btn ${WB_NOTE ? 'btn-primary' : 'btn-ghost'} btn-sm" data-wb="key">Dùng API key</button></div>
+       <form data-wb-form="key" class="${WB_NOTE ? '' : 'hidden'} mt-2 flex gap-2"><input class="input" name="k" type="password" autocomplete="off" maxlength="500" required
            placeholder="API key tạo ở WikiBox > Tùy chỉnh cá nhân > WikiBox MCP > Tạo key mới" style="height:32px">
          <button class="btn btn-primary btn-sm shrink-0" type="submit">Lưu</button></form>`;
   box.onclick = async e => {
@@ -5507,8 +5511,11 @@ async function renderWikiboxSettings(box) {
     if (b.dataset.wb === 'key') { $('[data-wb-form="key"]', box).classList.remove('hidden'); $('[data-wb-form="key"] input', box).focus(); return; }
     if (b.dataset.wb === 'connect') {
       b.disabled = true;
-      try { const r = await POST('/api/wikibox/connect', { return_to: location.origin + location.pathname }); location.href = r.url; }
-      catch (err) { toast(err.message, 'err', 8000); b.disabled = false; }
+      try { const r = await POST('/api/wikibox/connect', { return_to: location.origin + location.pathname }); WB_NOTE = ''; location.href = r.url; }
+      catch (err) {
+        if (err.status === 409) { WB_NOTE = err.message; renderWikiboxSettings(box); setTimeout(() => { const k = $('[data-wb-form="key"] input', box); if (k) k.focus(); }, 30); }
+        else { toast(err.message, 'err', 8000); b.disabled = false; }
+      }
       return;
     }
     const ok = await confirmDialog({ title: 'Ngắt kết nối WikiBox?', ok: 'Ngắt kết nối', danger: true,
@@ -5524,6 +5531,7 @@ async function renderWikiboxSettings(box) {
     try {
       if (f.dataset.wbForm === 'key') {
         await POST('/api/wikibox/key', { api_key: f.k.value.trim() });
+        WB_NOTE = '';
         toast('Đã kết nối WikiBox bằng API key.');
         return renderWikiboxSettings(box);
       }
