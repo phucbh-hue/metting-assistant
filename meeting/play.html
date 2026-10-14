@@ -35,12 +35,14 @@
   .pill { display: inline-block; padding: 4px 10px; border-radius: 99px; background: #EFE7FB; color: var(--brand); font-size: 13px; font-weight: 600; }
   .gift { font-size: 15px; background: #FFF6DB; border-radius: 14px; padding: 12px 14px; }
   ol { margin: 6px 0 0; padding-left: 20px; } li { margin: 4px 0; }
+  #net { text-align: center; font-size: 13px; color: var(--bad); padding: 0 16px; }
   footer { text-align: center; font-size: 12px; color: var(--muted); padding: 10px 0 18px; }
 </style>
 </head>
 <body>
 <header><div class="t">UrBox Meeting Copilot</div><h1 id="title">Đang vào trò chơi...</h1></header>
 <main id="app"><div class="card muted">Đang tải...</div></main>
+<div id="net" hidden></div>
 <footer>Trả lời trên điện thoại hoặc nói đáp án to và rõ trong phòng họp.</footer>
 <script>
 const CODE = location.pathname.split('/').filter(Boolean)[1] || '';
@@ -49,21 +51,29 @@ const COLORS = ['var(--a)', 'var(--b)', 'var(--c)', 'var(--d)'];
 const L = 'ABCD';
 let pid = ''; try { pid = localStorage.getItem(KEY) || ''; } catch (e) { /* trình duyệt chặn lưu trữ */ }
 let st = null, skew = 0, timer = null, sending = false;
+let lastSig = '';       // chỉ vẽ lại khi nội dung đổi: vẽ lại mỗi lần tải trạng thái làm mất chữ đang gõ, mất lượt bấm
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const $ = s => document.querySelector(s);
 async function api(path, body) {
   const r = await fetch(`/play/${encodeURIComponent(CODE)}${path}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
   const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(d.detail || 'Có lỗi, thử lại giúp em');
+  if (!r.ok) throw Object.assign(new Error(d.detail || 'Có lỗi, thử lại giúp em'), { status: r.status });
   return d;
 }
+function net(msg) { const el = $('#net'); el.textContent = msg || ''; el.hidden = !msg; }
 async function poll() {
   try {
     st = await api(`/state${pid ? `?pid=${encodeURIComponent(pid)}` : ''}`);
     skew = (st.now || Date.now() / 1000) - Date.now() / 1000;
     if (st.me && pid && !st.me.joined) { pid = ''; try { localStorage.removeItem(KEY); } catch (e) { /* bỏ qua */ } }
+    net('');
     render();
-  } catch (e) { $('#app').innerHTML = `<div class="card"><b>Không vào được trò chơi</b><p class="muted">${esc(e.message)}</p></div>`; }
+  } catch (e) {
+    if (!st) { lastSig = ''; $('#app').innerHTML = `<div class="card"><b>Không vào được trò chơi</b><p class="muted">${esc(e.message)}</p></div>`; }
+    else if (e.status === 404) return net('Trò chơi đã đóng.');      // giữ màn hình cuối cùng
+    else net('Mạng chập chờn, đang kết nối lại...');                 // giữ nguyên màn hình và tên đang gõ
+  }
+  if (st && st.ended) return;                    // lượt đã xong: kết quả không đổi nữa
   clearTimeout(timer); timer = setTimeout(poll, st && ['answering', 'closing', 'lucky'].includes(st.phase) ? 700 : 1200);
 }
 function left() { return st && st.deadline ? Math.max(0, st.deadline - (Date.now() / 1000 + skew)) : 0; }
@@ -72,16 +82,29 @@ function render() {
   const me = st.me || {};
   const app = $('#app');
   if (!pid) {
-    if (st.phase === 'final' || st.phase === 'stopped') { app.innerHTML = '<div class="card">Trò chơi đã kết thúc. Cảm ơn anh chị!</div>'; return; }
-    app.innerHTML = `<div class="card"><p class="muted" style="margin-top:0">${esc(st.theme || '')}</p>
+    if (['final', 'lucky', 'stopped'].includes(st.phase)) {      // hết câu hỏi: không vào chơi được nữa
+      if (lastSig !== 'ended') { lastSig = 'ended'; app.innerHTML = '<div class="card">Trò chơi đã kết thúc. Cảm ơn anh chị!</div>'; }
+      return;
+    }
+    if ($('#nm')) {                              // đang nhập tên: giữ nguyên ô nhập, chỉ cập nhật chữ xung quanh
+      $('#theme').textContent = st.theme || ''; $('#prize').textContent = st.prize || '';
+      return;
+    }
+    lastSig = 'join';
+    app.innerHTML = `<div class="card"><p class="muted" style="margin-top:0" id="theme">${esc(st.theme || '')}</p>
       <label for="nm" class="muted">Tên hiện trên bảng điểm</label>
-      <input id="nm" maxlength="30" placeholder="Ví dụ: Lan - Marketing" autocomplete="nickname">
+      <input id="nm" maxlength="30" placeholder="Ví dụ: Lan - Marketing" autocomplete="nickname" enterkeyhint="go">
       <button class="primary" id="go">Vào chơi</button></div>
-      <div class="gift">Phần thưởng: <b>${esc(st.prize || '')}</b></div>`;
+      <div class="gift">Phần thưởng: <b id="prize">${esc(st.prize || '')}</b></div>`;
     $('#go').onclick = join; $('#nm').onkeydown = e => { if (e.key === 'Enter') join(); };
     $('#nm').focus();
     return;
   }
+  const sig = JSON.stringify([st.phase, st.qi, st.phase === 'lobby' ? st.players : 0, me.joined, me.name, me.choice,
+    me.points, me.rank, me.alive, me.gain, st.reveal ? st.reveal.answer : null, st.lucky ? st.lucky.winner : null,
+    (st.winners || []).map(w => w.name).join('|')]);
+  if (sig === lastSig) return;                   // không đổi gì: thanh thời gian tự chạy, không vẽ lại cả khung
+  lastSig = sig;
   const head = `<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
     <div><div style="font-weight:700">${esc(me.name || '')}</div><div class="muted">${me.points || 0} điểm${me.rank && me.points ? `, hạng ${me.rank}` : ''}${st.format === 'golden_bell' && st.qi >= 0 ? (me.alive ? ', đang trụ lại' : ', đã bị loại') : ''}</div></div>
     ${st.total && st.qi >= 0 && st.phase !== 'final' ? `<span class="pill">Câu ${st.qi + 1}/${st.total}</span>` : ''}</div>`;

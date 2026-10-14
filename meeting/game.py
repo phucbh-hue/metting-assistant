@@ -36,7 +36,8 @@ REVEAL_S = 5.0
 LOBBY_MAX_S = 15 * 60
 MAX_PLAYERS = 300
 MAX_QUESTIONS = 12
-GAMES: Dict[str, "GameRun"] = {}          # mã chơi trên điện thoại -> lượt chơi đang mở
+KEEP_ENDED_S = 30 * 60         # lượt đã xong: điện thoại vẫn xem được hạng và người thắng trong 30 phút
+GAMES: Dict[str, Any] = {}     # mã chơi trên điện thoại -> lượt đang mở (GameRun) hoặc kết quả lượt đã xong (EndedGame)
 
 GAME_SYSTEM = """Bạn là người thiết kế và dẫn trò chơi (MC) cho cuộc họp của UrBox (nền tảng quà tặng, e-voucher, loyalty tại
 Việt Nam). Thiết kế MỘT trò chơi đố vui có thưởng để mọi người trong phòng cùng chơi: trả lời bằng giọng nói ("đáp án B")
@@ -210,7 +211,7 @@ class GameRun:
             "artifact_id": self.artifact_id, "code": self.code, "title": self.g["title"], "format": self.g["format"],
             "theme": self.g["theme"], "rules": self.g["rules"], "prize": self.g["prize"], "phase": self.phase,
             "qi": self.qi, "total": len(self.g["questions"]), "now": time.time(), "opened_at": self.opened_at,
-            "deadline": self.deadline, "players": len(self.players),
+            "deadline": self.deadline, "players": len(self.players), "ended": self.finished,
             "alive": sum(1 for p in self.players.values() if p["alive"]),
             "leaderboard": self.leaderboard(), "winners": self.winners, "lucky": self.lucky}
         if q is not None:
@@ -269,7 +270,7 @@ class GameRun:
 
     def join(self, name: str) -> str:
         """Người chơi trên điện thoại. Trả về mã người chơi (giữ trong trình duyệt của họ)."""
-        if self.finished or self.phase == "final":
+        if self.finished or self.phase in ("final", "lucky"):
             raise ValueError("Trò chơi đã kết thúc")
         name = _clean(name, 30)
         if not name:
@@ -329,7 +330,7 @@ class GameRun:
             self.finished = True
             if self.phase != "final":
                 self.phase = "stopped"
-            GAMES.pop(self.code, None)
+            GAMES[self.code] = EndedGame(self)      # điện thoại không mất màn kết quả ngay khi trò chơi khép lại
 
     async def _wait(self, seconds: float, until: Optional[asyncio.Event] = None) -> None:
         """Chờ seconds giây; bấm Câu tiếp (hoặc sự kiện until) thì thôi chờ."""
@@ -520,6 +521,31 @@ class GameRun:
             log.info("meeting.game: không lưu được kết quả trò chơi: %s", e)
 
 
-def by_code(code: str) -> Optional[GameRun]:
-    g = GAMES.get(str(code or "")[:20])
-    return g if g is not None and not g.finished else None
+class EndedGame:
+    """Kết quả lượt chơi đã xong: điện thoại chỉ còn xem hạng và người thắng. Không giữ phiên họp trong bộ nhớ."""
+    finished = True
+
+    def __init__(self, run: GameRun):
+        self.code, self.ended_at = run.code, time.time()
+        self._state = run.public()
+        self._me = {k: run.public(k)["me"] for k, p in run.players.items() if p["via"] == "phone"}
+
+    def public(self, pid: Optional[str] = None) -> Dict[str, Any]:
+        out = {**self._state, "now": time.time()}
+        if pid is not None:
+            out["me"] = self._me.get(pid) or {"joined": False}
+        return out
+
+    def join(self, name: str) -> str:
+        raise ValueError("Trò chơi đã kết thúc")
+
+    def answer_phone(self, pid: str, choice: int) -> bool:
+        return False
+
+
+def by_code(code: str) -> "Optional[GameRun | EndedGame]":
+    """Lượt chơi theo mã trên điện thoại: đang mở, hoặc đã xong chưa quá KEEP_ENDED_S (chỉ còn xem kết quả)."""
+    now = time.time()
+    for k in [k for k, g in GAMES.items() if isinstance(g, EndedGame) and now - g.ended_at > KEEP_ENDED_S]:
+        GAMES.pop(k, None)
+    return GAMES.get(str(code or "")[:20])

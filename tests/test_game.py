@@ -82,6 +82,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         for p in self.patches:
             p.stop()
+        game.GAMES.clear()
 
     async def wait_phase(self, run, phase, timeout=5.0):
         end = time.monotonic() + timeout
@@ -126,7 +127,11 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(run.task, 10)
         self.assertEqual(run.phase, "final")
         self.assertEqual(run.winners[0]["name"], "Phúc")
-        self.assertIsNone(game.by_code(run.code))                                            # hết lượt: mã đóng
+        ended = game.by_code(run.code)                                                       # hết lượt: chỉ còn xem kết quả
+        self.assertIsInstance(ended, game.EndedGame)
+        self.assertEqual((ended.public()["ended"], ended.public(pid)["me"]["rank"]), (True, 2))
+        with self.assertRaises(ValueError):
+            ended.join("Đến muộn")
         meta = db.get_artifact(self.aid)["meta"]["results"]
         self.assertEqual((meta["players"], meta["winners"][0]["name"]), (3, "Phúc"))
 
@@ -164,6 +169,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         for s in list(live.SESSIONS.values()):
             s.dispose()
         live.SESSIONS.clear()
+        game.GAMES.clear()
 
     async def test_assistant_designs_the_game_then_hosts_it_on_stage(self):
         mid = db.create_meeting("Demo Meeting Copilot")
@@ -232,6 +238,23 @@ class PlayApiTests(unittest.TestCase):
         self.assertEqual(self.client.post(f"/play/{run.code}/answer", json={"pid": pid, "choice": 0}).status_code, 200)
         self.assertEqual(self.client.post(f"/play/{run.code}/answer", json={"pid": pid, "choice": 9}).status_code, 422)
         self.assertNotIn("answer", json.dumps(self.client.get(f"/play/{run.code}/state").json()["question"]))
+
+    def test_phone_still_shows_the_result_after_the_game_ends(self):
+        run = game.GameRun(FakeSession(), 1, game.normalize(GAME))
+        game.GAMES[run.code] = run
+        pid = self.client.post(f"/play/{run.code}/join", json={"name": "Lan"}).json()["pid"]
+        self.assertFalse(self.client.get(f"/play/{run.code}/state").json()["ended"])
+        run.phase = "final"
+        run._close()                                                                         # trò chơi khép lại
+        st = self.client.get(f"/play/{run.code}/state?pid={pid}").json()
+        self.assertEqual((st["phase"], st["ended"], st["me"]["name"], st["me"]["rank"]), ("final", True, "Lan", 1))
+        self.assertFalse(self.client.get(f"/play/{run.code}/state?pid=pkhac").json()["me"]["joined"])
+        late = self.client.post(f"/play/{run.code}/join", json={"name": "Đến muộn"})
+        self.assertEqual((late.status_code, late.json()["detail"]), (400, "Trò chơi đã kết thúc"))
+        self.assertEqual(self.client.post(f"/play/{run.code}/answer", json={"pid": pid, "choice": 0}).status_code, 409)
+        game.GAMES[run.code].ended_at -= game.KEEP_ENDED_S + 1                               # quá 30 phút: mã đóng hẳn
+        self.assertEqual(self.client.get(f"/play/{run.code}/state").status_code, 404)
+        self.assertNotIn(run.code, game.GAMES)
 
 
 if __name__ == "__main__":
