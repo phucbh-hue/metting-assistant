@@ -7,7 +7,7 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng người Việt tự nhiên của Soniox, đọc rõ cả từ tiếng
 Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy, miễn phí), vừa làm vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.19.0 - cập nhật 09/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.20.0 - cập nhật 14/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Hướng dẫn sử dụng cho người dùng (đăng nhập, mọi tính năng, Cài đặt) kèm video demo:
   [docs/huong-dan-su-dung.md](docs/huong-dan-su-dung.md).
 - Bộ slide demo để Jarvis tự trình bày (mở tệp, chọn "Theo ghi chú trong tệp"):

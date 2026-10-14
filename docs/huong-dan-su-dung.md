@@ -1,20 +1,23 @@
 ---
 title: Hướng dẫn sử dụng UrBox Meeting Copilot
 description: >
-  Hướng dẫn cho người dùng nội bộ UrBox: đăng nhập, tạo và chạy cuộc họp, trợ lý AI, biên bản, nhóm
-  cuộc họp, lịch Google và bot Google Meet, chế độ BD, hồ sơ giọng nói và toàn bộ phần Cài đặt.
-  Kèm video demo có phụ đề.
-version: 3.19.0
-updated: 10/10/2026
+  Hướng dẫn cho người dùng nội bộ UrBox: đăng nhập, tạo và chạy cuộc họp, trợ lý AI, trò chơi có thưởng,
+  biên bản và mẫu biên bản, nhóm cuộc họp, lịch Google và bot Google Meet, chế độ BD, kho tri thức WikiBox,
+  hồ sơ giọng nói và toàn bộ phần Cài đặt. Kèm video demo có phụ đề.
+version: 3.20.0
+updated: 14/10/2026
 owner: phuc.bh@urbox.vn
 video: huong-dan/video-demo.mp4
 ---
 
 # Hướng dẫn sử dụng UrBox Meeting Copilot
 
-- Phiên bản: 3.19.0. Cập nhật: 10/10/2026. Phụ trách: phuc.bh@urbox.vn.
+- Phiên bản: 3.20.0. Cập nhật: 14/10/2026. Phụ trách: phuc.bh@urbox.vn.
 - Ảnh và video trong tài liệu dùng dữ liệu mẫu và tài khoản giả (`*.demo@urbox.vn`), không có dữ liệu thật.
-- Dữ liệu tra cứu nội bộ của trợ lý (ticket Jira, danh bạ, kiến trúc hệ thống) hiện là dữ liệu mẫu.
+- Dữ liệu tra cứu nội bộ của trợ lý (ticket Jira, danh bạ, kiến trúc hệ thống) hiện là dữ liệu mẫu. Kho tri
+  thức thật của công ty dùng WikiBox khi người tạo cuộc họp đã kết nối (mục 13.4).
+- Bản 3.20.0 (14/10/2026) chưa có ảnh chụp cho các phần mới: trò chơi, mẫu biên bản, WikiBox, mời bot bằng
+  link.
 
 ## Mục lục
 
@@ -284,8 +287,8 @@ Tên mặc định là **Jarvis**. Quản trị viên đổi được tên trong
 
 ### 7.3. Các thẻ sản phẩm AI
 
-Cột phải có các thẻ **Jarvis**, **Slide**, **Dashboard**, **Báo cáo**, **Sơ đồ**, **Giao diện**. Con số trên
-thẻ là số sản phẩm.
+Cột phải có các thẻ **Jarvis**, **Slide**, **Dashboard**, **Báo cáo**, **Sơ đồ**, **Giao diện**, **Trò chơi**.
+Con số trên thẻ là số sản phẩm.
 
 ![Slide](huong-dan/img/09-slide.jpg)
 
@@ -343,6 +346,29 @@ thẻ là số sản phẩm.
   - **Để tôi trình bày**.
 - PowerPoint nên lưu thêm bản PDF để hiện đúng thiết kế.
 
+### 7.6. Trò chơi có thưởng
+
+Nói "Jarvis ơi, tạo một trò chơi có thưởng để mọi người tương tác với em" (có thể nói thêm chủ đề, số câu,
+phần thưởng, "theo kiểu rung chuông vàng"). Trợ lý tự soạn trò chơi và làm người dẫn (MC) trên màn hình trình
+bày.
+
+- **Hai thể thức**:
+  - **Đấu trường tri thức** (mặc định): trả lời đúng được 100 điểm, càng nhanh được thêm tối đa 50 điểm.
+  - **Rung chuông vàng**: trả lời sai hoặc không trả lời là bị loại; cả phòng cùng sai thì được cứu trợ.
+- **Câu hỏi** lấy từ nội dung cuộc họp và dữ liệu tra cứu, thêm kiến thức chung. Trợ lý không bịa thông tin về
+  UrBox. Người dẫn xem trước câu hỏi và đáp án ở thẻ **Trò chơi** (đừng chiếu thẻ này).
+- **Cách chơi**, cùng một bảng điểm:
+  - nói đáp án to, rõ: "Đáp án B", "câu C", "bê"; câu Đúng/Sai thì nói "Đúng" hoặc "Sai". Ứng dụng biết ai
+    nói nhờ nhận ra giọng (người chưa có mẫu giọng hiện là Người nói N). Người trong Google Meet cũng chơi
+    được qua bot;
+  - hoặc quét mã QR trên màn hình để chơi trên điện thoại, không cần đăng nhập.
+- **Trình tự**: màn chờ (luật chơi, phần thưởng, mã QR), bấm **Bắt đầu** hoặc nói "Jarvis ơi, bắt đầu", rồi
+  từng câu: trợ lý đọc câu hỏi, đếm ngược, công bố đáp án kèm giải thích và người nhanh nhất. Bảng điểm sau
+  câu 3 và câu 5, bục vinh danh, rồi quay số may mắn cho một người chơi khác.
+- **Nút cho người dẫn**: Bắt đầu, Chốt đáp án / Câu tiếp, Đọc bảng điểm, Dừng trò chơi, Chơi lại. Nói được:
+  "Jarvis ơi, câu tiếp theo", "xem bảng điểm", "dừng trò chơi".
+- Phần thưởng chỉ hiện và đọc lên. Ban tổ chức trao quà, ứng dụng không phát voucher thật.
+
 ### 7.5. Giọng nói và hình đại diện
 
 - Nút **Giọng nói: bật / tắt** (hoặc phím V): tắt thì trợ lý chỉ hiện phụ đề, không nói thành tiếng.
@@ -361,7 +387,10 @@ thẻ là số sản phẩm.
    - rủi ro.
 3. Sau khi kết thúc vẫn đặt tên, gộp người nói và sửa từng câu được.
 
-Lập lại biên bản: bấm **Lập biên bản ngay** ở thẻ Báo cáo, hoặc nói "Jarvis ơi, lập biên bản".
+Lập lại biên bản: bấm **Lập lại bằng mẫu khác** dưới biên bản, hoặc mở menu cuộc họp, chọn **Lập lại biên
+bản...** (chọn được mẫu khác, bản cũ vẫn giữ trong danh sách phiên bản). Cuộc họp chưa có biên bản thì bấm
+**Lập biên bản ngay** ở thẻ Báo cáo, hoặc nói "Jarvis ơi, lập biên bản". Cấu trúc biên bản theo mẫu biên bản
+(mục 8.3); dưới biên bản ghi biên bản lập theo mẫu nào.
 
 ![Biên bản có mục thay đổi so với các buổi trước](huong-dan/img/14-bien-ban-thay-doi.jpg)
 
@@ -372,6 +401,37 @@ Lập lại biên bản: bấm **Lập biên bản ngay** ở thẻ Báo cáo, h
   > Dạ thưa anh chị, theo như mình đã bàn ở buổi 25/09/2026 (Review sprint 40) thì là 15/12/2026 chứ không
   > phải 20/12/2026, anh chị có thể xem xét lại nha ạ.
 - Trợ lý chỉ ghi vào biên bản, không nhắc hay ngắt lời trong lúc họp.
+
+### 8.3. Mẫu biên bản
+
+Biên bản là bản recap của cuộc họp. Mỗi loại họp nên có một cấu trúc riêng: daily cần "hôm qua, hôm nay,
+vướng mắc"; họp khách cần "câu hỏi của khách, cam kết, bước tiếp theo". Mở Cài đặt, mục **Mẫu biên bản**, bấm
+**Quản lý mẫu**.
+
+- **Mẫu dựng sẵn**: Biên bản tiêu chuẩn, Daily standup, Họp với khách hàng (BD), Phỏng vấn tuyển dụng,
+  Sprint review / planning, Retrospective, Họp 1:1, Báo cáo tuần. Không sửa được: bấm **Nhân bản** rồi sửa
+  bản sao.
+- **Tạo mẫu**: đặt tên, phạm vi, các mục theo thứ tự. Mỗi mục là đoạn văn, gạch đầu dòng hoặc bảng (đặt cột).
+  Thêm "AI cần ghi gì" cho từng mục và yêu cầu chung. Khung bên phải xem trước cấu trúc. **Soạn nhanh bằng
+  AI**: mô tả biên bản mình muốn, AI soạn các mục để sửa tiếp.
+- **Ai được làm gì**:
+
+| Phạm vi | Tạo, sửa, xóa | Dùng | Đặt làm mặc định |
+|---|---|---|---|
+| Dựng sẵn | Không ai | Mọi người | Quản trị viên (cho công ty), chủ nhóm (cho nhóm) |
+| Công ty | Quản trị viên | Mọi người | Quản trị viên (cho công ty), chủ nhóm (cho nhóm) |
+| Nhóm | Chủ nhóm | Thành viên nhóm (nhân bản được) | Chủ nhóm |
+| Của tôi | Người tạo | Chỉ người tạo | Không |
+
+- **Mẫu dùng cho một cuộc họp**, theo thứ tự ưu tiên:
+  1. mẫu chọn riêng cho cuộc họp (ô **Mẫu biên bản** khi tạo cuộc họp, hoặc menu cuộc họp > **Mẫu biên
+     bản...**);
+  2. mặc định của nhóm (Cài đặt nhóm > **Mẫu biên bản của nhóm**);
+  3. mặc định của công ty;
+  4. mẫu dựng sẵn hợp với loại hoặc tên cuộc họp (daily, phỏng vấn, họp khách...);
+  5. Biên bản tiêu chuẩn.
+- Chọn mẫu cho cuộc họp và lập lại biên bản: người tạo cuộc họp hoặc chủ nhóm. Xóa một mẫu đang là mặc định
+  thì nhóm / công ty quay về bước ưu tiên kế tiếp.
 
 ### 8.2. Tải về, lưu Drive, lưu về máy
 
@@ -486,6 +546,17 @@ Mỗi buổi trong 7 ngày tới hiện:
 - Phòng họp nên dùng loa có khử tiếng vọng hoặc tai nghe. Ứng dụng cũng tự bỏ các câu mic thu lại từ loa phát
   tiếng người online.
 
+### 10.5. Mời bot bằng link Google Meet
+
+Cuộc họp không có trên lịch của mình (người khác mời, link gửi qua chat), hoặc chưa kết nối Lịch:
+- Ở trang chủ, mục **Mời bot vào Google Meet**: dán link Meet (hoặc chỉ mã dạng `abc-defg-hij`), đặt tên
+  cuộc họp và nhóm nếu muốn, bấm **Mời bot vào**. Bot xin vào ngay; người trong Meet bấm **Cho vào**.
+- Danh sách bên dưới hiện trạng thái từng bot, nút **Mở cuộc họp** và **Cho bot rời**.
+- Họp nửa online nửa trực tiếp mà đã mở cuộc họp trong ứng dụng: menu cuộc họp > **Mời bot vào Google
+  Meet...**, dán link. Lời người online được chép vào chính cuộc họp đang mở.
+- Bot không vào được thì trạng thái ghi rõ lý do: chưa ai bấm Cho vào, bị từ chối, cuộc họp chỉ cho người
+  trong tổ chức, hoặc tài khoản Recall.ai của công ty hết credit (trang chủ hiện cảnh báo, báo quản trị viên).
+
 ## 11. Chế độ BD
 
 Chế độ BD dành cho nhóm kinh doanh họp với khách.
@@ -513,9 +584,11 @@ Khung chat **Trợ lý BD**:
   xác nhận được bỏ qua.
 - **Đội BD gõ hỏi** vào ô "Hỏi trợ lý". Câu hỏi nối tiếp được hiểu theo các lượt trước.
 - **Câu trợ lý bỏ sót**: bấm **Hỏi AI** ngay ở câu đó trong phần lời nói bên trái.
-- Mỗi câu trả lời gộp hai nguồn, kèm dấu nguồn ngay sau từng ý:
+- Mỗi câu trả lời gộp các nguồn, kèm dấu nguồn ngay sau từng ý:
   - **K**: tài liệu của nhóm. Rê chuột vào để xem tên tài liệu và đoạn.
   - **M**: cuộc họp trước. Bấm để mở cuộc họp đó.
+  - **U**: kho tri thức WikiBox của công ty, khi người tạo cuộc họp đã kết nối (mục 13.4). Bấm để mở tài liệu
+    trên WikiBox. Giá, điều khoản riêng cho khách vẫn theo tài liệu của nhóm (K).
 - **Ghi chú cho đội mình**: điều đã nói, hứa, báo giá ở buổi trước; chỗ khác với tài liệu; điều nên hỏi thêm
   khách.
 - Mỗi câu trả lời còn có **độ chắc** (cao / vừa / thấp) và nút **Chép câu trả lời** (chép không kèm dấu
@@ -572,6 +645,8 @@ Các mục, theo thứ tự trong hộp Cài đặt:
 |---|---|---|---|
 | 1 | Tài khoản | Tên, email, nút Đăng xuất | Mỗi người |
 | 2 | Google (Drive và Lịch) | Kết nối Google, trạng thái quyền Drive / Lịch, công tắc bot vào Google Meet | Mỗi người, cho chính mình |
+| 2a | Kho tri thức WikiBox | Kết nối WikiBox để trợ lý và Bảng BD tra tài liệu thật của công ty | Mỗi người, cho chính mình |
+| 2b | Mẫu biên bản | Quản lý mẫu biên bản; mẫu mặc định của công ty | Mẫu cá nhân: mỗi người. Mẫu công ty: quản trị viên |
 | 3 | Gói AI của tôi | Chạy AI cho cuộc họp của mình bằng gói Claude.ai / ChatGPT của chính mình | Mỗi người, cho chính mình |
 | 4 | Cài đặt trợ lý | Tên gọi trợ lý và các tên gọi khác (tên bị nhận dạng sai) | Chỉ quản trị viên (dùng chung toàn hệ thống) |
 | 5 | Hình đại diện trợ lý | Linh vật UrBox, Hộp quà, Khuôn mặt tròn | Mỗi người (nhớ theo trình duyệt) |
@@ -601,6 +676,21 @@ thì nhờ quản trị viên.
 - Bấm **Ngắt kết nối** để xóa đăng nhập trên server.
 - Chỉ kết nối gói của chính mình. Điều khoản của Anthropic và OpenAI không cho dùng chung tài khoản. Xác nhận
   với IT / Pháp chế trước khi dùng gói cá nhân cho nội dung nội bộ.
+
+### 13.4. Kho tri thức WikiBox
+
+WikiBox (`wiki.urbox.dev`) là kho tri thức của công ty. Kết nối rồi thì trợ lý và Bảng BD tra tài liệu thật
+(sản phẩm, quy trình, chính sách) thay cho dữ liệu mẫu, trong các cuộc họp do mình tạo.
+
+- **Kết nối WikiBox**: đăng nhập WikiBox, chọn không gian làm việc, bấm **Cho phép**. Quyền chỉ đọc: tìm tài
+  liệu, đọc nội dung, hỏi Thủ thư; không thêm, sửa, xóa gì trên WikiBox.
+- Hoặc **Dùng API key**: tạo key ở WikiBox > Tùy chỉnh cá nhân > WikiBox MCP > Tạo key mới (key chỉ hiện một
+  lần), dán vào ô rồi bấm **Lưu**. Key cần quyền Truy xuất (retrieve).
+- Cả hai cách đều chạy dưới quyền của chính mình: chỉ đọc được tài liệu mình được xem trên WikiBox. Bảng BD
+  của một cuộc họp dùng kết nối của người tạo cuộc họp.
+- **Kiểm tra**: gõ thử một câu tìm kiếm để xem kết quả. **Ngắt kết nối**: trợ lý quay về dữ liệu mẫu.
+- Dùng được với mọi nguồn AI (API Claude, Gemini, gói Claude.ai / ChatGPT): máy chủ của ứng dụng gọi WikiBox
+  và chỉ gửi kết quả tìm được cho AI, không gửi khóa.
 
 ### 13.2. Tên trợ lý, hình đại diện, giọng đọc
 
@@ -668,6 +758,9 @@ thì nhờ quản trị viên.
 | Gán nhầm người nói | Bấm tên ở đầu đoạn, chọn "Câu này là của..." hoặc gộp người nói; lưu mẫu giọng để lần sau tự nhận ra |
 | "Chưa lưu Drive: cần kết nối" | Cài đặt, mục Google (Drive và Lịch): kết nối bằng đúng tài khoản trùng email đăng nhập |
 | "Bot không vào được" | Xem lý do ở Lịch sắp tới: chưa ai cho vào, hoặc cuộc họp chỉ cho người trong tổ chức; bấm "Mời bot vào lại" |
+| "Tài khoản Recall.ai của công ty đã hết credit" | Báo quản trị viên nạp thêm credit trên Recall.ai, rồi bấm "Mời bot vào lại" |
+| "WikiBox từ chối API key này" | Tạo key mới trên WikiBox (có quyền Truy xuất), hoặc dùng nút Kết nối WikiBox |
+| Trò chơi không nhận câu trả lời bằng giọng | Nói ngắn, rõ "Đáp án B" khi đồng hồ đang chạy (sau khi trợ lý đọc xong câu hỏi); hoặc chơi bằng mã QR |
 | "Chỉ quản trị viên được đổi cài đặt chung" | Nhờ quản trị viên đổi |
 | Không thấy cuộc họp người khác gửi link | Người đó cần thêm bạn vào nhóm của cuộc họp |
 | Không lưu được biên bản về máy | Dùng Chrome hoặc Edge; bấm "Cho phép lưu" khi trang chủ hỏi |
@@ -690,3 +783,6 @@ thì nhờ quản trị viên.
   Jarvis khoảng 25-40 giây, bảng BD khoảng 15-30 giây.
 - **Gói AI của tôi**: mỗi lần đăng nhập tối đa 6 phút. Bản web chưa hỗ trợ gói Gemini.
 - **Google Meet**: bot nghe tối đa 16 người nói cùng lúc, không vào được phòng nhóm nhỏ (breakout room).
+- **Trò chơi**: tối đa 300 người chơi mỗi lượt. Câu trả lời bằng giọng chỉ tính trong lúc đếm ngược, câu đầu
+  tiên của mỗi người. Phòng ồn hoặc nhiều người nói cùng lúc thì nên chơi bằng điện thoại.
+- **WikiBox**: chỉ đọc; kết quả tìm theo quyền của người tạo cuộc họp.
