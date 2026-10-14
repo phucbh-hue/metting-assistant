@@ -690,6 +690,13 @@ def save_artifact(meeting_id: int, kind: str, title: str, content: str,
     return aid
 
 
+def update_artifact_meta(artifact_id: int, fields: Dict[str, Any]) -> bool:
+    """Ghi thêm thông tin vào meta của một sản phẩm (kết quả trò chơi...), không tạo phiên bản mới."""
+    res = _get_db()["ai_artifacts"].update_one({"id": int(artifact_id)},
+                                               {"$set": {f"meta.{k}": v for k, v in (fields or {}).items()}})
+    return res.modified_count > 0
+
+
 def get_artifacts(meeting_id: int) -> List[Dict[str, Any]]:
     return list(_get_db()["ai_artifacts"].find({"meeting_id": meeting_id}, {"_id": 0}).sort("created_at", -1))
 

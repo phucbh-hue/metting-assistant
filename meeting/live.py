@@ -641,6 +641,7 @@ class MeetingSession:
         self._stream_raws: Dict[str, Dict[int, Set[str]]] = {}
         self._meet_texts: Deque[Tuple[float, float, List[str]]] = deque(maxlen=60)   # câu Meet gần đây (chặn tiếng vọng)
         self.bd = None                                         # trợ lý BD (nhóm bật chế độ BD, bản 3.19)
+        self.game = None                                       # trò chơi có thưởng đang chạy (meeting/game.py)
         self._held: Set[asyncio.Task] = set()
         self._queue: asyncio.Queue = asyncio.Queue()
         self._db_queue: asyncio.Queue = asyncio.Queue()
@@ -764,6 +765,7 @@ class MeetingSession:
             "stage": self.stage_public(),
             "recording": self.recording_public(),
             "meet": self.meet_public(),
+            "game": self.game.public() if self.game is not None else None,
         }
 
     # ----------------------------------------------------------- workers ---
@@ -883,6 +885,8 @@ class MeetingSession:
         self.segments.append(seg)
         self._by_seq[seq] = seg
         await self.emit({"type": "segment", "segment": seg})
+        if self.game is not None and self.game.active:
+            self.game.on_segment(seg)                # trò chơi: câu trả lời bằng giọng nói
         self._db(db.add_segment, self.id, it["t_start"], it["t_end"], prof.label, it["text"],
                  speaker_id=prof.voice_id, confidence=seg["confidence"], is_inferred=seg["is_inferred"],
                  raw_embedding=vector.tolist() if vector is not None else None, seq=seq,
@@ -1386,6 +1390,8 @@ class MeetingSession:
         await self.emit({"type": "ai_activated", "wake_word": name or llm.assistant_config()["name"], "prompt": prompt,
                          "source": source})
         try:
+            if self.game is not None and self.game.active and await self._game_voice(command):
+                return
             if self._ask and time.monotonic() < self._ask["until"]:
                 ans = llm.present_answer(command, asked=True)
                 if ans:
@@ -1438,6 +1444,10 @@ class MeetingSession:
             await self.stage_action("show", artifact_id=aid, slide=slide or 0)
         elif res.get("artifact"):
             await self.stage_action("show", artifact_id=res["artifact"]["id"])
+            if res["artifact"].get("kind") == "game":   # trò chơi: mở màn hình và dẫn luôn
+                await self.emit({"type": "stage_command", "action": "open"})
+                await self.start_game(res["artifact"])
+                return
         if res.get("present"):                        # "vẽ sơ đồ rồi thuyết trình luôn"
             art = await self._get_artifact(self.stage["artifact_id"])
             if art and art.get("kind") in ("diagram", "dashboard"):
@@ -1446,6 +1456,54 @@ class MeetingSession:
                 await self.emit({"type": "stage_command", "action": "open"})
                 await self._ensure_scripts(art)
                 await self.emit({"type": "stage_present", "action": "start", "slide": self.stage["slide"]})
+
+    # ------------------------------------------------- trò chơi có thưởng ---
+    async def start_game(self, art: Dict[str, Any]) -> Dict[str, Any]:
+        """Mở một lượt chơi từ sản phẩm loại game (lượt cũ đang chạy thì dừng). Trợ lý dẫn trên màn hình trình chiếu."""
+        from meeting import game
+        try:
+            g = game.normalize(json.loads(art.get("content") or "{}"))
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Trò chơi không đọc được: {e}")
+        if self.game is not None and self.game.active:
+            await self.game.stop("Bắt đầu lượt chơi mới")
+        run = game.GameRun(self, int(art["id"]), g)
+        self.game = run
+        if self.stage["artifact_id"] != int(art["id"]):
+            await self.stage_action("show", artifact_id=int(art["id"]))
+        run.task = asyncio.create_task(run.run())
+        return run.public()
+
+    async def game_command(self, action: str) -> Dict[str, Any]:
+        """start (bắt đầu từ màn chờ), next (bỏ qua thời gian chờ), scores (xem bảng điểm), stop."""
+        g = self.game
+        if g is None or not g.active:
+            raise ValueError("Chưa có trò chơi nào đang chạy")
+        if action == "start":
+            g.start()
+        elif action == "next":
+            g.start() if g.phase == "lobby" else g.skip()
+        elif action == "stop":
+            await g.stop()
+            await self._say("Dạ, em dừng trò chơi. Cảm ơn cả nhà đã tham gia!")
+        elif action == "scores":
+            board = g.leaderboard(3)
+            await self._say("Bảng điểm: " + ", ".join(f"{r['name']} {r['points']} điểm" for r in board) + "."
+                            if board else "Chưa có ai ghi điểm ạ.")
+        else:
+            raise ValueError("Lệnh không hợp lệ")
+        return g.public()
+
+    async def _game_voice(self, command: str) -> bool:
+        """Gọi tên trợ lý trong lúc chơi: lệnh điều khiển trò chơi thì làm ngay; đang đếm ngược thì không gọi AI."""
+        from meeting import game
+        cmd = game.command_of(command)
+        if cmd is not None:
+            if cmd == "start" and self.game.phase != "lobby":
+                cmd = "next"
+            await self.game_command(cmd)
+            return True
+        return self.game.phase in ("reading", "answering", "closing")
 
     # ------------------------------------------------- màn hình trình bày ---
     STAGE_ACTIONS = ("show", "next", "prev", "goto", "topic", "back", "follow")
@@ -2431,6 +2489,8 @@ class MeetingSession:
         self.disposed = True
         if self.bd is not None:
             self.bd.close()
+        if self.game is not None and self.game.task is not None and not self.game.task.done():
+            self.game.task.cancel()
         for t in self._workers:
             t.cancel()
         self._workers = []

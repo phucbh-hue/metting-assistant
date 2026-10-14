@@ -115,6 +115,69 @@
     @media (max-width: 640px) { .cal-row { grid-template-columns: minmax(0, 1fr); } }
     .mb-join { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto auto; gap: 8px; }
     @media (max-width: 760px) { .mb-join { grid-template-columns: minmax(0, 1fr); } }
+    /* ---------- Trò chơi có thưởng (màn hình trình chiếu) ---------- */
+    .gm { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 18px; padding: 8px 4px; color: rgb(var(--ink)); }
+    .gm-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .gm-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 999px; font-weight: 700; font-size: 15px;
+      background: rgb(var(--brand) / .16); color: rgb(var(--ink)); border: 1px solid rgb(var(--brand) / .35); }
+    .gm-gold { background: rgba(255, 183, 0, .16); border-color: rgba(255, 183, 0, .45); }
+    .gm-title { font-size: clamp(30px, 4.4vw, 64px); font-weight: 800; line-height: 1.1; letter-spacing: -.5px;
+      background: linear-gradient(100deg, #fff 10%, #E7D6FF 45%, #FFB700 95%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .gm-q { font-size: clamp(24px, 3.1vw, 46px); font-weight: 750; line-height: 1.25; text-wrap: balance; }
+    .gm-lobby { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 28px; align-items: center; flex: 1; }
+    .gm-rules { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; font-size: clamp(16px, 1.5vw, 22px); }
+    .gm-rules li { display: flex; gap: 10px; align-items: flex-start; }
+    .gm-rules li::before { content: ""; width: 10px; height: 10px; margin-top: .55em; border-radius: 3px; background: #FFB700; flex: none; }
+    .gm-prize { margin-top: 20px; display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-radius: 18px;
+      background: linear-gradient(120deg, rgba(255, 183, 0, .18), rgba(130, 53, 228, .16)); border: 1px solid rgba(255, 183, 0, .4); font-size: clamp(16px, 1.5vw, 22px); }
+    .gm-qr { background: #fff; color: #1F1B2E; border-radius: 24px; padding: 18px; text-align: center; box-shadow: 0 20px 50px rgb(0 0 0 / .35); }
+    .gm-qr svg { width: 100%; max-width: 300px; height: auto; display: block; margin: 0 auto; }
+    .gm-qr .u { font-size: 13px; color: #6B6680; word-break: break-all; margin-top: 6px; }
+    .gm-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .gm-chip { padding: 4px 10px; border-radius: 999px; background: rgb(var(--ink) / .08); font-size: 13.5px; animation: gmPop .35s ease-out; }
+    .gm-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .gm-opt { position: relative; overflow: hidden; display: flex; align-items: center; gap: 14px; padding: 18px 20px; border-radius: 20px; min-height: 86px;
+      color: #fff; font-size: clamp(18px, 1.9vw, 28px); font-weight: 700; transition: transform .25s, opacity .3s, box-shadow .3s; }
+    .gm-opt b { display: grid; place-items: center; flex: none; width: 46px; height: 46px; border-radius: 14px; background: rgba(255, 255, 255, .22); font-size: 24px; }
+    .gm-opt .fill { position: absolute; inset: auto auto 0 0; height: 6px; background: rgba(255, 255, 255, .7); transition: width .6s; }
+    .gm-opt .n { margin-left: auto; font-size: .8em; opacity: .9; }
+    .gm-o0 { background: linear-gradient(135deg, #7A2BE0, #9B4DF0); } .gm-o1 { background: linear-gradient(135deg, #2563EB, #3B82F6); }
+    .gm-o2 { background: linear-gradient(135deg, #D99100, #F2B000); } .gm-o3 { background: linear-gradient(135deg, #0F9F5A, #18B86A); }
+    .gm-wait .gm-opt { opacity: .55; }
+    .gm-right { transform: scale(1.03); box-shadow: 0 0 0 4px #fff, 0 0 40px rgba(255, 255, 255, .55); }
+    .gm-wrong { opacity: .28; }
+    .gm-timer { display: flex; align-items: center; gap: 16px; }
+    .gm-bar { flex: 1; height: 14px; border-radius: 999px; background: rgb(var(--ink) / .1); overflow: hidden; }
+    .gm-bar i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #FFB700, #8235E4); transition: width .25s linear; }
+    .gm-sec { font-size: clamp(34px, 3.6vw, 58px); font-weight: 800; min-width: 2.2ch; text-align: right; font-variant-numeric: tabular-nums; }
+    .gm-sec.hot { color: #FF6B6B; animation: gmPulse .5s infinite alternate; }
+    .gm-explain { font-size: clamp(16px, 1.6vw, 24px); padding: 14px 18px; border-radius: 16px; background: rgb(var(--ink) / .06); }
+    .gm-board { display: flex; flex-direction: column; gap: 10px; }
+    .gm-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 12px; font-size: clamp(16px, 1.7vw, 26px); }
+    .gm-row .rk { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: rgb(var(--ink) / .08); font-weight: 800; }
+    .gm-row:nth-child(1) .rk { background: #FFB700; color: #1F1B2E; } .gm-row:nth-child(2) .rk { background: #D9D4E8; color: #1F1B2E; }
+    .gm-row:nth-child(3) .rk { background: #E3A26B; color: #1F1B2E; }
+    .gm-row .nm { position: relative; padding: 8px 12px; border-radius: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .gm-row .nm i { position: absolute; inset: 0 auto 0 0; background: rgb(var(--brand) / .28); border-radius: 12px; transition: width .8s ease-out; z-index: 0; }
+    .gm-row .nm span { position: relative; z-index: 1; }
+    .gm-row .pt { font-weight: 800; font-variant-numeric: tabular-nums; }
+    .gm-out { opacity: .4; text-decoration: line-through; }
+    .gm-podium { display: grid; grid-template-columns: repeat(3, 1fr); align-items: end; gap: 14px; max-width: 900px; width: 100%; margin: 0 auto; }
+    .gm-step { text-align: center; }
+    .gm-step .blk { border-radius: 18px 18px 6px 6px; display: grid; place-items: center; font-size: 42px; font-weight: 900; color: #1F1B2E; }
+    .gm-step .who { font-size: clamp(18px, 2vw, 30px); font-weight: 800; margin-bottom: 8px; animation: gmPop .6s ease-out; }
+    .gm-step .pts { font-size: 15px; opacity: .8; margin-bottom: 8px; }
+    .gm-s1 .blk { height: 210px; background: linear-gradient(180deg, #FFD54A, #FFB700); } .gm-s2 .blk { height: 150px; background: linear-gradient(180deg, #EEE9F7, #CFC7E4); }
+    .gm-s3 .blk { height: 110px; background: linear-gradient(180deg, #F0B98A, #D98E55); }
+    .gm-slot { margin: 0 auto; min-width: min(640px, 90%); padding: 30px 26px; border-radius: 28px; text-align: center; font-size: clamp(32px, 4.2vw, 64px); font-weight: 900;
+      background: linear-gradient(120deg, rgba(255, 183, 0, .22), rgba(130, 53, 228, .3)); border: 2px solid rgba(255, 183, 0, .55); }
+    .gm-confetti { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+    .gm-confetti i { position: absolute; top: -12px; width: 10px; height: 16px; border-radius: 3px; animation: gmFall linear forwards; }
+    @keyframes gmFall { to { transform: translateY(110vh) rotate(720deg); opacity: .9; } }
+    @keyframes gmPop { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes gmPulse { from { transform: scale(1); } to { transform: scale(1.12); } }
+    @media (max-width: 900px) { .gm-lobby { grid-template-columns: 1fr; } .gm-opts { grid-template-columns: 1fr; } }
+    @media (prefers-reduced-motion: reduce) { .gm-confetti { display: none; } .gm-sec.hot, .gm-chip, .gm-step .who { animation: none; } }
     .bd-grid { display: grid; grid-template-columns: minmax(250px, 330px) minmax(0, 1fr); }
     @media (max-width: 860px) {
       .bd-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 30%) minmax(0, 1fr); }
@@ -617,6 +680,7 @@
               <button class="tab" role="tab" data-act="tab" data-tab="docs" aria-selected="false">Báo cáo <span class="count num" data-count="docs"></span></button>
               <button class="tab" role="tab" data-act="tab" data-tab="diagram" aria-selected="false">Sơ đồ <span class="count num" data-count="diagram"></span></button>
               <button class="tab" role="tab" data-act="tab" data-tab="web_design" aria-selected="false">Giao diện <span class="count num" data-count="web_design"></span></button>
+              <button class="tab" role="tab" data-act="tab" data-tab="game" aria-selected="false">Trò chơi <span class="count num" data-count="game"></span></button>
             </div>
             <button class="icon-btn mx-2 shrink-0" data-act="stage-open" title="Trình chiếu toàn màn hình cùng trợ lý" aria-label="Trình chiếu toàn màn hình cùng trợ lý">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
@@ -2242,6 +2306,7 @@ function closeRoom() {
 function applySnapshot(d) {
   const R = S.room;
   R.meeting = d.meeting;
+  if ('game' in d) R.game = d.game;
   R.segs.clear(); R.order = [];
   (d.segments || []).filter(s => hasWords(s.text)).forEach(s => { R.segs.set(s.seq, s); R.order.push(s.seq); });
   R.speakers = new Map((d.speakers || []).map(p => [p.sid, p]));
@@ -2333,6 +2398,7 @@ function onEvent(R, ev) {
     case 'stream_status': onStreamStatus(ev); break;
     case 'recording': R.recording = ev.recording; renderTopbar(); break;
     case 'meet': R.meet = ev.meet; renderTopbar(); renderMeetPeople(); break;
+    case 'game_state': onGameState(ev.game); break;
     case 'toast': toast(ev.text || '', ev.level || 'info', 7000); break;
     case 'ai_listening': {
       const t = newTurn('', 'voice'); t.listening = true; switchTab('jarvis'); renderJarvis(); break;
@@ -2801,11 +2867,11 @@ const QUICK = [
   'Vẽ sơ đồ tư duy các ý chính đang bàn',
   'Tra cứu ticket Jira liên quan tới nội dung vừa nói',
 ];
-const KIND_LABEL = { minutes: 'Biên bản', diagram: 'Sơ đồ', web_design: 'Giao diện', slides: 'Slide', dashboard: 'Dashboard', report: 'Báo cáo' };
-const TAB_KINDS = { slides: ['slides'], dashboard: ['dashboard'], docs: ['report', 'minutes'], diagram: ['diagram'], web_design: ['web_design'] };
+const KIND_LABEL = { minutes: 'Biên bản', diagram: 'Sơ đồ', web_design: 'Giao diện', slides: 'Slide', dashboard: 'Dashboard', report: 'Báo cáo', game: 'Trò chơi' };
+const TAB_KINDS = { slides: ['slides'], dashboard: ['dashboard'], docs: ['report', 'minutes'], diagram: ['diagram'], web_design: ['web_design'], game: ['game'] };
 const tabOf = kind => Object.keys(TAB_KINDS).find(t => TAB_KINDS[t].includes(kind)) || 'docs';
 const inTab = (a, tab) => (TAB_KINDS[tab] || []).includes(a.kind);
-const VISUAL_KINDS = new Set(['dashboard', 'slides', 'web_design', 'diagram', 'report']);
+const VISUAL_KINDS = new Set(['dashboard', 'slides', 'web_design', 'diagram', 'report', 'game']);
 function newTurn(prompt, via = 'chat') {
   const t = { prompt, via, steps: [], tools: [], response: null, artifact: null, error: null, done: false };
   S.room.turns.push(t); return t;
@@ -2910,6 +2976,7 @@ async function renderArtifactPane() {
         diagram: [`Nhờ ${AN()} vẽ sơ đồ tư duy từ nội dung đang bàn, rồi bấm vào từng ý để nghe ${AN()} giải thích.`, 'Vẽ sơ đồ các ý chính', 'Vẽ sơ đồ tư duy các ý chính đang bàn trong cuộc họp: quyết định, việc cần làm, người phụ trách, rủi ro'],
         web_design: [`Nhờ ${AN()} phác thảo giao diện cho ý tưởng trong cuộc họp.`, 'Phác thảo giao diện', 'Thiết kế giao diện web cho ý tưởng chính đang bàn'],
         slides: [`Nhờ ${AN()} soạn bộ slide từ nội dung cuộc họp, rồi trình chiếu và điều khiển bằng giọng nói.`, 'Soạn slide báo cáo', 'Làm slide báo cáo tiến độ và các quyết định của cuộc họp'],
+        game: [`Nhờ ${AN()} tạo trò chơi có thưởng: ${AN()} tự soạn câu hỏi và làm MC dẫn trên màn hình. Mọi người nói đáp án hoặc quét mã QR để chơi trên điện thoại.`, 'Tạo trò chơi có thưởng', 'Tạo một trò chơi có thưởng để mọi người tương tác'],
       }[R.tab];
       pane.innerHTML = `<div class="text-muted"><p class="mb-3">${hint[0]}${R.meeting.minutes_status === 'failed' && R.tab === 'docs' ? ' Lần lập tự động vừa rồi thất bại.' : ''}</p>
         <button class="btn btn-ghost btn-sm" data-act="quick" data-prompt="${esc(hint[2])}">${hint[1]}</button></div>`;
@@ -2953,6 +3020,9 @@ async function renderArtifactPane() {
     } catch (e) {
       if (currentArtifact() === art && S.room.tab === 'diagram') host.outerHTML = `<p class="mb-2" style="color:rgb(var(--danger))">Không vẽ được sơ đồ: ${esc(e.message || e)}</p><pre class="text-[12px] text-muted whitespace-pre-wrap">${esc(parseDiagram(art.content).code || art.content)}</pre>`;
     }
+  } else if (art.kind === 'game') {
+    bar.classList.add('hidden');
+    pane.innerHTML = gamePanelHtml(art);
   } else if (art.kind === 'web_design') {
     const mobile = R.vp === 'mobile';
     pane.innerHTML = `<div class="h-full w-full grid place-items-center"><iframe title="Bản thiết kế giao diện" sandbox="allow-scripts allow-modals allow-forms"
@@ -4400,6 +4470,198 @@ function applyExplained(ev) {
 /* =====================================================================
    SÂN KHẤU: TRÌNH CHIẾU CÙNG TRỢ LÝ
    ===================================================================== */
+/* =====================================================================
+   TRÒ CHƠI CÓ THƯỞNG (14/10/2026): trợ lý thiết kế và dẫn trên màn hình trình chiếu
+   ===================================================================== */
+const GM = { qrLib: null, beepCtx: null, lastPhase: '', lastQi: -1, ticked: -1, skew: 0 };
+const GM_LETTER = 'ABCD';
+function parseGame(content) { try { const g = JSON.parse(content || '{}'); return g && Array.isArray(g.questions) ? g : null; } catch (e) { return null; } }
+function gameFor(art) { const R = S.room; return R && R.game && art && R.game.artifact_id === art.id ? R.game : null; }
+function playUrl(code) { return `${(typeof API_BASE === 'string' && API_BASE) || location.origin}/play/${encodeURIComponent(code)}`; }
+function gmLeft(g) { return g && g.deadline ? Math.max(0, g.deadline - (Date.now() / 1000 + GM.skew)) : 0; }
+function gmBeep(freq, dur = 0.12, vol = 0.05) {
+  try {
+    GM.beepCtx = GM.beepCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const c = GM.beepCtx, o = c.createOscillator(), gn = c.createGain();
+    o.frequency.value = freq; o.type = 'sine'; gn.gain.value = vol;
+    o.connect(gn); gn.connect(c.destination); o.start(); gn.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + dur); o.stop(c.currentTime + dur + 0.02);
+  } catch (e) { /* trình duyệt chặn âm thanh: bỏ qua */ }
+}
+function gmConfetti(host) {
+  if (!host || REDUCED_MOTION) return;
+  const box = document.createElement('div'); box.className = 'gm-confetti';
+  const colors = ['#FFB700', '#8235E4', '#3B82F6', '#18B86A', '#FF6B6B', '#fff'];
+  box.innerHTML = Array.from({ length: 70 }, () => `<i style="left:${Math.random() * 100}%;background:${colors[Math.floor(Math.random() * colors.length)]};animation-duration:${2.2 + Math.random() * 2.2}s;animation-delay:${Math.random() * .6}s"></i>`).join('');
+  host.appendChild(box); setTimeout(() => box.remove(), 5200);
+}
+async function gmQr(el, url) {
+  if (!el) return;
+  try {
+    if (!window.qrcode) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js');
+    const qr = window.qrcode(0, 'M'); qr.addData(url); qr.make();
+    el.innerHTML = qr.createSvgTag({ cellSize: 8, margin: 2, scalable: true });
+  } catch (e) { el.innerHTML = '<p style="padding:30px 0">Mở link bên dưới trên điện thoại để chơi</p>'; }
+}
+function gmOpts(g, q, mode) {
+  const rv = g.reveal;
+  const total = rv ? Math.max(1, rv.counts.reduce((a, b) => a + b, 0)) : 1;
+  return `<div class="gm-opts ${mode === 'wait' ? 'gm-wait' : ''}">${q.options.map((o, i) => {
+    const cls = rv && mode === 'reveal' ? (i === rv.answer ? 'gm-right' : 'gm-wrong') : '';
+    const n = rv && mode === 'reveal' ? rv.counts[i] || 0 : null;
+    return `<div class="gm-opt gm-o${i} ${cls}"><b>${q.type === 'truefalse' ? (i === 0 ? '✓' : '✗') : GM_LETTER[i]}</b><span>${esc(o)}</span>
+      ${n != null ? `<span class="n">${n} người</span><span class="fill" style="width:${(n / total) * 100}%"></span>` : ''}</div>`;
+  }).join('')}</div>`;
+}
+function gmBoardHtml(g, n = 8) {
+  const rows = (g.leaderboard || []).slice(0, n);
+  const max = Math.max(1, ...rows.map(r => r.points || 0));
+  if (!rows.length) return '<p class="text-muted">Chưa có người chơi nào.</p>';
+  return `<div class="gm-board">${rows.map((r, i) => `<div class="gm-row ${g.format === 'golden_bell' && !r.alive ? 'gm-out' : ''}"><span class="rk">${i + 1}</span>
+    <span class="nm"><i style="width:${Math.max(4, (r.points / max) * 100)}%"></i><span>${esc(r.name)}${r.via === 'phone' ? ' 📱' : ''}</span></span>
+    <span class="pt">${g.format === 'golden_bell' ? (r.alive ? 'trụ lại' : 'bị loại') : `${r.points} điểm`}</span></div>`).join('')}</div>`;
+}
+/** Nội dung trò chơi trên màn hình trình chiếu (g: trạng thái lượt chơi đang chạy, hoặc null để xem trước). */
+function gameStageHtml(art, g) {
+  const d = parseGame(art.content) || { title: art.title, questions: [] };
+  const fmtName = (g ? g.format : d.format) === 'golden_bell' ? 'Rung chuông vàng' : 'Đấu trường tri thức';
+  if (!g) {
+    return `<div class="gm"><div class="gm-top"><span class="gm-pill">${esc(fmtName)}</span><span class="gm-pill gm-gold">${(d.questions || []).length} câu hỏi</span></div>
+      <div class="gm-title">${esc(d.title || 'Trò chơi')}</div><p class="text-[18px] text-muted">${esc(d.theme || '')}</p>
+      <div class="gm-prize">🎁 <span>Phần thưởng: <b>${esc(d.prize || '')}</b></span></div>
+      <p class="text-muted">Bấm "Bắt đầu chơi" bên dưới, hoặc nói "${esc(AN())} ơi, bắt đầu trò chơi".</p></div>`;
+  }
+  const q = g.question;
+  const head = `<div class="gm-top"><div class="flex flex-wrap gap-2"><span class="gm-pill">${esc(fmtName)}</span>
+      ${g.qi >= 0 && g.phase !== 'final' && g.phase !== 'lucky' ? `<span class="gm-pill gm-gold">Câu ${g.qi + 1}/${g.total}</span>` : ''}</div>
+    <span class="gm-pill">${g.format === 'golden_bell' && g.qi >= 0 ? `${g.alive}/${g.players} người trụ lại` : `${g.players} người chơi`}</span></div>`;
+  if (g.phase === 'lobby') {
+    const url = playUrl(g.code);
+    return `<div class="gm">${head}<div class="gm-lobby"><div>
+        <div class="gm-title">${esc(g.title)}</div><p class="text-[20px] mt-2 text-muted">${esc(g.theme || '')}</p>
+        <ul class="gm-rules">${(g.rules || []).map(r => `<li>${esc(r)}</li>`).join('')}
+          <li>Nói to, rõ đáp án: "Đáp án B", "câu C"; câu Đúng/Sai thì nói "Đúng" hoặc "Sai"</li></ul>
+        <div class="gm-prize">🎁 <span>Phần thưởng: <b>${esc(g.prize || '')}</b></span></div></div>
+      <div class="gm-qr"><div data-gm-qr></div><div style="font-weight:800;font-size:18px;margin-top:6px">Quét để chơi trên điện thoại</div>
+        <div class="u">${esc(url)}</div></div></div>
+      <div class="gm-chips">${(g.leaderboard || []).map(r => `<span class="gm-chip">${esc(r.name)}</span>`).join('')}</div></div>`;
+  }
+  if (q && ['reading', 'answering', 'closing'].includes(g.phase)) {
+    const left = gmLeft(g);
+    const status = g.phase === 'reading' ? `${esc(AN())} đang đọc câu hỏi...` : g.phase === 'closing' ? 'Đang chốt đáp án...' : '';
+    return `<div class="gm">${head}<div class="gm-q">${esc(q.q)}</div>${gmOpts(g, q, g.phase === 'answering' ? '' : 'wait')}
+      <div class="gm-timer">${g.phase === 'answering' ? `<div class="gm-bar"><i data-gm-bar style="width:${(left / q.time) * 100}%"></i></div><span class="gm-sec ${left <= 3 ? 'hot' : ''}" data-gm-sec>${Math.ceil(left)}</span>`
+        : `<span class="text-[20px] text-muted">${status}</span>`}</div>
+      <div class="gm-chips">${g.n_answered ? `<span class="text-muted mr-1">Đã trả lời (${g.n_answered}):</span>` : ''}${(g.answered || []).map(n => `<span class="gm-chip">${esc(n)}</span>`).join('')}</div></div>`;
+  }
+  if (q && g.phase === 'reveal' && g.reveal) {
+    const rv = g.reveal;
+    const gains = (rv.gains || []).slice(0, 5).map(x => `<span class="gm-chip">${esc(x.name)} +${x.points}</span>`).join('');
+    return `<div class="gm" data-gm-celebrate="${(rv.gains || []).length ? 1 : 0}">${head}<div class="gm-q">${esc(q.q)}</div>${gmOpts(g, q, 'reveal')}
+      ${rv.explain ? `<div class="gm-explain">💡 ${esc(rv.explain)}</div>` : ''}
+      <div class="gm-chips">${rv.fastest ? `<span class="gm-pill gm-gold">⚡ Nhanh nhất: ${esc(rv.fastest)}</span>` : ''}${gains}
+        ${rv.revived ? '<span class="gm-pill">Cả phòng cùng sai: cứu trợ!</span>' : ''}${(rv.eliminated || []).length ? `<span class="text-muted">Bị loại: ${rv.eliminated.map(esc).join(', ')}</span>` : ''}</div></div>`;
+  }
+  if (g.phase === 'scores') return `<div class="gm">${head}<div class="gm-title" style="font-size:clamp(28px,3.4vw,52px)">Bảng điểm</div>${gmBoardHtml(g)}</div>`;
+  if (g.phase === 'lucky' && g.lucky) {
+    return `<div class="gm">${head}<div class="gm-title" style="text-align:center">Quay số may mắn 🎁</div>
+      <div class="gm-slot" data-gm-slot>...</div><p class="text-center text-muted">Một phần quà cho người đã chơi (không tính người thắng)</p></div>`;
+  }
+  if (g.phase === 'final' || g.phase === 'stopped') {
+    const w = g.winners || [];
+    const top = (g.leaderboard || []).slice(0, 3);
+    const order = [top[1], top[0], top[2]];
+    const podium = g.format === 'golden_bell' && w.length > 3
+      ? `<div class="gm-chips" style="justify-content:center">${w.map(x => `<span class="gm-pill gm-gold">🏆 ${esc(x.name)}</span>`).join('')}</div>`
+      : `<div class="gm-podium">${order.map((r, k) => r ? `<div class="gm-step gm-s${[2, 1, 3][k]}"><div class="who">${[2, 1, 3][k] === 1 ? '👑 ' : ''}${esc(r.name)}</div>
+          <div class="pts">${g.format === 'golden_bell' ? (r.alive ? 'trụ lại' : '') : `${r.points} điểm`}</div><div class="blk">${[2, 1, 3][k]}</div></div>` : '<div></div>').join('')}</div>`;
+    return `<div class="gm" data-gm-celebrate="${g.phase === 'final' && w.length ? 1 : 0}">${head}
+      <div class="gm-title" style="text-align:center">${g.phase === 'stopped' ? 'Trò chơi đã dừng' : w.length ? `Chúc mừng ${esc(w.map(x => x.name).join(', '))}!` : 'Cảm ơn cả nhà!'}</div>
+      ${podium}
+      <div class="gm-prize" style="justify-content:center">🎁 <span>Phần thưởng: <b>${esc(g.prize || '')}</b>${g.lucky ? ` · May mắn: <b>${esc(g.lucky.winner)}</b>` : ''}</span></div></div>`;
+  }
+  return `<div class="gm">${head}<div class="gm-title">${esc(g.title)}</div></div>`;
+}
+function gameNavHtml(art, g) {
+  const btn = (act, text, primary) => `<button class="btn ${primary ? 'btn-primary' : 'btn-ghost'} btn-sm" data-act="game-${act}" data-aid="${art.id}">${text}</button>`;
+  if (!g || !['lobby', 'reading', 'answering', 'closing', 'reveal', 'scores', 'lucky'].includes(g.phase)) return btn('play', g ? 'Chơi lại' : 'Bắt đầu chơi', true);
+  if (g.phase === 'lobby') return btn('start', 'Bắt đầu', true) + btn('stop', 'Dừng');
+  return btn('next', g.phase === 'answering' ? 'Chốt đáp án' : 'Câu tiếp') + btn('scores', 'Đọc bảng điểm') + btn('stop', 'Dừng trò chơi');
+}
+function mountGameFrame(frame, art) {
+  const g = gameFor(art);
+  frame.innerHTML = `<div class="stage-scroll" style="position:relative;width:100%;height:100%">${gameStageHtml(art, g)}</div>`;
+  const qr = $('[data-gm-qr]', frame); if (qr && g) gmQr(qr, playUrl(g.code));
+  const cele = $('[data-gm-celebrate="1"]', frame); if (cele) gmConfetti(frame.firstElementChild);
+  gmSlot(frame, g);
+}
+function gmSlot(root, g) {
+  const el = $('[data-gm-slot]', root); if (!el || !g || !g.lucky) return;
+  const names = g.lucky.names || []; if (!names.length) return;
+  const end = (g.lucky.at - GM.skew) * 1000 + 6000; let i = 0;
+  const tick = () => {
+    if (!document.contains(el)) return;
+    if (Date.now() >= end) { el.textContent = `🎉 ${g.lucky.winner}`; gmBeep(880, .25); gmConfetti(root.firstElementChild); return; }
+    el.textContent = names[i++ % names.length]; gmBeep(420 + (i % 5) * 40, .04, .03);
+    setTimeout(tick, 70 + Math.max(0, 6000 - (end - Date.now())) / 16);
+  };
+  tick();
+}
+function onGameState(game) {
+  const R = S.room; if (!R) return;
+  const prev = R.game;
+  R.game = game;
+  GM.skew = (game.now || Date.now() / 1000) - Date.now() / 1000;
+  const moved = GM.lastPhase !== game.phase || GM.lastQi !== game.qi;
+  // Lời của MC khớp màn hình: vào câu hỏi mới / công bố đáp án thì bỏ phần đang đọc dở (lời mở màn dài, câu trước...)
+  if (moved && ['reading', 'reveal', 'stopped'].includes(game.phase)) stopVoice();
+  if (game.phase === 'reveal' && moved) gmBeep((game.reveal && (game.reveal.gains || []).length) ? 880 : 330, .3);
+  GM.lastPhase = game.phase; GM.lastQi = game.qi;
+  const art = stageArtifact();
+  if (STAGE.open && art && art.id === game.artifact_id) {
+    const same = prev && prev.phase === game.phase && prev.qi === game.qi && game.phase === 'answering';
+    if (same) {                                  // đang đếm ngược: chỉ cập nhật danh sách đã trả lời, không vẽ lại cả màn
+      const chips = $('#stage-frame .gm-chips'); const tmp = document.createElement('div'); tmp.innerHTML = gameStageHtml(art, game);
+      const fresh = $('.gm-chips', tmp); if (chips && fresh) chips.innerHTML = fresh.innerHTML;
+      $('#stage-nav').innerHTML = `<div class="flex flex-wrap items-center justify-end gap-2">${gameNavHtml(art, game)}</div>`;
+    } else renderStageFrame(true);
+  }
+  if (R.tab === 'game') renderArtifactPane();
+}
+setInterval(() => {                             // đồng hồ đếm ngược trên màn hình + tiếng tích tắc 3 giây cuối
+  const R = S.room; const g = R && R.game; if (!g || g.phase !== 'answering' || !g.question) return;
+  const left = gmLeft(g);
+  const bar = $('[data-gm-bar]'); if (bar) bar.style.width = `${(left / g.question.time) * 100}%`;
+  const sec = $('[data-gm-sec]'); if (sec) { sec.textContent = Math.ceil(left); sec.classList.toggle('hot', left <= 3); }
+  const s = Math.ceil(left);
+  if (STAGE.open && s <= 3 && s > 0 && s !== GM.ticked) { GM.ticked = s; gmBeep(660, .07); }
+}, 200);
+async function gameAction(action, aid) {
+  const R = S.room; if (!R) return;
+  try {
+    const r = await POST(`/api/meetings/${R.id}/game`, { action, artifact_id: aid || null });
+    if (r.game) onGameState(r.game);
+    if (action === 'play') openStage(true);
+  } catch (e) { toast(e.message, 'err'); }
+}
+function gamePanelHtml(art) {
+  const d = parseGame(art.content) || { questions: [] };
+  const g = gameFor(art);
+  const live = g && ['lobby', 'reading', 'answering', 'closing', 'reveal', 'scores', 'lucky'].includes(g.phase);
+  const results = art.meta && art.meta.results;
+  return `<div class="flex flex-col gap-3">
+    <div><div class="text-[20px] font-semibold">${esc(d.title || art.title)}</div>
+      <div class="text-[12.5px] text-muted">${d.format === 'golden_bell' ? 'Rung chuông vàng (sai là bị loại)' : 'Đấu trường tri thức (đúng và nhanh được nhiều điểm)'}, ${(d.questions || []).length} câu. Phần thưởng: ${esc(d.prize || '')}</div></div>
+    ${live ? `<div class="notice notice-info"><b>Đang chơi:</b> ${esc({ lobby: 'chờ bắt đầu', reading: 'đang đọc câu hỏi', answering: 'đang đếm ngược', closing: 'đang chốt đáp án', reveal: 'công bố đáp án', scores: 'bảng điểm', lucky: 'quay số may mắn' }[g.phase] || g.phase)}${g.qi >= 0 ? `, câu ${g.qi + 1}/${g.total}` : ''}. ${g.players} người chơi.
+      <div class="flex flex-wrap gap-2 mt-2">${gameNavHtml(art, g)}<button class="btn btn-ghost btn-sm" data-act="stage-open">Mở màn hình trình chiếu</button></div></div>`
+      : `<div class="flex flex-wrap gap-2"><button class="btn btn-primary btn-sm" data-act="game-play" data-aid="${art.id}">${g || results ? 'Chơi lại trên màn hình' : 'Chơi trên màn hình'}</button></div>`}
+    ${g && (g.leaderboard || []).length ? `<div><div class="text-[12px] text-muted mb-1">Bảng điểm</div>${gmBoardHtml(g, 10)}</div>` : ''}
+    ${results && !live ? `<p class="text-[12.5px] text-muted">Lần chơi gần nhất: ${results.players} người, thắng: ${esc((results.winners || []).map(w => w.name).join(', ') || 'chưa có')}${results.lucky ? `, may mắn: ${esc(results.lucky)}` : ''}.</p>` : ''}
+    <details class="panel p-3"><summary class="cursor-pointer text-[13px]">Câu hỏi và đáp án (chỉ người dẫn xem, đừng chiếu)</summary>
+      <ol class="mt-2 flex flex-col gap-2 text-[13px]" style="list-style:decimal;padding-left:18px">${(d.questions || []).map(q => `<li><b>${esc(q.q)}</b>
+        <div class="text-muted">${q.options.map((o, i) => `${i === q.answer ? '<b style="color:rgb(var(--accent))">' : ''}${q.type === 'truefalse' ? '' : GM_LETTER[i] + '. '}${esc(o)}${i === q.answer ? ' ✓</b>' : ''}`).join(' · ')}</div></li>`).join('')}</ol></details>
+  </div>`;
+}
+
 const STAGE = { open: false };
 function parseDeck(content) {
   try { const d = typeof content === 'string' ? JSON.parse(content) : content; if (d && Array.isArray(d.slides) && d.slides.length) return d; } catch (e) { /* bỏ qua */ }
@@ -4529,6 +4791,12 @@ async function renderStageFrame(animate, navOnly) {
       <div class="thumbs" aria-label="Danh sách slide">${deck.slides.map((sl, k) => `<button class="thumb" data-act="stage-goto" data-slide="${k}" aria-current="${k === i}">${k + 1}. ${esc(sl.title)}</button>`).join('')}</div>`;
     const cur = $('.thumb[aria-current="true"]', nav); if (cur) cur.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   } else {
+    if (art.kind === 'game') {
+      nav.innerHTML = `<div class="flex flex-wrap items-center justify-end gap-2">${gameNavHtml(art, gameFor(art))}${back}${picker}</div>`;
+      mountGameFrame(frame, art);
+      renderPrompter();
+      return;
+    }
     const canPresent = art.kind === 'dashboard' || art.kind === 'diagram';
     const presentBtn = canPresent ? `<button class="btn ${PRESENT.on ? 'btn-primary' : 'btn-ghost'} btn-sm" data-act="stage-present" aria-pressed="${PRESENT.on}" title="${esc(AN())} đi qua từng phần, phần đang nói sáng lên (nói: 'thuyết trình ${art.kind === 'diagram' ? 'sơ đồ' : 'dashboard'} này')">${PRESENT.on ? 'Dừng thuyết trình' : 'Thuyết trình'}</button>` : '';
     nav.innerHTML = `<div class="flex flex-wrap items-center justify-end gap-2">${back}${presentBtn}${OPEN_DOC_BTN}${picker}</div>`;
@@ -6094,6 +6362,8 @@ document.addEventListener('click', async e => {
   const mid = el.dataset.mid ? parseInt(el.dataset.mid, 10) : null;
   switch (act) {
     case 'create-meeting': return openCreateMeeting();
+    case 'game-play': case 'game-start': case 'game-next': case 'game-scores': case 'game-stop':
+      return gameAction(act.slice(5), el.dataset.aid ? parseInt(el.dataset.aid, 10) : null);
     case 'tpl-manage': return openTemplates();
     case 'minutes-regen': if (S.room) openMeetingTemplate(S.room, true); return;
     case 'hub-group': location.hash = el.dataset.gid ? `#/g/${el.dataset.gid}` : '#/'; return;

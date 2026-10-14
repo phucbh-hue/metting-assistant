@@ -1902,6 +1902,22 @@ async def generate_report(meeting_id: int, prompt_request: str, context_text: st
     return save_report(meeting_id, md, prompt_request)
 
 
+async def generate_game(meeting_id: int, prompt_request: str, context_text: str = "", data_text: str = "") -> Dict[str, Any]:
+    """Trò chơi có thưởng (meeting/game.py): trợ lý thiết kế câu hỏi từ nội dung cuộc họp và dữ liệu tra cứu."""
+    from meeting import game
+    set_meeting(meeting_id, "trò chơi")
+    raw = await _call_llm(game.GAME_SYSTEM, _data_prompt(prompt_request, context_text[-12000:], data_text, None),
+                          max_tokens=3500)
+    try:
+        g = game.normalize(_json_from_text(raw))
+    except ValueError as e:
+        raise RuntimeError(str(e))
+    content = json.dumps(g, ensure_ascii=False)
+    aid = db.save_artifact(meeting_id=meeting_id, kind="game", title=f"Trò chơi: {g['title'][:60]}", content=content,
+                           prompt_trigger=prompt_request)
+    return {"id": aid, "kind": "game", "title": f"Trò chơi: {g['title'][:60]}", "content": content, "version": 1}
+
+
 # ==============================================================================
 # 4. TRÒ CHUYỆN CO-DESIGN HAI CHIỀU (CONVERSATIONAL CO-DESIGN REFINEMENT)
 # ==============================================================================

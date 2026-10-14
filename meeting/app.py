@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field  # noqa: E402
 
 from meeting import (artifacts, auth, bd, cli_llm, db, decks, drive_sync, envfile, gcalendar,  # noqa: E402
                      google_oauth, group_chat, group_kb, groups, live, llm, mcp, meet_bots, recall, recap_export,
-                     minutes_templates, recording, tts, user_llm, user_prefs, voice, websearch, wikibox)
+                     game, minutes_templates, recording, tts, user_llm, user_prefs, voice, websearch, wikibox)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("meeting.app")
@@ -1139,6 +1139,76 @@ async def google_disconnect(request: Request):
     if u:
         await google_oauth.disconnect(u["email"])
     return {"available": auth.ENABLED and google_oauth.configured(), **google_oauth.status((u or {}).get("email"))}
+
+
+# ==============================================================================
+# TRÒ CHƠI CÓ THƯỞNG (meeting/game.py): trợ lý thiết kế và dẫn; người chơi nói đáp án hoặc chơi trên điện thoại
+# ==============================================================================
+class GameActionReq(BaseModel):
+    action: str = Field(..., max_length=20)            # play (bắt đầu lượt mới từ artifact_id), start, next, scores, stop
+    artifact_id: Optional[int] = None
+
+
+class PlayJoinReq(BaseModel):
+    name: str = Field(..., max_length=60)
+
+
+class PlayAnswerReq(BaseModel):
+    pid: str = Field(..., max_length=40)
+    choice: int = Field(..., ge=0, le=3)
+
+
+@app.post("/api/meetings/{mid}/game")
+async def meeting_game(mid: int, req: GameActionReq):
+    """Điều khiển trò chơi trên màn hình trình chiếu (nút Bắt đầu, Câu tiếp, Bảng điểm, Dừng, Chơi lại)."""
+    s = await _session_or_404(mid)
+    try:
+        if req.action == "play":
+            art = await s._get_artifact(req.artifact_id)
+            if not art or art.get("meeting_id") != mid or art.get("kind") != "game":
+                raise HTTPException(status_code=404, detail="Không tìm thấy trò chơi trong cuộc họp này")
+            if not s.is_live():
+                raise HTTPException(status_code=400, detail="Cuộc họp đã kết thúc")
+            return {"game": await s.start_game(art)}
+        if req.action not in ("start", "next", "scores", "stop"):
+            raise HTTPException(status_code=400, detail="Lệnh không hợp lệ")
+        return {"game": await s.game_command(req.action)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+def _play(code: str):
+    g = game.by_code(code)
+    if g is None:
+        raise HTTPException(status_code=404, detail="Trò chơi không còn mở (hỏi người dẫn mã mới)")
+    return g
+
+
+@app.get("/play/{code}")
+def play_page(code: str):
+    """Trang chơi trên điện thoại (quét mã QR trên màn hình trình chiếu). Không cần đăng nhập: mã ngẫu nhiên của lượt."""
+    return FileResponse(str(Path(__file__).resolve().parent / "play.html"), media_type="text/html",
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.get("/play/{code}/state")
+async def play_state(code: str, pid: str = ""):
+    return _play(code).public(pid=pid[:40] or None)
+
+
+@app.post("/play/{code}/join")
+async def play_join(code: str, req: PlayJoinReq):
+    try:
+        return {"pid": _play(code).join(req.name)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/play/{code}/answer")
+async def play_answer(code: str, req: PlayAnswerReq):
+    if not _play(code).answer_phone(req.pid, req.choice):
+        raise HTTPException(status_code=409, detail="Không nhận được câu trả lời (hết giờ hoặc đã trả lời)")
+    return {"ok": True}
 
 
 # ==============================================================================

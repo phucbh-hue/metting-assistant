@@ -533,9 +533,9 @@ def tool_label(tool: str) -> str:
     return "kho tri thức WikiBox" if tool.startswith(WIKI_PREFIX) else TOOL_LABELS.get(tool, tool)
 
 
-ARTIFACT_KINDS = ("dashboard", "report", "slides", "web_design", "diagram", "minutes")
+ARTIFACT_KINDS = ("dashboard", "report", "slides", "web_design", "diagram", "minutes", "game")
 KIND_NAMES = {"dashboard": "dashboard", "report": "báo cáo nhanh", "slides": "bộ slide", "web_design": "trang web",
-              "diagram": "sơ đồ", "minutes": "biên bản"}
+              "diagram": "sơ đồ", "minutes": "biên bản", "game": "trò chơi"}
 MAX_TOOL_ROUNDS = 2
 
 AGENT_SYSTEM = """Bạn là {{NAME}}, trợ lý AI ngồi cùng cuộc họp của UrBox (mọi người gọi bạn là "{{NAME}}").
@@ -551,7 +551,7 @@ Cách làm việc:
 2. Đủ dữ liệu (hoặc không cần tra cứu) thì trả về MỘT JSON duy nhất:
 {"thought": "suy luận ngắn",
  "insights": [{"kind": "risk|todo|improve|good|info", "text": "điều em phát hiện, 1 câu cụ thể"}],
- "artifact_needed": "dashboard" | "report" | "slides" | "web_design" | "diagram" | "minutes" | null,
+ "artifact_needed": "dashboard" | "report" | "slides" | "web_design" | "diagram" | "minutes" | "game" | null,
  "artifact_prompt": "mô tả chi tiết cho bộ tạo sản phẩm: dùng dữ liệu nào, biểu đồ/bố cục nào",
  "report_markdown": "nội dung chi tiết để HIỂN THỊ trên màn hình (markdown: gạch đầu dòng, bảng)",
  "show": {"artifact_id": id trong "Nội dung đã có", "slide": số slide tính từ 1 hoặc null} hoặc null,
@@ -564,6 +564,8 @@ Chọn sản phẩm (artifact_needed):
 - "slides": slide, bài trình bày. "web_design": trang web, giao diện, landing page, prototype.
 - "diagram": sơ đồ (mặc định là sơ đồ tư duy kiểu NotebookLM, bấm vào ý nào cũng nghe giải thích được), quy trình,
   luồng xử lý, kiến trúc. "minutes": biên bản cuộc họp.
+- "game": trò chơi, đố vui, minigame, câu đố có thưởng để mọi người cùng tương tác; em tự thiết kế câu hỏi và làm MC dẫn
+  luôn trên màn hình (artifact_prompt ghi rõ chủ đề, số câu, phần thưởng, thể thức nếu người dùng có nói).
 - null: câu hỏi ngắn trả lời được ngay trong 1-3 câu.
 
 Màn hình trình chiếu (em điều khiển được):
@@ -590,6 +592,7 @@ _KIND_HINTS = [
     ("slides", r"slide|trình\s*chiếu|thuyết\s*trình|bài\s*trình\s*bày|deck"),
     ("web_design", r"trang\s*web|website|landing|giao\s*diện|\bweb\b|html|prototype"),
     ("diagram", r"sơ\s*đồ|diagram|flowchart|luồng|mind\s*map|tư\s*duy"),
+    ("game", r"trò\s*chơi|\bgame\b|minigame|đố\s*vui|câu\s*đố|\bquiz\b|rung\s*chuông\s*vàng|đấu\s*trường"),
     ("minutes", r"biên\s*bản|minutes"),
     ("report", r"báo\s*cáo|report|tổng\s*hợp|review|liệt\s*kê"),
 ]
@@ -600,6 +603,7 @@ PROGRESS_START = {
     "web_design": "Em đang dựng trang web, mất khoảng một phút ạ.",
     "diagram": "Em đang vẽ sơ đồ.",
     "minutes": "Em đang lập biên bản cuộc họp.",
+    "game": "Em đang thiết kế trò chơi, khoảng nửa phút là xong ạ.",
 }
 
 
@@ -619,6 +623,8 @@ def ack_phrase(command: str) -> str:
         return f"Dạ, em dựng {KIND_NAMES[kind]} ngay, anh chị chờ em chút nhé."
     if kind in ("report", "minutes"):
         return "Dạ, để em tổng hợp ngay."
+    if kind == "game":
+        return "Dạ, em thiết kế trò chơi ngay, cả nhà chờ em chút nhé!"
     return "Dạ, để em xem."
 
 
@@ -891,6 +897,8 @@ def _final_reply(chat: str, kind: Optional[str], art: Optional[Dict[str, Any]], 
     generic = not chat or (len(chat) < 90 and bool(_GENERIC_REPLY.search(chat)))
     if err:
         return (f"{'' if generic else chat + ' '}Em chưa tạo được {KIND_NAMES.get(kind, 'sản phẩm')}: {err}").strip()
+    if art and art.get("kind") == "game":                # lời dẫn của MC nói tiếp ngay sau câu này
+        return f"Dạ, trò chơi \"{str(art.get('title', '')).removeprefix('Trò chơi: ')}\" đã sẵn sàng trên màn hình!"
     if art and generic:
         extra = ""
         if art.get("kind") == "dashboard":
@@ -907,7 +915,7 @@ def _final_reply(chat: str, kind: Optional[str], art: Optional[Dict[str, Any]], 
     return chat
 
 
-EARLY_KINDS = ("dashboard", "slides", "web_design", "diagram")   # sản phẩm lâu: dựng sớm, song song với lời đáp
+EARLY_KINDS = ("dashboard", "slides", "web_design", "diagram", "game")   # sản phẩm lâu: dựng sớm, song song với lời đáp
 
 
 def _artifact_job(kind: str, meeting_id: int, art_prompt: str, context_text: str, data_text: str,
@@ -922,6 +930,8 @@ def _artifact_job(kind: str, meeting_id: int, art_prompt: str, context_text: str
         return artifacts.generate_web_sandbox(meeting_id, art_prompt, context_text, data_text)
     if kind == "diagram":
         return artifacts.generate_diagram(meeting_id, art_prompt, context_text, data_text)
+    if kind == "game":
+        return artifacts.generate_game(meeting_id, art_prompt, context_text, data_text)
     return artifacts.generate_meeting_minutes(meeting_id, segments, (meeting or {}).get("title") or "Biên bản cuộc họp",
                                               meeting=meeting)
 
