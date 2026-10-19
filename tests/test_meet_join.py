@@ -95,11 +95,14 @@ class ManualJoinTests(MeetBase):
         [rec] = self.records()
         self.assertNotEqual(rec["status"], "cancelled")
         self.assertEqual(self.join(meet_url=MEET).json()["bot"]["rid"], rec["rid"])      # bấm lại: không gọi bot thứ hai
+        # người khác dán cùng link: dùng chung bot (không gọi bot thứ hai), có cuộc họp riêng khi bot bắt đầu chép lời
         other = self.join(self.hdr("binh@urbox.vn", "Bình"), meet_url=MEET)
-        self.assertEqual(other.status_code, 400)
-        self.assertIn("đã được mời", other.json()["detail"])
+        self.assertEqual(other.status_code, 200)
+        self.assertEqual((other.json()["bot"]["rid"], other.json()["bot"]["shared_by"]), (rec["rid"], "Nguyễn Văn An"))
         mine = self.client.get("/api/meet-bots", headers=self.h).json()
         self.assertEqual([b["rid"] for b in mine["items"]], [rec["rid"]])
+        theirs = self.client.get("/api/meet-bots", headers=self.hdr("binh@urbox.vn", "Bình")).json()
+        self.assertEqual([b["rid"] for b in theirs["items"]], [rec["rid"]])
         self.assertEqual(len(self.recall.bots), 1)
 
     def test_calendar_bot_reuses_a_pasted_link_bot(self):

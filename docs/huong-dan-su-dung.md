@@ -4,20 +4,22 @@ description: >
   Hướng dẫn cho người dùng nội bộ UrBox: đăng nhập, tạo và chạy cuộc họp, trợ lý AI, trò chơi có thưởng,
   biên bản và mẫu biên bản, nhóm cuộc họp, lịch Google và bot Google Meet, chế độ BD, kho tri thức WikiBox,
   hồ sơ giọng nói và toàn bộ phần Cài đặt. Kèm video demo có phụ đề.
-version: 3.20.0
-updated: 14/10/2026
+version: 3.21.0
+updated: 19/10/2026
 owner: phuc.bh@urbox.vn
 video: huong-dan/video-demo.mp4
 ---
 
 # Hướng dẫn sử dụng UrBox Meeting Copilot
 
-- Phiên bản: 3.20.0. Cập nhật: 14/10/2026. Phụ trách: phuc.bh@urbox.vn.
+- Phiên bản: 3.21.0. Cập nhật: 19/10/2026. Phụ trách: phuc.bh@urbox.vn.
 - Ảnh và video trong tài liệu dùng dữ liệu mẫu và tài khoản giả (`*.demo@urbox.vn`), không có dữ liệu thật.
 - Dữ liệu tra cứu nội bộ của trợ lý (ticket Jira, danh bạ, kiến trúc hệ thống) hiện là dữ liệu mẫu. Kho tri
   thức thật của công ty dùng WikiBox khi người tạo cuộc họp đã kết nối (mục 13.4).
 - Bản 3.20.0 (14/10/2026) chưa có ảnh chụp cho các phần mới: trò chơi, mẫu biên bản, WikiBox, mời bot bằng
   link.
+- Bản 3.21.0 (19/10/2026): nhiều người cùng dùng Copilot trong một cuộc họp Google Meet chỉ cần một bot, mỗi
+  người có cuộc họp riêng (mục 10.6). Phần này chưa có ảnh chụp.
 
 ## Mục lục
 
@@ -531,7 +533,8 @@ Mỗi buổi trong 7 ngày tới hiện:
   - mỗi người trong Meet có một luồng chép lời riêng, đúng tên trong Meet.
 - Kết thúc:
   - mọi người rời Meet thì bot tự rời, cuộc họp kết thúc và biên bản được lập;
-  - bấm **Kết thúc cuộc họp** trong ứng dụng thì bot cũng rời Meet.
+  - bấm **Kết thúc cuộc họp** trong ứng dụng thì bot cũng rời Meet, trừ khi người khác còn dùng chung bot
+    (mục 10.6).
 
 ### 10.4. Họp nửa online nửa trực tiếp
 
@@ -556,6 +559,37 @@ Cuộc họp không có trên lịch của mình (người khác mời, link g�
   Meet...**, dán link. Lời người online được chép vào chính cuộc họp đang mở.
 - Bot không vào được thì trạng thái ghi rõ lý do: chưa ai bấm Cho vào, bị từ chối, cuộc họp chỉ cho người
   trong tổ chức, hoặc tài khoản Recall.ai của công ty hết credit (trang chủ hiện cảnh báo, báo quản trị viên).
+- Bot của người khác đã ở trong cuộc họp đó: không gọi thêm bot. Bạn có cuộc họp riêng nhận cùng lời thoại
+  (mục 10.6). Mời từ menu của phòng họp đang mở thì chính phòng đó nhận lời thoại.
+
+### 10.6. Nhiều người cùng dùng Copilot trong một cuộc họp
+
+Ví dụ 5 người họp trên Google Meet và đều bật bot (hoặc đều dán link mời bot):
+- **Chỉ một bot** vào Meet. Người được hệ thống hẹn bot trước là **người mời bot**. Những người khác thấy dòng
+  "Bot chung do ... mời" ở Lịch sắp tới và ở mục Mời bot vào Google Meet.
+- **Mỗi người khác có cuộc họp riêng** trong danh sách cuộc họp của mình, nhận cùng lời thoại:
+  - mở phòng xem lời thoại và chữ đang nói như bình thường, đầu phòng có nhãn **Bot Meet chung**;
+  - trợ lý, slide, sơ đồ, dashboard, trò chơi tạo trong phòng nào thì chỉ người mở phòng đó thấy;
+  - gọi "Jarvis ơi..." trong Meet: bạn đang mở cuộc họp riêng của mình thì trợ lý trả lời trong phòng của bạn;
+    không mở thì phòng của người mời bot trả lời;
+  - người mời bot đổi tên người nói thì cuộc họp riêng đổi theo, trừ người bạn đã tự sửa tên.
+- **Biên bản**: kết thúc thì mỗi cuộc họp có biên bản riêng, lưu vào Google Drive của chủ cuộc họp đó (thư mục
+  Cuộc họp riêng). Cùng lời thoại, cùng mẫu biên bản thì AI chỉ lập một lần, các cuộc họp dùng chung nội dung.
+- **Nhóm**:
+  - Ai xem được cuộc họp qua nhóm (thành viên hoặc chủ nhóm của nhóm chứa cuộc họp) thì dùng chung cuộc họp
+    đó, không có bản riêng: một biên bản trong thư mục Drive của chủ nhóm, chia sẻ cho thành viên.
+  - Muốn cuộc họp riêng của mình vào nhóm: chọn nhóm cho buổi đó ở Lịch sắp tới, hoặc lúc dán link. Thành
+    viên nhóm đó dùng chung bản này.
+- **Kết thúc**:
+  - bạn bấm **Kết thúc cuộc họp** ở cuộc họp riêng: chỉ cuộc họp của bạn dừng và lập biên bản, bot ở lại cho
+    người khác;
+  - người mời bot kết thúc sớm: cuộc họp riêng còn mở của một người khác nhận âm thanh thay, bot ở lại;
+  - mọi người rời Meet: bot rời, mọi cuộc họp kết thúc, mỗi người có biên bản của mình;
+  - nút **Thôi nhận lời thoại** (trang chủ, mục Mời bot vào Google Meet) chỉ dừng cuộc họp riêng của bạn.
+- **Ai có cuộc họp riêng**: người đã bật công tắc bot và có buổi họp này trên lịch, hoặc người dán link mời
+  bot. Bật muộn giữa buổi thì cuộc họp riêng được tạo ngay, chép bù phần đã nói. Không bật bot thì không có.
+- Cuộc họp riêng không có ghi âm và dữ liệu giọng (âm thanh chỉ ở cuộc họp của người mời bot), nên không có
+  "Phân tích lại người nói".
 
 ## 11. Chế độ BD
 
@@ -763,6 +797,7 @@ WikiBox (`wiki.urbox.dev`) là kho tri thức của công ty. Kết nối rồi 
 | Trò chơi không nhận câu trả lời bằng giọng | Nói ngắn, rõ "Đáp án B" khi đồng hồ đang chạy (sau khi trợ lý đọc xong câu hỏi); hoặc chơi bằng mã QR |
 | "Chỉ quản trị viên được đổi cài đặt chung" | Nhờ quản trị viên đổi |
 | Không thấy cuộc họp người khác gửi link | Người đó cần thêm bạn vào nhóm của cuộc họp |
+| Cùng họp Google Meet mà không có cuộc họp của mình | Bật công tắc bot (buổi họp có trên lịch của bạn), hoặc dán link Meet ở trang chủ. Là thành viên nhóm chứa cuộc họp thì mở cuộc họp đó trong trang nhóm (dùng chung) |
 | Không lưu được biên bản về máy | Dùng Chrome hoặc Edge; bấm "Cho phép lưu" khi trang chủ hỏi |
 
 ## 16. Giới hạn cần biết
@@ -783,6 +818,7 @@ WikiBox (`wiki.urbox.dev`) là kho tri thức của công ty. Kết nối rồi 
   Jarvis khoảng 25-40 giây, bảng BD khoảng 15-30 giây.
 - **Gói AI của tôi**: mỗi lần đăng nhập tối đa 6 phút. Bản web chưa hỗ trợ gói Gemini.
 - **Google Meet**: bot nghe tối đa 16 người nói cùng lúc, không vào được phòng nhóm nhỏ (breakout room).
+  Nhiều người dùng chung một bot thì cuộc họp riêng không có ghi âm (mục 10.6).
 - **Trò chơi**: tối đa 300 người chơi mỗi lượt. Câu trả lời bằng giọng chỉ tính trong lúc đếm ngược, câu đầu
   tiên của mỗi người. Phòng ồn hoặc nhiều người nói cùng lúc thì nên chơi bằng điện thoại.
 - **WikiBox**: chỉ đọc; kết quả tìm theo quyền của người tạo cuộc họp.

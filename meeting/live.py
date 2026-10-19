@@ -61,6 +61,8 @@ ECHO_HOLD_S = float(os.getenv("MEET_ECHO_HOLD_S", "2.0"))
 # Mỗi luồng Meet là MỘT người (tắt tách người nói: Soniox đôi khi chia một giọng thành 2 nhãn). Máy phòng họp có nhiều
 # người cùng vào Meet thì đặt MEET_DIARIZE=1 để tách người trong luồng đó như mic.
 MEET_DIARIZE = os.getenv("MEET_DIARIZE", "0") == "1"
+# Cuộc họp riêng (bot Meet dùng chung) lập biên bản sau khi bên nhận âm thanh chốt tên người nói, chờ tối đa ngần này giây
+NAMES_WAIT_S = 120.0
 MIN_ENROLL_S = voice.MIN_ANCHOR_S
 AUTO_ENROLL_AI = os.getenv("AUTO_ENROLL_VOICES", "0").strip().lower() in ("1", "true", "yes", "on")
 
@@ -590,8 +592,17 @@ class MeetingSession:
                                                   else {**s, "raw_embedding": None} for s in segments])
         self.segments: List[Dict[str, Any]] = []
         self._by_seq: Dict[Any, Dict[str, Any]] = {}
+        # Nhiều người dùng Copilot cùng một cuộc họp Google Meet (bản 3.21): một bot, cuộc họp nhận âm thanh gửi bản sao
+        # từng câu sang cuộc họp riêng của từng người (phòng độc lập: sản phẩm AI, biên bản, Drive của riêng người đó).
+        self._targets: Optional[List[Dict[str, Any]]] = None     # bản riêng đang nhận lời thoại (None: chưa đọc)
+        self._src_map: Dict[int, int] = {}                        # bản riêng: seq bên nhận âm thanh -> seq của mình
+        self._fwd_names: Dict[int, Tuple[str, str, str, str]] = {}   # tên đã gửi sang bản riêng (chỉ gửi khi đổi)
+        self._mirror_at = 0.0
+        self.names_final = asyncio.Event()                        # đã chốt tên người nói lúc kết thúc (bản riêng chờ)
         backfill = []
         for s in segments:
+            if s.get("src_seq") is not None and s.get("seq") is not None:
+                self._src_map[int(s["src_seq"])] = int(s["seq"])
             seg = _public_segment(s)
             sid = self.speakers.sid_of(seg["seq"])
             prof = self.speakers.profile(sid)
@@ -744,6 +755,8 @@ class MeetingSession:
                 q.put_nowait(event)
             except asyncio.QueueFull:
                 log.warning("meeting.live: hàng đợi sự kiện client đầy, bỏ qua sự kiện %s", event.get("type"))
+        if event.get("type") == "interim" and self._targets:
+            await self._forward_interim(event)       # chữ đang nói cũng hiện ở bản riêng đang mở
 
     def public_speakers(self) -> List[Dict[str, Any]]:
         out = []
@@ -831,7 +844,7 @@ class MeetingSession:
 
     def _meet_voice_recent(self) -> bool:
         now = time.monotonic()
-        return any(g.active or now - g.last_voice < 5.0 for g in self._gates.values())
+        return now - self._mirror_at < 5.0 or any(g.active or now - g.last_voice < 5.0 for g in self._gates.values())
 
     def _is_echo(self, t_start: float, t_end: float, text: str) -> bool:
         """Câu của mic trùng câu người trong Meet nói cùng lúc (kể cả câu Meet đang nói dở chưa chốt)."""
@@ -866,39 +879,65 @@ class MeetingSession:
             await self._process_locked(it)
 
     async def _process_locked(self, it: Dict[str, Any]):
-        seq, clip, vector, voiced = it["seq"], it["clip"] or b"", it["vector"], it["voiced"]
-        if voiced is None:
-            voiced = voice.voiced_s(clip) if clip else 0.0
-        if vector is None and clip and voiced >= voice.MIN_SEG_S and voice.available():
-            vector = await asyncio.to_thread(voice.embed, clip)
-        force = self._meet_profile(it) if str(it["stream"]).startswith("meet") else None
-        changes = self.speakers.add(key=seq, v=vector, raw_label=it["raw"], t=it["t_start"], voiced=voiced,
-                                    text=it["text"], epoch=it["epoch"], dur=it["t_end"] - it["t_start"],
+        kind = it.get("kind", "segment")
+        if kind == "names":                          # bên nhận âm thanh đổi tên người nói
+            await self._apply_mirror_names(it["profiles"])
+            return
+        if kind == "relabel":                        # bên nhận âm thanh đổi người nói của các câu đã chép
+            await self._apply_mirror_relabel(it["items"])
+            return
+        mirror = bool(it.get("mirror"))
+        seq, clip, vector, voiced = it["seq"], it.get("clip") or b"", it.get("vector"), it.get("voiced")
+        if mirror:                                   # câu chép từ cuộc họp nhận âm thanh: người nói theo bên đó
+            force, voiced = await self._mirror_sid(it), 0.0
+        else:
+            if voiced is None:
+                voiced = voice.voiced_s(clip) if clip else 0.0
+            if vector is None and clip and voiced >= voice.MIN_SEG_S and voice.available():
+                vector = await asyncio.to_thread(voice.embed, clip)
+            force = self._meet_profile(it) if str(it["stream"]).startswith("meet") else None
+        changes = self.speakers.add(key=seq, v=vector, raw_label=it.get("raw"), t=it["t_start"], voiced=voiced,
+                                    text=it["text"], epoch=it.get("epoch", 0), dur=it["t_end"] - it["t_start"],
                                     stream=it["stream"], force_sid=force)
         prof = self.speakers.profile(self.speakers.sid_of(seq))
         seg = {
             "seq": seq, "meeting_id": self.id, "t_start": it["t_start"], "t_end": it["t_end"],
             "speaker_key": prof.sid, "speaker_label": prof.label, "speaker_id": prof.voice_id,
-            "text": it["text"], "is_inferred": prof.origin == "ai", "raw_speaker": it["raw"],
+            "text": it["text"], "is_inferred": prof.origin == "ai", "raw_speaker": it.get("raw"),
             "confidence": round(float(prof.confidence or 0.0), 2),
         }
         self.segments.append(seg)
         self._by_seq[seq] = seg
+        if mirror:
+            self._src_map[int(it["src_seq"])] = seq
         await self.emit({"type": "segment", "segment": seg})
-        if self.game is not None and self.game.active:
+        if self.game is not None and self.game.active and not it.get("backfill"):
             self.game.on_segment(seg)                # trò chơi: câu trả lời bằng giọng nói
         self._db(db.add_segment, self.id, it["t_start"], it["t_end"], prof.label, it["text"],
                  speaker_id=prof.voice_id, confidence=seg["confidence"], is_inferred=seg["is_inferred"],
                  raw_embedding=vector.tolist() if vector is not None else None, seq=seq,
-                 speaker_key=prof.sid, raw_speaker=it["raw"], epoch=it["epoch"], stream=it["stream"],
+                 speaker_key=prof.sid, raw_speaker=it.get("raw"), epoch=it.get("epoch", 0), stream=it["stream"],
                  emb_model=voice.MODEL_ID if vector is not None else None,
-                 voiced=round(float(voiced), 2))
+                 voiced=round(float(voiced), 2), src_seq=it.get("src_seq"))
         await self._apply_relabels([k for k in changes if k != seq])
         await self._sync_speakers()
 
-        await self._check_wake(seg)
+        if mirror:
+            if it.get("backfill"):                   # câu cũ chép bù cho người vào sau: không gọi trợ lý, không gợi ý
+                return
+            if it.get("wake"):                       # chính chủ cuộc họp riêng này gọi trợ lý trong Meet
+                await self._check_wake(seg)
+        else:
+            stream = str(it["stream"])
+            person = self.meet_people.get(stream) if stream.startswith("meet") else None
+            targets = await self._copy_targets()
+            route = self._wake_route(person, targets) if targets else None
+            if targets:
+                await self._forward_segment(seg, it, prof, route)
+            if route is None:                        # người có cuộc họp riêng đang mở gọi trợ lý: phòng của người đó trả lời
+                await self._check_wake(seg)
+            self.identity.notify(seg)
         await self._follow_slide(seg)
-        self.identity.notify(seg)
         if self.meeting.get("group_id"):
             from meeting import bd
             bd.on_segment(self, seg)                 # nhóm BD: gợi ý cho đội BD trên bảng riêng
@@ -1014,6 +1053,7 @@ class MeetingSession:
         if items:
             await self.emit({"type": "segments_relabeled", "items": items})
             self._db(db.update_segments_speaker_by_seqs, self.id, items)
+            await self._forward_relabel(items)
         return len(items)
 
     async def _sync_speakers(self):
@@ -1026,6 +1066,7 @@ class MeetingSession:
             await self.emit({"type": "speakers_split", "source_sid": src, "new_sid": new})
         if not dirty:
             return
+        await self._forward_names(dirty)
         self._db(db.upsert_speakers, self.id, [p.to_dict(with_vector=True) for p in dirty])
         await self.emit({"type": "speakers", "speakers": self.public_speakers()})
         # Hồ sơ đã có tên, đang chờ đủ dữ liệu giọng để lưu mẫu
@@ -1133,6 +1174,9 @@ class MeetingSession:
 
         Dùng dữ liệu đã lưu (vector giọng, nhãn Soniox, epoch). Tên đã đặt được giữ cho hồ sơ mới chứa nhiều
         câu nhất của người đó."""
+        if self._src_map:
+            raise ValueError("Cuộc họp này chép lời từ bot Google Meet dùng chung (không có dữ liệu giọng): người nói "
+                             "theo cuộc họp của người mời bot, sửa tên hoặc đổi người nói của từng câu nếu cần")
         await self.drain()
         rows = await asyncio.to_thread(db.get_segments, self.id, True)
         async with self._lock:
@@ -1267,7 +1311,10 @@ class MeetingSession:
         people = [{"stream": k, "name": v.get("name") or "", "email": v.get("email") or "", "is_host": v.get("is_host"),
                    "mode": self._meet_mode(k), "ignored": self.meet_ignored(k), "speaking": bool(v.get("speaking"))}
                   for k, v in self.meet_people.items()]
-        return {"bot": self.meet_bot, "people": people}
+        out = {"bot": self.meet_bot, "people": people}
+        if self.copy_of:
+            out["copy"] = True          # cuộc họp riêng: lời thoại chép từ bot do người khác mời (bot dùng chung)
+        return out
 
     async def _emit_meet(self):
         await self.emit({"type": "meet", "meet": self.meet_public()})
@@ -1377,6 +1424,207 @@ class MeetingSession:
             return None
         person = self.meet_people.get(stream) or {}
         return self.speakers.pin_profile(stream, person.get("name") or "", float(it["t_start"])).sid
+
+    # ------------------------------------- bot Meet dùng chung: cuộc họp riêng của từng người ---
+    # Nhiều người dùng Copilot trong cùng một cuộc họp Google Meet: chỉ một bot. Cuộc họp nhận âm thanh (của người hẹn bot)
+    # gửi bản sao từng câu, tên người nói, việc đổi người nói sang cuộc họp riêng của từng người kia (meet_bots quyết định
+    # ai có cuộc họp riêng). Cuộc họp riêng là một phòng độc lập: trợ lý, sản phẩm AI, biên bản, Drive của riêng người đó.
+    @property
+    def copy_of(self) -> Optional[int]:
+        """Cuộc họp nhận âm thanh mà cuộc họp này chép lời theo (None: không phải cuộc họp riêng từ bot dùng chung)."""
+        v = (self.meeting.get("meet") or {}).get("copy_of")
+        return int(v) if v else None
+
+    def set_copy_targets(self, targets: List[Dict[str, Any]]):
+        """meet_bots báo các cuộc họp riêng đang nhận lời thoại từ cuộc họp này: [{meeting_id, email, name}]."""
+        self._targets = [dict(t) for t in targets]
+
+    async def _copy_targets(self) -> List[Dict[str, Any]]:
+        if self._targets is None:
+            rid = (self.meeting.get("meet") or {}).get("rid")
+            if not rid or self.copy_of:
+                self._targets = []
+            else:
+                from meeting import meet_bots
+                self._targets = await asyncio.to_thread(meet_bots.targets_for, rid, self.id)
+        return self._targets
+
+    async def _target_sessions(self) -> List[Tuple[Dict[str, Any], "MeetingSession"]]:
+        out = []
+        for t in await self._copy_targets():
+            c = await get_session(int(t["meeting_id"]))
+            if c is not None and not c.disposed and c.id != self.id:
+                out.append((t, c))
+        return out
+
+    @staticmethod
+    def _mirror_info(p: voice.SpeakerProfile) -> Dict[str, Any]:
+        """Người nói gửi sang cuộc họp riêng: khóa gắn hồ sơ (luồng Meet của người đó, hoặc số hồ sơ bên này) và tên."""
+        return {"pin": p.pin or f"src:{p.sid}", "src_sid": p.sid, "name": p.name, "role": p.role, "origin": p.origin,
+                "confidence": round(float(p.confidence or 0.0), 3)}
+
+    def _wake_route(self, person: Optional[Dict[str, Any]], targets: List[Dict[str, Any]]) -> Optional[int]:
+        """Người trong Meet gọi trợ lý mà người đó đang mở cuộc họp riêng của mình: phòng đó trả lời, không phải phòng này.
+        Không mở (hoặc người khác gọi) thì phòng này trả lời như trước."""
+        if not person:
+            return None
+        for t in targets:
+            c = SESSIONS.get(int(t["meeting_id"]))
+            if c is not None and c.subscribers and c.is_live() and same_person(person, t):
+                return c.id
+        return None
+
+    async def _forward_segment(self, seg: Dict[str, Any], it: Dict[str, Any], prof: voice.SpeakerProfile,
+                               route: Optional[int]):
+        stream = str(it["stream"])
+        person = self.meet_people.get(stream) if stream.startswith("meet") else None
+        base = {"kind": "segment", "mirror": True, "src_seq": seg["seq"], "text": seg["text"], "stream": stream,
+                "person": {"name": person.get("name") or "", "email": person.get("email") or ""} if person else None,
+                **self._mirror_info(prof)}
+        for _, c in await self._target_sessions():
+            off = self.started_at - c.started_at                   # cùng một mốc giờ: lệch nhau khi gắn phòng có sẵn
+            c.ingest_mirror(dict(base, t_start=seg["t_start"] + off, t_end=seg["t_end"] + off, wake=route == c.id))
+
+    async def _forward_relabel(self, items: List[Dict[str, Any]]):
+        pairs = await self._target_sessions()
+        if not pairs:
+            return
+        out = []
+        for d in items:
+            p = self.speakers.profile(d.get("speaker_key"))
+            if p is not None:
+                out.append({"src_seq": d["seq"], **self._mirror_info(p)})
+        if out:
+            for _, c in pairs:
+                c.ingest_mirror({"kind": "relabel", "items": out})
+
+    async def _forward_names(self, dirty: List[voice.SpeakerProfile]):
+        pairs = await self._target_sessions()
+        if not pairs:
+            return
+        out = []
+        for p in dirty:
+            if not p.active:
+                continue
+            info = self._mirror_info(p)
+            sig = (info["pin"], info["name"], info["role"], info["origin"])
+            if self._fwd_names.get(p.sid) == sig:
+                continue                                           # chỉ thêm câu, tên không đổi: không gửi
+            self._fwd_names[p.sid] = sig
+            out.append(info)
+        if out:
+            for _, c in pairs:
+                c.ingest_mirror({"kind": "names", "profiles": out})
+
+    async def _forward_interim(self, ev: Dict[str, Any]):
+        stream = str(ev.get("stream") or "")
+        person = self.meet_people.get(stream) if stream.startswith("meet") else None
+        p = self.speakers.profile(ev.get("speaker_key")) if ev.get("speaker_key") is not None else None
+        key = stream if stream.startswith("meet") else (self._mirror_info(p)["pin"] if p is not None else None)
+        for t in list(self._targets or []):
+            c = SESSIONS.get(int(t["meeting_id"]))
+            if c is not None and c.subscribers and c.is_live() and c.id != self.id:
+                await c.mirror_interim(ev, key, person)
+
+    async def attach_copy(self, target: Dict[str, Any], backfill: bool = True, persist: Optional[Callable] = None):
+        """Thêm một cuộc họp riêng (người vào sau): chép bù các câu đã có rồi mới gửi câu mới, đúng thứ tự.
+        persist: ghi danh sách cuộc họp riêng vào bản ghi bot (chạy trong khóa để không lọt câu)."""
+        async with self._lock:
+            targets = list(await self._copy_targets())
+            if persist is not None:
+                await asyncio.to_thread(persist)
+            c = await get_session(int(target["meeting_id"]))
+            if c is not None and backfill:
+                off = self.started_at - c.started_at
+                for seg in list(self.segments):
+                    p = self.speakers.profile(seg.get("speaker_key"))
+                    if p is None:
+                        continue
+                    c.ingest_mirror({"kind": "segment", "mirror": True, "backfill": True, "src_seq": seg["seq"],
+                                     "text": seg["text"], "stream": "mirror", "person": None, "wake": False,
+                                     "t_start": seg["t_start"] + off, "t_end": seg["t_end"] + off, **self._mirror_info(p)})
+            if all(int(t["meeting_id"]) != int(target["meeting_id"]) for t in targets):
+                targets.append(dict(target))
+            self._targets = targets
+
+    # bên nhận (cuộc họp riêng)
+    def ingest_mirror(self, item: Dict[str, Any]):
+        """Câu / tên người nói / đổi người nói chép từ cuộc họp nhận âm thanh, xử lý tuần tự cùng hàng đợi câu."""
+        if self.disposed:
+            return
+        if item.get("kind", "segment") == "segment":
+            if not self.is_live():
+                return
+            person = item.get("person")
+            if person and self.audio_owner is not None and same_person(person, self.mic_user):
+                return                      # máy này vừa bật mic trong phòng vừa vào Meet: mic đã chép câu này
+            if str(item.get("stream") or "").startswith("meet"):
+                self._meet_texts.append((item["t_start"], item["t_end"], self._words(item["text"])))
+                self._mirror_at = time.monotonic()                # mic trong phòng (nếu bật) chặn tiếng vọng của câu này
+            item = dict(item, seq=self.next_seq)
+            self.next_seq += 1
+        self._ensure_workers()
+        self._queue.put_nowait(item)
+
+    async def mirror_interim(self, ev: Dict[str, Any], key: Optional[str], person: Optional[Dict[str, Any]]):
+        if not self.is_live() or (person and self.audio_owner is not None and same_person(person, self.mic_user)):
+            return
+        p = self.speakers.pinned(key) if key else None
+        if ev.get("text"):
+            self.note_interim()
+        await self.emit({"type": "interim", "stream": ev.get("stream"), "text": ev.get("text") or "",
+                         "speaker_key": p.sid if p is not None else None,
+                         "speaker_label": p.label if p is not None else ev.get("speaker_label")})
+
+    async def _mirror_sid(self, it: Dict[str, Any]) -> int:
+        p = self.speakers.mirror_profile(it["pin"], int(it["src_sid"]), float(it["t_start"]))
+        q, keys = self.speakers.mirror_name(p.sid, it.get("name") or "", it.get("role") or "",
+                                            it.get("origin") or "new", float(it.get("confidence") or 0.0))
+        if keys:
+            await self._apply_relabels(keys)
+        return (q or p).sid
+
+    async def _apply_mirror_names(self, profiles: List[Dict[str, Any]]):
+        keys: List[Any] = []
+        for d in profiles:
+            p = self.speakers.pinned(d["pin"])
+            if p is None:
+                continue                    # người này chưa có câu nào ở đây: tên đi kèm câu đầu tiên
+            _, ks = self.speakers.mirror_name(p.sid, d.get("name") or "", d.get("role") or "",
+                                              d.get("origin") or "new", float(d.get("confidence") or 0.0))
+            keys += ks
+        if keys:
+            await self._apply_relabels(sorted(set(keys)))
+        await self._sync_speakers()
+
+    async def _apply_mirror_relabel(self, items: List[Dict[str, Any]]):
+        keys: List[Any] = []
+        for d in items:
+            seq = self._src_map.get(int(d["src_seq"]))
+            seg = self._by_seq.get(seq) if seq is not None else None
+            if seg is None:
+                continue
+            p = self.speakers.mirror_profile(d["pin"], int(d["src_sid"]), float(seg["t_start"]))
+            q, ks = self.speakers.mirror_name(p.sid, d.get("name") or "", d.get("role") or "",
+                                              d.get("origin") or "new", float(d.get("confidence") or 0.0))
+            keys += ks
+            target = q or p
+            if self.speakers.sid_of(seq) != target.sid:
+                self.speakers.reassign(seq, target.sid)
+                keys.append(seq)
+        if keys:
+            await self._apply_relabels(sorted(set(keys)))
+        await self._sync_speakers()
+
+    async def _wait_source_names(self):
+        """Cuộc họp riêng lập biên bản: chờ bên nhận âm thanh chốt tên người nói lúc kết thúc (tên đã áp vào đây)."""
+        src = SESSIONS.get(self.copy_of) if self.copy_of else None
+        if src is not None and not src.disposed and src.meeting.get("minutes_status") == "pending":
+            try:
+                await asyncio.wait_for(src.names_final.wait(), NAMES_WAIT_S)
+            except asyncio.TimeoutError:
+                log.info("meeting.live: chờ tên người nói từ cuộc họp %s quá lâu, lập biên bản luôn", self.copy_of)
+        await self.drain()
 
     # ----------------------------------------------------------------- AI ---
     async def _handle_ai_activation(self, command: str, full_sentence: str, name: str = "", source: str = "voice"):
@@ -2410,6 +2658,7 @@ class MeetingSession:
         if minutes_status:
             asyncio.create_task(self._finalize_minutes())
         else:
+            self.names_final.set()
             self.dispose_if_idle()
         return {"status": "ended", "minutes_status": minutes_status}
 
@@ -2417,18 +2666,25 @@ class MeetingSession:
         status = "failed"
         artifacts.set_meeting(self.id, "biên bản")
         try:
-            try:
-                await self.identity.run(force=True)
-            except Exception as e:
-                log.warning("meeting.live: đoán tên lần cuối lỗi: %s", e)
-            try:   # nhận xét nhanh để trợ lý nói trong lúc chờ lập biên bản
-                items = await artifacts.meeting_insights(self.segments, self.meeting)
-                if items:
-                    await self.emit({"type": "ai_insights", "items": items, "source": "meeting_end"})
-            except Exception as e:
-                log.warning("meeting.live: nhận xét cuối buổi lỗi: %s", e)
+            if self.copy_of is not None:
+                await self._wait_source_names()   # tên người nói theo bên nhận âm thanh (đã chốt lúc kết thúc)
+            if self.copy_of is None or len(self._src_map) < len(self.segments):
+                try:
+                    await self.identity.run(force=True)
+                except Exception as e:
+                    log.warning("meeting.live: đoán tên lần cuối lỗi: %s", e)
+            self.names_final.set()
+            if self.subscribers:
+                try:   # nhận xét nhanh để trợ lý nói trong lúc chờ lập biên bản (không ai mở phòng thì thôi)
+                    items = await artifacts.meeting_insights(self.segments, self.meeting)
+                    if items:
+                        await self.emit({"type": "ai_insights", "items": items, "source": "meeting_end"})
+                except Exception as e:
+                    log.warning("meeting.live: nhận xét cuối buổi lỗi: %s", e)
+            # shared: cuộc họp riêng của nhiều người (bot Meet dùng chung) cùng lời thoại, cùng mẫu thì lập một lần
             art = await artifacts.generate_meeting_minutes(self.id, self.segments, self.title,
-                                                           meeting=self.meeting, speakers=self.public_speakers())
+                                                           meeting=self.meeting, speakers=self.public_speakers(),
+                                                           shared=True)
             status = "done"
             await self.emit({"type": "artifact_created", "artifact": art})
             await self.stage_action("show", artifact_id=art["id"])
@@ -2438,6 +2694,7 @@ class MeetingSession:
             log.warning("meeting.live: lập biên bản lỗi: %s", e)
             await self.emit({"type": "error", "text": f"Không lập được biên bản tự động: {e}"})
         finally:
+            self.names_final.set()
             self.meeting["minutes_status"] = status
             await asyncio.to_thread(db.update_meeting, self.id, {"minutes_status": status}, True)
             await self.emit({"type": "meeting_status", "status": "ended", "meeting": self.meeting,

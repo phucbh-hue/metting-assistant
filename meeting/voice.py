@@ -490,6 +490,42 @@ class MeetingSpeakers:
             self.dirty.add(p.sid)
         return p
 
+    def mirror_profile(self, key: str, sid: int, t: float = 0.0) -> SpeakerProfile:
+        """Hồ sơ trong cuộc họp riêng nhận lời thoại từ cuộc họp khác (nhiều người dùng chung một bot Meet): gắn với hồ sơ
+        `key` bên kia, giữ đúng số `sid` (cùng nhãn "Người nói N") khi số đó còn trống."""
+        p = self.pinned(key)
+        if p is None:
+            if sid in self.profiles:
+                p = self._new_profile(t)
+            else:
+                p = SpeakerProfile(sid=int(sid), first_t=t, last_t=t)
+                self.profiles[p.sid] = p
+                self.next_sid = max(self.next_sid, p.sid + 1)
+                self.dirty.add(p.sid)
+            p.pin = key
+        return p
+
+    def mirror_name(self, sid: int, name: str, role: str = "", origin: str = "new",
+                    confidence: float = 0.0) -> Tuple[Optional[SpeakerProfile], List[Any]]:
+        """Tên theo cuộc họp bên kia. Không khóa hồ sơ; người dùng đã tự đặt tên trong cuộc họp này thì giữ tên đó.
+        Trả về (hồ sơ sau cùng, các câu đổi nhãn)."""
+        p = self.profile(sid)
+        if p is None or p.locked:
+            return p, []
+        name = (name or "").strip()
+        if (p.name, p.role, p.origin) == (name, role or p.role, origin):
+            return p, []
+        if not name:
+            p.name, p.voice_id, p.origin, p.confidence = "", None, origin, float(confidence or 0.0)
+            self.dirty.add(p.sid)
+            return p, self.keys_of(p.sid)
+        twin = self.find_by_name(name, exclude=p.sid)
+        keep = twin.locked if twin is not None else False
+        q, keys = self.rename(p.sid, name, role=role, origin=origin, confidence=float(confidence or 0.0))
+        if q is not None:
+            q.locked = keep                      # tên đi theo bên kia, không phải người dùng tự đặt
+        return q, keys
+
     def _new_profile(self, t: float = 0.0) -> SpeakerProfile:
         p = SpeakerProfile(sid=self.next_sid, first_t=t, last_t=t)
         self.profiles[p.sid] = p

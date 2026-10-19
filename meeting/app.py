@@ -1058,6 +1058,8 @@ async def delete_meeting_record(mid: int, request: Request):
     if m is not None and not _can_manage_meeting(_user(request), m):
         raise HTTPException(status_code=403, detail="Chỉ người tạo cuộc họp hoặc chủ nhóm được xóa cuộc họp này")
     s = live.SESSIONS.get(mid)
+    if m is not None and m.get("status") != "ended" and recall.enabled():
+        await meet_bots.on_meeting_ended(mid)      # bot Meet: người khác nhận thay, hoặc bot rời (không ở lại vô ích)
     if s is not None:
         await s.close()
     await asyncio.to_thread(recording.delete, mid)
@@ -1462,14 +1464,15 @@ def _calendar_payload(email: str, events: List[Dict[str, Any]], error: str = "")
            "events": []}
     for ev in events:
         rec = meet_bots.find_for_event(email, ev)
-        bot = meet_bots.public(rec) if rec and rec.get("status") != "cancelled" else None
+        # bot dùng chung: cuộc họp anh chị mở được là cuộc họp riêng của mình (hoặc cuộc họp của nhóm mình)
+        bot = meet_bots.public_for(rec, email) if rec and rec.get("status") != "cancelled" else None
         names = [a.get("name") or a.get("email") for a in ev.get("attendees") or []]
         out["events"].append({
             **{k: ev.get(k) for k in ("id", "series", "title", "start", "end", "all_day", "meet_url", "declined",
                                       "link", "is_organizer")},
             "attendees": len(names), "attendee_names": names[:12], "skipped": ev["id"] in skip,
             "group_id": series_groups.get(ev.get("series") or ev["id"]), "bot": bot,
-            "bot_mine": bool(bot) and bot.get("owner") == email})
+            "bot_mine": bool(bot) and bot.get("meeting_id") is not None})
     return out
 
 
@@ -1588,8 +1591,8 @@ async def meet_bot_join(req: MeetJoinReq, request: Request):
         rec = await meet_bots.join_now(u["email"], u.get("name") or "", req.meet_url, req.title, gid, req.meeting_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {"bot": dict(meet_bots.public(rec), title=rec.get("title"), meet_url=rec.get("meet_url"), manual=True),
-            "problem": recall.account_problem()}
+    return {"bot": dict(meet_bots.public_for(rec, u["email"]), title=rec.get("title"), meet_url=rec.get("meet_url"),
+                        manual=True), "problem": recall.account_problem()}
 
 
 @app.post("/api/meet-bots/{rid}/leave")
@@ -1602,7 +1605,9 @@ async def meet_bot_leave(rid: str, request: Request):
         raise HTTPException(status_code=404, detail="Không tìm thấy bot")
     except recall.RecallError as e:
         raise HTTPException(status_code=502, detail=str(e))
-    return {"bot": dict(meet_bots.public(rec), title=rec.get("title"), meet_url=rec.get("meet_url"))}
+    # left: bot rời Google Meet thật; False: chỉ cuộc họp của anh chị thôi nhận lời thoại, bot ở lại cho người khác
+    return {"bot": dict(meet_bots.public_for(rec, u["email"]), title=rec.get("title"), meet_url=rec.get("meet_url")),
+            "left": rec.get("status") not in meet_bots.ACTIVE}
 
 
 @app.put("/api/meetings/{mid}/meet-people/{stream}")
@@ -2167,7 +2172,10 @@ async def meeting_insights(mid: int, payload: Optional[Dict[str, Any]] = None):
 async def reanalyze_meeting(mid: int):
     """Chạy lại nhận diện người nói cho toàn bộ cuộc họp (giữ tên đã đặt)."""
     s = await _session_or_404(mid)
-    res = await s.reanalyze()
+    try:
+        res = await s.reanalyze()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     await _finish_op(s)
     return res
 

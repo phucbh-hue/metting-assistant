@@ -7,7 +7,7 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng người Việt tự nhiên của Soniox, đọc rõ cả từ tiếng
 Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy, miễn phí), vừa làm vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.20.0 - cập nhật 14/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.21.0 - cập nhật 19/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Hướng dẫn sử dụng cho người dùng (đăng nhập, mọi tính năng, Cài đặt) kèm video demo:
   [docs/huong-dan-su-dung.md](docs/huong-dan-su-dung.md).
 - Bộ slide demo để Jarvis tự trình bày (mở tệp, chọn "Theo ghi chú trong tệp"):
@@ -16,6 +16,26 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
+
+## Bản 3.21: nhiều người dùng Copilot cùng một cuộc họp Google Meet
+
+Một cuộc họp vẫn chỉ một bot Recall. Cuộc họp nhận âm thanh thuộc người hẹn bot; mỗi người khác cùng dùng bot (bật công
+tắc và có buổi này trên lịch, hoặc dán link khi bot đã ở đó) có **cuộc họp riêng** nhận bản sao lời thoại.
+- Phòng độc lập: trợ lý, slide, sơ đồ, dashboard, trò chơi chỉ chủ phòng thấy. "Jarvis ơi" của ai thì phòng người đó
+  trả lời nếu người đó đang mở phòng; không thì phòng của người hẹn bot.
+- Tên người nói, việc sửa người nói của từng câu đi theo cuộc họp nhận âm thanh (người dùng tự sửa tên thì giữ).
+  Số thứ tự "Người nói N" giống nhau giữa các phòng.
+- Biên bản: mỗi cuộc họp một biên bản, lưu vào Drive của chủ cuộc họp đó. Cùng lời thoại và mẫu thì gọi AI một lần
+  (`artifacts._shared_minutes`), các cuộc họp dùng chung nội dung. Lập lại biên bản thì luôn gọi AI.
+- Nhóm: ai xem được một cuộc họp của bot qua nhóm thì dùng chung cuộc họp đó (một biên bản trong thư mục Drive của
+  chủ nhóm). Cuộc họp riêng vào nhóm theo lựa chọn của chính chủ (gắn chuỗi trên lịch, hoặc chọn lúc dán link).
+- Kết thúc: ai kết thúc chỉ dừng cuộc họp của mình. Người hẹn bot kết thúc sớm thì cuộc họp riêng còn mở của người khác
+  nhận âm thanh thay (bot ở lại, kết nối âm thanh của Recall chuyển sang). Mọi người rời Meet thì bot rời, mọi cuộc họp
+  kết thúc. "Cho bot rời" của người có cuộc họp riêng chỉ dừng cuộc họp đó.
+- Bật bot muộn giữa buổi: cuộc họp riêng tạo ngay, chép bù phần đã nói (không gọi trợ lý theo câu cũ).
+- Cuộc họp riêng không có ghi âm, không có vector giọng: không phân tích lại người nói.
+- Mã: `meeting/meet_bots.py` (tạo cuộc họp riêng, chuyển, tách), `meeting/live.py` (gửi và nhận bản sao lời thoại),
+  test `tests/test_meet_shared.py`.
 
 ## Bản 3.19: nhớ xuyên cuộc họp trong nhóm, chế độ BD
 

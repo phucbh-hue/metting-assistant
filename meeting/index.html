@@ -1348,7 +1348,7 @@ function renderCalendar() {
         <option value="">Không nhóm</option>${groupsOpt.map(g => `<option value="${g.id}" ${ev.group_id === g.id ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select>` : '';
     return `<li class="cal-row">
       <div class="min-w-0"><div class="font-medium truncate">${esc(ev.title)}</div>
-        <div class="text-[12px] text-muted">${esc(evTime(ev))}${ev.attendees ? `, ${ev.attendees} người` : ''}${ev.series ? ', lặp lại' : ''}${ev.bot && ev.bot.status_msg && !ev.skipped ? `. ${esc(ev.bot.status_msg)}` : ''}</div></div>
+        <div class="text-[12px] text-muted">${esc(evTime(ev))}${ev.attendees ? `, ${ev.attendees} người` : ''}${ev.series ? ', lặp lại' : ''}${ev.bot && ev.bot.status_msg && !ev.skipped ? `. ${esc(ev.bot.status_msg)}` : ''}${ev.bot && ev.bot.shared_by && !ev.skipped ? `. Bot chung do ${esc(ev.bot.shared_by)} mời, lời thoại chép vào cuộc họp của anh chị` : ''}</div></div>
       <div class="flex flex-wrap items-center gap-2 justify-end">
         <span class="chip ${cls}">${esc(txt)}</span>${sel}
         ${ev.bot && ev.bot.meeting_id && ev.bot_mine ? `<a class="btn btn-ghost btn-sm" href="#/m/${ev.bot.meeting_id}">Mở cuộc họp</a>` : ''}
@@ -1408,11 +1408,13 @@ function mbRow(b) {
   const active = ['pending', 'scheduled', 'joining', 'waiting', 'in_call'].includes(b.status);
   return `<li class="cal-row">
     <div class="min-w-0"><div class="font-medium truncate">${esc(b.title || 'Google Meet')}</div>
-      <div class="text-[12px] text-muted">${esc((b.meet_url || '').replace('https://', ''))}${b.status_msg ? `. ${esc(b.status_msg)}` : ''}</div></div>
+      <div class="text-[12px] text-muted">${esc((b.meet_url || '').replace('https://', ''))}${b.status_msg ? `. ${esc(b.status_msg)}` : ''}${b.shared_by ? `. Bot chung do ${esc(b.shared_by)} mời` : ''}</div></div>
     <div class="flex flex-wrap items-center gap-2 justify-end">
       <span class="chip ${cls}">${esc(txt)}</span>
       ${b.meeting_id ? `<a class="btn btn-ghost btn-sm" href="#/m/${b.meeting_id}">Mở cuộc họp</a>` : ''}
-      ${active ? `<button type="button" class="btn btn-ghost btn-sm" data-mb-leave="${esc(b.rid)}">Cho bot rời</button>` : ''}
+      ${active ? (b.shared_by
+        ? `<button type="button" class="btn btn-ghost btn-sm" data-mb-leave="${esc(b.rid)}" title="Bot vẫn ở lại cho những người khác">Thôi nhận lời thoại</button>`
+        : `<button type="button" class="btn btn-ghost btn-sm" data-mb-leave="${esc(b.rid)}">Cho bot rời</button>`) : ''}
     </div></li>`;
 }
 function renderMeetJoin() {
@@ -1442,7 +1444,7 @@ function renderMeetJoin() {
     try {
       const r = await POST('/api/meet-bots/join', { meet_url: f.url.value.trim(), title: f.title.value.trim(),
         group_id: f.group.value ? parseInt(f.group.value, 10) : null });
-      toast(r.bot && r.bot.status === 'failed' ? r.bot.status_msg : 'Đã mời bot. Người trong cuộc họp bấm Cho vào khi bot xin vào.',
+      toast(r.bot && r.bot.status === 'failed' ? r.bot.status_msg : meetJoinedText(r.bot, 'Đã mời bot. Người trong cuộc họp bấm Cho vào khi bot xin vào.'),
         r.bot && r.bot.status === 'failed' ? 'err' : 'info', 7000);
       MB.fastUntil = Date.now() + 3 * 60000;
       await loadMeetBots();
@@ -1451,7 +1453,10 @@ function renderMeetJoin() {
   box.onclick = async e => {
     const b = e.target.closest('[data-mb-leave]'); if (!b) return;
     b.disabled = true;
-    try { await POST(`/api/meet-bots/${encodeURIComponent(b.dataset.mbLeave)}/leave`, {}); toast('Đã cho bot rời cuộc họp.'); }
+    try {
+      const r = await POST(`/api/meet-bots/${encodeURIComponent(b.dataset.mbLeave)}/leave`, {});
+      toast(r.left === false ? 'Cuộc họp của anh chị thôi nhận lời thoại. Bot vẫn ở lại cho những người khác.' : 'Đã cho bot rời cuộc họp.');
+    }
     catch (err) { toast(err.message, 'err'); }
     loadMeetBots();
   };
@@ -1472,7 +1477,7 @@ function openRoomMeetJoin() {
       try {
         const r = await POST('/api/meet-bots/join', { meet_url: e.currentTarget.url.value.trim(), meeting_id: R.id });
         closeModal();
-        toast(r.bot && r.bot.status === 'failed' ? r.bot.status_msg : 'Đã mời bot. Người trong Meet bấm Cho vào khi bot xin vào.',
+        toast(r.bot && r.bot.status === 'failed' ? r.bot.status_msg : meetJoinedText(r.bot, 'Đã mời bot. Người trong Meet bấm Cho vào khi bot xin vào.'),
           r.bot && r.bot.status === 'failed' ? 'err' : 'info', 7000);
       } catch (err) { toast(err.message, 'err', 7000); btn.disabled = false; }
     });
@@ -1480,9 +1485,16 @@ function openRoomMeetJoin() {
 }
 
 /* ---------- phòng họp từ Google Meet: trạng thái bot, người trong Meet ---------- */
+function meetJoinedText(bot, fallback) {
+  return bot && bot.shared_by ? `Bot do ${bot.shared_by} mời đã ở trong cuộc họp này (không gọi thêm bot). Lời thoại chép vào cuộc họp riêng của anh chị.` : fallback;
+}
 function meetChip(R) {
-  const mt = R && R.meet; if (!mt || (!mt.bot && !(mt.people || []).length)) return '';
+  const mt = R && R.meet; if (!mt || (!mt.bot && !(mt.people || []).length && !mt.copy)) return '';
   const b = mt.bot || {};
+  if (mt.copy) {                                              // cuộc họp riêng: lời thoại chép từ bot chung do người khác mời
+    const on = ['in_call', 'joining', 'waiting'].includes(b.status);
+    return `<button type="button" class="chip ${on ? 'chip-live' : ''} hidden sm:inline-flex" data-act="meet-people" title="Bot chung${b.shared_by ? ` do ${esc(b.shared_by)} mời` : ''}: lời thoại chép vào cuộc họp riêng của anh chị">${on ? 'Bot Meet chung: đang chép lời' : 'Bot Meet chung'}</button>`;
+  }
   const map = { in_call: ['Bot Meet: đang chép lời', 'chip-live'], waiting: ['Bot Meet: chờ cho vào', 'chip-warn'], joining: ['Bot Meet: đang vào', 'chip-warn'],
     scheduled: ['Bot Meet: sẽ vào', ''], pending: ['Bot Meet: đang hẹn', ''], ended: ['Bot Meet: đã rời', ''], failed: ['Bot Meet: không vào được', 'chip-danger'] };
   const [txt, cls] = map[b.status] || ['Google Meet', ''];
@@ -1491,6 +1503,16 @@ function meetChip(R) {
 }
 function openMeetPeople() {
   if (!S.room) return;
+  const mt = S.room.meet || {};
+  if (mt.copy) {
+    const by = mt.bot && mt.bot.shared_by;
+    openModal(`<h3 class="text-lg font-semibold mb-1">Bot Google Meet dùng chung</h3>
+      <p class="text-muted text-[13px] mb-3">Cuộc họp này nhận lời thoại từ bot ${by ? `do ${esc(by)} mời` : 'do người khác mời'} vào Google Meet: nhiều người dùng Copilot trong
+        cùng cuộc họp chỉ cần một bot. Đây là cuộc họp riêng của anh chị: trợ lý, slide, sơ đồ chỉ anh chị thấy; biên bản lưu vào Google Drive của anh chị
+        (cuộc họp thuộc nhóm thì vào thư mục của nhóm). Anh chị kết thúc cuộc họp này thì chỉ cuộc họp này dừng, bot vẫn ở lại cho những người khác.</p>
+      <div class="flex justify-end"><button type="button" class="btn btn-ghost" data-act="modal-close">Đóng</button></div>`);
+    return;
+  }
   openModal(`<h3 class="text-lg font-semibold mb-1">Người trong Google Meet</h3>
     <p class="text-muted text-[13px] mb-3">Mỗi người trong Meet được chép lời riêng, có tên theo Meet. Máy trong phòng vừa bật mic của ứng dụng vừa vào Meet thì
       chọn "Bỏ qua" để không chép trùng (ứng dụng tự bỏ qua nếu trùng tên hoặc email với người đang bật mic).</p>
@@ -6394,6 +6416,7 @@ document.addEventListener('click', async e => {
     case 'room-menu': {
       const R = S.room; if (!R) return;
       const items = [{ id: 'reanalyze', text: 'Phân tích lại người nói' }, { id: 'move', text: 'Chuyển vào nhóm...' }, { id: 'export', text: 'Xuất Markdown' }, { id: 'export-data', text: 'Xuất dữ liệu phân tích (JSON)' }];
+      if (R.meet && R.meet.copy) items.shift();               // cuộc họp riêng (bot dùng chung): không có dữ liệu giọng để phân tích lại
       if (AUTH.required && R.meeting && R.meeting.status === 'ended') items.push({ id: 'drive-save', text: 'Lưu lên Google Drive' });
       if ((R.artifacts || []).some(a => a.kind === 'minutes')) items.push({ id: 'dl-docx', text: 'Tải biên bản (.docx)' });
       if (R.meeting) items.push(R.meeting.status === 'ended' ? { id: 'minutes-regen', text: 'Lập lại biên bản...' } : { id: 'meeting-tpl', text: 'Mẫu biên bản...' });

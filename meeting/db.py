@@ -507,7 +507,8 @@ def add_segment(meeting_id: int, t_start: float, t_end: float, speaker_label: st
                 raw_embedding: Optional[List[float]] = None, seq: Optional[int] = None,
                 speaker_key: Optional[int] = None, raw_speaker: Optional[str] = None,
                 epoch: Optional[int] = None, stream: str = "mic", voiced: Optional[float] = None,
-                emb_model: Optional[str] = None) -> int:
+                emb_model: Optional[str] = None, src_seq: Optional[int] = None) -> int:
+    """src_seq: câu chép từ cuộc họp nhận âm thanh của bot Meet dùng chung (seq bên đó), None: câu của chính cuộc họp."""
     db = _get_db()
     sid = _next_id("segments")
     db["meeting_segments"].insert_one({
@@ -528,6 +529,7 @@ def add_segment(meeting_id: int, t_start: float, t_end: float, speaker_label: st
         "voiced": voiced,
         "raw_embedding": raw_embedding,
         "emb_model": emb_model if raw_embedding is not None else None,
+        "src_seq": src_seq,
     })
     return sid
 

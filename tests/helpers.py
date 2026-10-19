@@ -52,6 +52,7 @@ def reset_db():
     from meeting import artifacts, groups
     groups._CACHE.clear()
     artifacts._MEETING_OWNER.clear()                      # nhóm cũ của test trước (mã nhóm được dùng lại sau khi dựng lại DB)
+    artifacts._SHARED.clear()                             # biên bản dùng chung (bot Meet) của test trước
     appmod = sys.modules.get("meeting.app")
     if appmod is not None:
         appmod._MEETING_KEYS.clear()           # id cuộc họp được dùng lại sau khi dựng lại DB

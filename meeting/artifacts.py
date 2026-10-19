@@ -8,6 +8,7 @@ Chức năng:
    "Thêm card thống kê") để tinh chỉnh trực tiếp mã nguồn web/diagram/minutes theo phiên bản.
 """
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -835,13 +836,50 @@ def compact_transcript(segments: List[Dict[str, Any]]) -> str:
 
 
 MINUTES_MAX_TOKENS = 8000           # phần chữ của biên bản (cuộc họp 1-2 giờ cần 3.000-6.000 token)
+SHARED_TTL_S = 30 * 60
+_SHARED: Dict[str, Tuple[float, "asyncio.Future"]] = {}
+
+
+async def _shared_minutes(system: str, prompt: str) -> str:
+    """Nhiều người dùng chung một bot Meet, mỗi người một cuộc họp riêng cùng lời thoại: cùng đầu vào (lời thoại, tên
+    người nói, mẫu biên bản) thì chỉ gọi AI một lần, các cuộc họp kia dùng lại nội dung. Lần gọi đó lỗi thì tự lập."""
+    key = hashlib.sha256(f"{system}\x00{prompt}".encode("utf-8")).hexdigest()
+    now = time.time()
+    for k in [k for k, (t, _) in _SHARED.items() if now - t > SHARED_TTL_S]:
+        _SHARED.pop(k, None)
+    hit = _SHARED.get(key)
+    if hit is not None:
+        try:
+            content = await asyncio.shield(hit[1])
+            if (content or "").strip():
+                return content
+        except Exception:
+            pass
+    fut = asyncio.get_running_loop().create_future()
+    _SHARED[key] = (now, fut)
+    try:
+        content = await _call_llm(system, prompt, max_tokens=MINUTES_MAX_TOKENS)
+    except BaseException as e:
+        if _SHARED.get(key, (0.0, None))[1] is fut:
+            _SHARED.pop(key, None)
+        if not fut.done():
+            fut.set_exception(e if isinstance(e, Exception) else RuntimeError("đã hủy"))
+            fut.exception()                              # đã xử lý: không báo "exception was never retrieved"
+        raise
+    if not fut.done():
+        fut.set_result(content)
+    if not (content or "").strip():
+        _SHARED.pop(key, None)
+    return content
 
 
 async def generate_meeting_minutes(meeting_id: int, segments: List[Dict[str, Any]],
                                    title: str = "Cuộc họp nội bộ", meeting: Optional[Dict[str, Any]] = None,
                                    speakers: Optional[List[Dict[str, Any]]] = None,
-                                   template: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """template: mẫu biên bản (None = mẫu của cuộc họp theo thứ tự ưu tiên trong minutes_templates.resolve)."""
+                                   template: Optional[Dict[str, Any]] = None, shared: bool = False) -> Dict[str, Any]:
+    """template: mẫu biên bản (None = mẫu của cuộc họp theo thứ tự ưu tiên trong minutes_templates.resolve).
+    shared: biên bản tự lập lúc kết thúc, dùng chung kết quả với cuộc họp có đúng cùng đầu vào (bot Meet dùng chung).
+    Bấm lập lại biên bản thì không dùng chung (người dùng muốn một bản mới)."""
     from meeting import minutes_templates
     set_meeting(meeting_id, "biên bản")
     transcript_text = compact_transcript(segments) or "(Chưa có nội dung)"
@@ -849,7 +887,8 @@ async def generate_meeting_minutes(meeting_id: int, segments: List[Dict[str, Any
     tpl = template or minutes_templates.resolve(meeting)
     people = "\n".join(
         f"- {p.get('label')}" + (f" ({p.get('role')})" if p.get("role") else "")
-        + f": {p.get('n_segments', 0)} câu" for p in (speakers or [])) or "(không rõ)"
+        + f": {p.get('n_segments', 0)} câu"
+        for p in sorted(speakers or [], key=lambda p: p.get("sid") or 0)) or "(không rõ)"
     agenda = "\n".join(f"- {a}" for a in (meeting.get("agenda") or []) if isinstance(a, str)) or "(không có)"
 
     prompt = (f"Tiêu đề: {title}\nThời gian bắt đầu: {_fmt_date(meeting.get('started_at'))}\n"
@@ -857,7 +896,11 @@ async def generate_meeting_minutes(meeting_id: int, segments: List[Dict[str, Any
               f"Người nói trong buổi họp (nhãn 'Người nói N' là người chưa xác định được tên):\n{people}\n\n"
               f"Transcript cuộc họp:\n{transcript_text}\n\nHãy lập biên bản cuộc họp theo đúng mẫu "
               f"\"{tpl['name']}\". Ngày tháng ghi theo dd/mm/yyyy.")
-    content = await _call_llm(minutes_templates.render_system(tpl), prompt, max_tokens=MINUTES_MAX_TOKENS)
+    system = minutes_templates.render_system(tpl)
+    if shared:
+        content = await _shared_minutes(system, prompt)
+    else:
+        content = await _call_llm(system, prompt, max_tokens=MINUTES_MAX_TOKENS)
     if not (content or "").strip():
         # không lưu biên bản rỗng: báo lỗi để cuộc họp hiện "lập biên bản lỗi" và lập lại được, thay vì "xong" mà trống
         raise RuntimeError("AI trả về biên bản rỗng, anh chị bấm lập lại biên bản giúp em")
