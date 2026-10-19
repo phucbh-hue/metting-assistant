@@ -1574,6 +1574,8 @@ def normalize_deck(data: Any, max_slides: int = 20) -> Optional[Dict[str, Any]]:
     deck = {"title": str(data.get("title") or slides[0]["title"]).strip()[:120], "slides": slides}
     if isinstance(data.get("source"), dict):
         deck["source"] = {k: str(v)[:500] for k, v in data["source"].items() if k in ("type", "path", "name", "ext")}
+        if isinstance(data["source"].get("exact"), bool):          # PowerPoint: hình đúng thiết kế hay bố cục của ứng dụng
+            deck["source"]["exact"] = data["source"]["exact"]
     if data.get("script_mode") in ("auto", "script"):
         deck["script_mode"] = data["script_mode"]
         deck["script_source"] = str(data.get("script_source") or "")[:200]

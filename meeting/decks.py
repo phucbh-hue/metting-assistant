@@ -7,8 +7,11 @@ LIBRARY_DIRS), đọc thành bộ slide của hệ thống.
 Định dạng:
 - .pdf  : mỗi trang thành một slide hiện đúng hình trang gốc (dựng ảnh bằng pypdfium2), kèm chữ của trang để tìm kiếm,
           tự chuyển slide theo lời nói và viết lời thuyết trình.
-- .pptx : chữ, ghi chú người trình bày (kịch bản) và hình lớn nhất của từng slide (hình phủ kín slide thì hiện cả
-          hình như trang PDF). Máy có LibreOffice thì dựng ảnh đúng thiết kế từng slide.
+- .pptx : hiện ĐÚNG thiết kế từng slide: LibreOffice chuyển sang PDF rồi dựng ảnh từng trang (máy chủ bản web cài sẵn
+          LibreOffice và font hay gặp). Chữ và ghi chú người trình bày (kịch bản) vẫn đọc từ tệp gốc; slide ẩn bỏ qua
+          như khi trình chiếu. Bộ slide toàn ảnh (xuất từ Canva...) dùng thẳng ảnh gốc. Máy không có LibreOffice thì
+          dựng lại theo bố cục của ứng dụng (chữ + hình lớn nhất), source["exact"] = False để trợ lý báo người dùng.
+          Ảnh dựng xong giữ theo nội dung tệp: mở lại đúng tệp đó (kể cả gửi lên lại) thì không phải dựng lại.
 - .ppt  : cần LibreOffice để chuyển đổi.
 - .docx : tiêu đề lớn thành slide, đoạn văn / gạch đầu dòng thành ý.
 - .md / .txt : "#" là tên bộ slide, mỗi "##" một slide, gạch đầu dòng là ý, đoạn văn là ghi chú.
@@ -18,11 +21,14 @@ Chỉ tên tệp được quét; nội dung chỉ được đọc khi người d
 """
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
+import threading
 import time
 import unicodedata
 from pathlib import Path
@@ -35,6 +41,13 @@ EXTS = (".pdf", ".pptx", ".ppt", ".docx", ".json", ".md", ".txt")
 MAX_PAGES = int(os.getenv("DECK_MAX_PAGES", "60") or 60)       # trang tối đa đọc từ một tệp
 SCAN_DEPTH = 4                                                  # độ sâu thư mục khi quét tên tệp
 FULL_BLEED = 0.9                                                # hình PowerPoint phủ từ 90% slide: hiện cả hình
+PURE_IMAGE = 0.98                                               # slide chỉ có một hình phủ kín, không chữ: đúng thiết kế
+PAGE_PX = 2000                                                  # cạnh dài ảnh mỗi trang / slide (điểm ảnh)
+RENDER_VERSION = "2"                                            # đổi cách dựng ảnh thì đổi số này (ảnh cũ không dùng lại)
+LO_TIMEOUT_S = 240
+LO_PROFILE = ROOT / "data" / "lo-profile"                       # hồ sơ LibreOffice riêng của Copilot
+_LO_LOCK = threading.Lock()                                     # LibreOffice: mỗi lúc một tệp (giới hạn RAM, CPU)
+log = logging.getLogger("meeting.decks")
 SCAN_LIMIT = 4000
 _SKIP_DIRS = {"node_modules", ".git", "__pycache__", "appdata", "$recycle.bin", "venv", ".venv", "site-packages",
               "program files", "program files (x86)", "windows", ".cache", ".npm", ".vscode", "data"}
@@ -309,9 +322,13 @@ def browse(query: str = "", limit: int = 50) -> List[Dict[str, Any]]:
 
 # ------------------------------------------------------------ ảnh của slide ---
 def assets_key(path: str) -> str:
-    """Mã thư mục ảnh của một tệp: đổi khi tệp được sửa (đường dẫn + thời điểm sửa + kích thước)."""
-    st = Path(path).stat()
-    return hashlib.sha1(f"{os.path.abspath(path)}|{st.st_mtime_ns}|{st.st_size}".encode("utf-8")).hexdigest()[:16]
+    """Mã thư mục ảnh của một tệp, theo NỘI DUNG tệp: sửa tệp thì đổi mã; mở lại đúng tệp đó (kể cả gửi lên lại từ
+    trình duyệt, nằm ở thư mục tạm khác) thì dùng lại ảnh đã dựng."""
+    h = hashlib.sha1(f"v{RENDER_VERSION}|{Path(path).suffix.lower()}|".encode("utf-8"))
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()[:16]
 
 
 def asset_path(key: str, name: str) -> Optional[Path]:
@@ -369,9 +386,12 @@ def _pdf_slides(path: Path, key: Optional[str]) -> List[Dict[str, Any]]:
                 target = out_dir / name
                 if not target.exists():
                     w, h = page.get_size()
-                    scale = min(2.0, 1600.0 / max(1.0, w))      # rộng tối đa khoảng 1600 điểm ảnh
+                    scale = min(3.0, PAGE_PX / max(1.0, w, h))  # cạnh dài khoảng 2000 điểm ảnh: chữ nhỏ vẫn nét
                     img = page.render(scale=scale).to_pil().convert("RGB")
-                    img.save(target, "JPEG", quality=85, optimize=True)
+                    # ghi xong mới đổi tên: không để lại ảnh dở khi hai người cùng mở một tệp
+                    tmp = out_dir / f".{name}.{os.getpid()}.{threading.get_ident()}.part"
+                    img.save(tmp, "JPEG", quality=90, subsampling=0, optimize=True)
+                    os.replace(tmp, target)
                 sl["image"] = _asset_url(key, name)
             slides.append(sl)
             page.close()
@@ -381,30 +401,94 @@ def _pdf_slides(path: Path, key: Optional[str]) -> List[Dict[str, Any]]:
 
 
 def _soffice() -> Optional[str]:
-    for c in (shutil.which("soffice"), shutil.which("libreoffice"),
+    """LibreOffice trên máy: SOFFICE_PATH (bản giải nén / cài chỗ khác), PATH, rồi thư mục cài mặc định trên Windows."""
+    for c in (os.getenv("SOFFICE_PATH"), shutil.which("soffice"), shutil.which("libreoffice"),
               r"C:\Program Files\LibreOffice\program\soffice.exe", r"C:\Program Files (x86)\LibreOffice\program\soffice.exe"):
         if c and Path(c).is_file():
             return c
     return None
 
 
+def _run(cmd: List[str], timeout: float) -> subprocess.CompletedProcess:
+    """Chạy LibreOffice; quá giờ thì dừng cả cây tiến trình (soffice sinh thêm soffice.bin, chỉ dừng cha là sót con)."""
+    kw: Dict[str, Any] = ({"start_new_session": True} if os.name != "nt"
+                          else {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)})
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kw)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if os.name != "nt":
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                pass
+        else:
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+        proc.kill()
+        proc.communicate()
+        raise
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+
+
 def _to_pdf(path: Path) -> Optional[Path]:
-    """Chuyển PowerPoint sang PDF bằng LibreOffice (nếu máy có) để lấy đúng hình từng slide."""
+    """PowerPoint -> PDF bằng LibreOffice (nếu máy có) để lấy đúng hình từng slide. Mỗi lúc một tệp, hồ sơ LibreOffice
+    riêng (không vướng LibreOffice người dùng đang mở), ưu tiên thấp để phòng họp đang ghi lời thoại không bị chậm.
+    Không chuyển được thì trả về None và ghi lý do vào log."""
     exe = _soffice()
     if not exe:
         return None
     out = Path(tempfile.mkdtemp(prefix="deck-"))
+    cmd = [exe, f"-env:UserInstallation={LO_PROFILE.resolve().as_uri()}", "--headless", "--invisible", "--norestore",
+           "--nologo", "--nodefault", "--nolockcheck", "--convert-to", "pdf", "--outdir", str(out), str(path)]
+    if os.name != "nt" and shutil.which("nice"):
+        cmd = ["nice", "-n", "10"] + cmd
+    t0 = time.monotonic()
     try:
-        subprocess.run([exe, "--headless", "--convert-to", "pdf", "--outdir", str(out), str(path)],
-                       capture_output=True, timeout=180)
-    except Exception:
+        with _LO_LOCK:
+            r = _run(cmd, LO_TIMEOUT_S)
+    except Exception as e:                       # quá giờ, không chạy được
+        log.warning("LibreOffice không chuyển được %s: %s", path.name, e)
+        shutil.rmtree(out, ignore_errors=True)
         return None
-    pdfs = list(out.glob("*.pdf"))
-    return pdfs[0] if pdfs else None
+    pdfs = sorted(out.glob("*.pdf"))
+    if not pdfs:
+        log.warning("LibreOffice không ra PDF cho %s (mã %s): %s", path.name, r.returncode,
+                    (r.stderr or b"").decode("utf-8", "replace")[-300:])
+        shutil.rmtree(out, ignore_errors=True)
+        return None
+    log.info("LibreOffice: %s -> PDF trong %.1f giây", path.name, time.monotonic() - t0)
+    return pdfs[0]
+
+
+def _office_pages(path: Path, key: Optional[str], expect: int) -> Optional[List[Dict[str, Any]]]:
+    """Ảnh đúng thiết kế của từng slide PowerPoint (qua LibreOffice), hoặc ảnh đã dựng lần trước cho đúng nội dung tệp
+    này. None: không có LibreOffice, chuyển lỗi, hoặc số trang khác số slide (ghép hình với ghi chú sẽ lệch)."""
+    if not key or expect <= 0:
+        return None
+    names = [f"{i}.jpg" for i in range(1, expect + 1)]
+    if all((ASSETS_DIR / key / n).is_file() for n in names):
+        return [{"image": _asset_url(key, n)} for n in names]
+    pdf = _to_pdf(path)
+    if pdf is None:
+        return None
+    try:
+        import pypdfium2 as pdfium
+        doc = pdfium.PdfDocument(str(pdf))
+        try:
+            pages = min(len(doc), MAX_PAGES)
+        finally:
+            doc.close()
+        if pages != expect:
+            log.warning("LibreOffice ra %d trang cho %s nhưng tệp có %d slide: không dùng hình", pages, path.name, expect)
+            return None
+        return _pdf_slides(pdf, key)
+    finally:
+        shutil.rmtree(pdf.parent, ignore_errors=True)
 
 
 def _pptx_slides(path: Path, key: Optional[str]) -> List[Dict[str, Any]]:
-    """Chữ, ghi chú người trình bày và hình lớn nhất của từng slide PowerPoint."""
+    """Chữ, ghi chú người trình bày và hình lớn nhất của từng slide PowerPoint (bỏ slide ẩn, như khi trình chiếu và như
+    LibreOffice xuất PDF). "_pure": slide chỉ là một hình phủ kín, không chữ (bộ slide xuất từ Canva dạng ảnh)."""
     from pptx import Presentation
     from pptx.enum.shapes import MSO_SHAPE_TYPE
     prs = Presentation(str(path))
@@ -419,7 +503,8 @@ def _pptx_slides(path: Path, key: Optional[str]) -> List[Dict[str, Any]]:
             else:
                 yield sh
 
-    for i, s in enumerate(list(prs.slides)[:MAX_PAGES]):
+    shown = [s for s in prs.slides if s._element.get("show") not in ("0", "false")]
+    for i, s in enumerate(shown[:MAX_PAGES]):
         title_shape = s.shapes.title
         title = (title_shape.text_frame.text.strip() if title_shape is not None and title_shape.has_text_frame else "")
         lines, best, best_area = [], None, 0
@@ -447,9 +532,13 @@ def _pptx_slides(path: Path, key: Optional[str]) -> List[Dict[str, Any]]:
         notes = ""
         if s.has_notes_slide and s.notes_slide.notes_text_frame is not None:
             notes = s.notes_slide.notes_text_frame.text.strip()
+        uncropped = best is not None and not any(abs(float(getattr(best, c, 0) or 0)) > 1e-3
+                                                 for c in ("crop_left", "crop_right", "crop_top", "crop_bottom"))
+        pure = uncropped and slide_area > 1 and best_area >= PURE_IMAGE * slide_area and not title and not lines
         if not title and lines:
             title = lines.pop(0)
-        sl: Dict[str, Any] = {"title": title or f"Slide {i + 1}", "layout": "bullets", "bullets": lines[:7], "notes": notes}
+        sl: Dict[str, Any] = {"title": title or f"Slide {i + 1}", "layout": "bullets", "bullets": lines[:7], "notes": notes,
+                              "_pure": pure}
         if best is not None and out_dir:
             out_dir.mkdir(parents=True, exist_ok=True)
             name = f"{i + 1}m.{'jpg' if best.image.ext.lower() == 'jpeg' else best.image.ext.lower()}"   # m: hình trong slide
@@ -546,13 +635,18 @@ def read_deck(path: str, with_images: bool = True) -> Dict[str, Any]:
     elif ext == ".pdf":
         data = {"title": p.stem, "slides": _pdf_slides(p, key)}
     elif ext == ".pptx":
-        slides = _pptx_slides(p, key)
-        pdf = _to_pdf(p) if with_images else None
-        if pdf is not None:                       # LibreOffice: đúng hình từng slide, giữ chữ và ghi chú
-            pages = _pdf_slides(pdf, key)
-            shutil.rmtree(pdf.parent, ignore_errors=True)
+        slides = _pptx_slides(p, None)            # chữ + ghi chú trước, chưa ghi ảnh
+        exact = bool(slides) and all(sl["_pure"] for sl in slides)   # toàn ảnh phủ kín: ảnh gốc là đúng thiết kế
+        pages = _office_pages(p, key, len(slides)) if with_images and not exact else None
+        if pages:                                 # LibreOffice: đúng hình từng slide, giữ chữ và ghi chú
             for sl, pg in zip(slides, pages):
-                sl.update(layout="image", image=pg.get("image", ""))
+                sl.update(layout="image", image=pg["image"])
+            exact = True
+        elif with_images:                         # ảnh gốc của bộ toàn ảnh, hoặc bố cục của ứng dụng + hình lớn nhất
+            slides = _pptx_slides(p, key)
+        for sl in slides:
+            sl.pop("_pure", None)
+        source["exact"] = exact and with_images
         data = {"title": p.stem, "slides": slides}
     elif ext == ".ppt":
         pdf = _to_pdf(p)

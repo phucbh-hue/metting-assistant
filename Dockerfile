@@ -14,6 +14,21 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
+# PowerPoint hiện ĐÚNG thiết kế: LibreOffice dựng ảnh từng slide (thêm khoảng 300 MB), cùng font hay gặp trong slide:
+# Liberation (thay Arial, Times New Roman), Carlito (Calibri), Caladea (Cambria), DejaVu, Roboto, Open Sans, Lato,
+# Montserrat, Inter, emoji, Be Vietnam Pro (scripts/download_fonts.py). Đặt 0 để bỏ: PowerPoint khi đó dựng lại theo bố
+# cục của ứng dụng (chữ + hình lớn nhất), không giống thiết kế gốc.
+ARG WITH_OFFICE=1
+COPY scripts/download_fonts.py scripts/download_fonts.py
+RUN if [ "$WITH_OFFICE" = "1" ]; then \
+      apt-get update \
+      && apt-get install -y --no-install-recommends libreoffice-impress fonts-liberation fonts-crosextra-carlito \
+         fonts-crosextra-caladea fonts-dejavu-core fonts-roboto-unhinted fonts-open-sans fonts-lato fonts-montserrat \
+         fonts-inter fonts-noto-color-emoji \
+      && python scripts/download_fonts.py --dest /usr/local/share/fonts/google \
+      && fc-cache -f && soffice --version && rm -rf /var/lib/apt/lists/*; \
+    fi
+
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 

@@ -2450,10 +2450,20 @@ class MeetingSession:
         await self.emit({"type": "artifact_created", "artifact": art})
         await self.emit({"type": "stage_command", "action": "open"})
         await self.stage_action("show", artifact_id=art["id"])
-        n = len(self._slides_of(art))
+        deck = artifacts.load_deck(art.get("content", "")) or {"slides": []}
+        n = len(deck["slides"])
         unit = "trang" if p.suffix.lower() in (".pdf", ".docx") else "slide"
         where = f" trong thư mục {folder}" if folder else ""
-        await self._say(f"Dạ, em mở \"{shown}\"{where}, gồm {n} {unit}.", quiet=True)
+        note = ""
+        if (deck.get("source") or {}).get("exact") is False:     # PowerPoint chưa dựng được hình đúng thiết kế
+            from meeting import decks
+            note = (" Em chưa dựng được hình đúng thiết kế của tệp này nên đang hiện chữ và hình theo bố cục của ứng dụng; "
+                    + ("anh chị thử mở lại tệp, hoặc lưu thêm bản PDF (File > Save As > PDF) rồi mở bản PDF."
+                       if decks._soffice() else
+                       "máy chạy Copilot cần cài LibreOffice (miễn phí) để hiện đúng thiết kế, hoặc anh chị lưu thêm bản "
+                       "PDF (File > Save As > PDF) rồi mở bản PDF."))
+        await self._say(f"Dạ, em mở \"{shown}\"{where}, gồm {n} {unit}.{note}", "concerned" if note else "happy",
+                        quiet=True)
         ans = llm.present_answer(command, explicit=True) if command else None
         self._present_scope = None                    # tệp vừa mở: trình bày từ trang đầu
         if ans:

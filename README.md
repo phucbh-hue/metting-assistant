@@ -7,7 +7,7 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng người Việt tự nhiên của Soniox, đọc rõ cả từ tiếng
 Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy, miễn phí), vừa làm vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.21.0 - cập nhật 19/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.21.1 - cập nhật 19/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Hướng dẫn sử dụng cho người dùng (đăng nhập, mọi tính năng, Cài đặt) kèm video demo:
   [docs/huong-dan-su-dung.md](docs/huong-dan-su-dung.md).
 - Bộ slide demo để Jarvis tự trình bày (mở tệp, chọn "Theo ghi chú trong tệp"):
@@ -16,6 +16,27 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
+
+## Bản 3.21.1: PowerPoint hiện đúng thiết kế
+
+Trước đây server bản web không có LibreOffice nên PowerPoint gửi lên bị dựng lại theo bố cục của ứng dụng (tiêu đề,
+gạch đầu dòng, hình lớn nhất), không giống thiết kế gốc.
+- Image Docker cài LibreOffice Impress và font hay gặp trong slide: Liberation (thay Arial, Times New Roman), Carlito
+  (Calibri), Caladea (Cambria), DejaVu, Roboto, Open Sans, Lato, Montserrat, Inter, Noto Color Emoji, Be Vietnam Pro
+  (`scripts/download_fonts.py`: cố định commit của Google Fonts, kiểm tra sha256). `--build-arg WITH_OFFICE=0` để bỏ.
+- Mỗi slide thành ảnh cạnh dài 2000 điểm ảnh (trước 1600), JPEG chất lượng 90, giữ nguyên màu. Chữ và ghi chú người
+  trình bày vẫn đọc từ tệp gốc để trợ lý tìm kiếm, nhắc bài, trình bày theo ghi chú.
+- Slide ẩn bỏ qua như khi trình chiếu (trước đây slide ẩn làm lệch ghi chú với hình). Số trang PDF khác số slide thì
+  không ghép hình.
+- Bộ slide toàn ảnh phủ kín, không chữ (Canva xuất dạng ảnh): dùng thẳng ảnh gốc, không cần LibreOffice.
+- Ảnh dựng xong giữ theo nội dung tệp (`decks.assets_key`): gửi lên lại đúng tệp đó thì hiện ngay, không dựng lại.
+- LibreOffice chạy mỗi lúc một tệp, hồ sơ riêng `data/lo-profile`, ưu tiên thấp (`nice`); quá 240 giây thì dừng cả cây
+  tiến trình. Bản trên máy tự tìm LibreOffice (PATH, thư mục cài mặc định) hoặc theo `SOFFICE_PATH`.
+- Không dựng được hình đúng thiết kế thì trợ lý báo rõ và chỉ cách sửa (`source.exact = false` trong bộ slide).
+- Thử với LibreOffice 25.8 trên Windows: bộ 13 slide trình bày ngày 19/10/2026 ra đúng thiết kế (font Be Vietnam Pro,
+  bảng, thẻ, biểu tượng). LibreOffice mất khoảng 14 giây, dựng ảnh 4 giây, mở lại 0,2 giây.
+- Test: `tests/test_documents.py` (mã ảnh theo nội dung, ảnh từ LibreOffice giữ ghi chú, lệch số trang, slide ẩn, bộ
+  toàn ảnh, lệnh LibreOffice và dừng khi treo, trợ lý báo khi chưa đúng thiết kế).
 
 ## Bản 3.21: nhiều người dùng Copilot cùng một cuộc họp Google Meet
 
@@ -343,7 +364,7 @@ là thư mục trên chính máy đó.
   - Chỉ nhận `.pdf .pptx .ppt .docx .md .txt .json`.
   - Chỉ người tạo cuộc họp gửi được tệp vào cuộc họp đó.
 - Server không có LibreOffice nên PowerPoint hiện chữ, ghi chú và hình lớn nhất của từng slide. Muốn đúng thiết kế thì lưu
-  thêm bản PDF rồi mở bản PDF.
+  thêm bản PDF rồi mở bản PDF. (Từ bản 3.21.1 server có LibreOffice: PowerPoint hiện đúng thiết kế.)
 - Slide PowerPoint chỉ là một hình phủ từ 90% slide (xuất từ Canva / Google Slides dạng ảnh, hoặc bộ slide demo trong
   `slides/demo`) thì hiện cả hình như trang PDF, vẫn giữ ghi chú để trình bày (10/10/2026).
 
@@ -873,13 +894,13 @@ phóng" còn bị hiểu thành slide số 2.
 | Tệp | Hiển thị | Ghi chú |
 |---|---|---|
 | PDF | đúng hình từng trang (dựng ảnh trên máy bằng pypdfium2) | chữ của trang dùng để tự chuyển slide và viết lời |
-| PowerPoint .pptx | chữ, bảng, hình lớn nhất của từng slide, ghi chú người trình bày | máy có LibreOffice thì hiện đúng thiết kế từng slide |
+| PowerPoint .pptx | đúng thiết kế từng slide (LibreOffice dựng ảnh), kèm chữ và ghi chú người trình bày | máy chưa có LibreOffice: chữ, bảng, hình lớn nhất của từng slide |
 | PowerPoint .ppt | cần LibreOffice | hoặc lưu lại thành .pptx / .pdf |
 | Word .docx | mỗi tiêu đề thành một slide, gạch đầu dòng thành ý | |
 | .md / .txt / .json | như thư viện slide cũ | |
 
-- Máy hiện chưa có PowerPoint / LibreOffice: muốn PowerPoint hiện đúng thiết kế thì lưu thêm bản PDF
-  (File > Save As > PDF) rồi mở bản PDF, hoặc cài LibreOffice (tự nhận, không cần cấu hình).
+- Server bản web có sẵn LibreOffice (bản 3.21.1). Bản chạy trên máy chưa có LibreOffice: cài LibreOffice (tự nhận, không
+  cần cấu hình; cài chỗ khác thì đặt `SOFFICE_PATH`), hoặc lưu thêm bản PDF (File > Save As > PDF) rồi mở bản PDF.
 - Ảnh từng trang lưu ở `data/deck_assets/` (không commit), mở lại tệp chưa sửa thì dùng lại ảnh cũ.
 
 ### Hỏi "tự trình bày hay theo kịch bản"

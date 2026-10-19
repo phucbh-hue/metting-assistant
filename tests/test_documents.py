@@ -2,8 +2,11 @@
 import asyncio
 import json
 import os
+import shutil
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -119,6 +122,7 @@ class ReadFileTests(TempLibrary, unittest.TestCase):
         self.assertEqual(s1["notes"], "Nhấn mạnh doanh số tăng 25% so với quý 3.")
         self.assertRegex(s1["image"], r"/api/deck-assets/[0-9a-f]{16}/1m\.png$")
         self.assertEqual((s2["layout"], s2.get("image")), ("bullets", None))
+        self.assertIs(deck["source"]["exact"], False)                       # trợ lý sẽ báo chưa đúng thiết kế
         self.assertTrue(decks.read_text(str(pp)).startswith("Slide 1: Nhấn mạnh doanh số"))
 
     def test_pptx_full_slide_picture_shows_as_whole_page(self):
@@ -141,6 +145,138 @@ class ReadFileTests(TempLibrary, unittest.TestCase):
         self.assertEqual((sl["title"], sl["layout"]), ("Chế độ BD", "image"))
         self.assertRegex(sl["image"], r"/api/deck-assets/[0-9a-f]{16}/1m\.png$")
         self.assertEqual(sl["notes"], "Khi khách hỏi, trợ lý tự gợi ý câu trả lời.")
+
+    def lo_pdf(self, pages):
+        """Giả LibreOffice: PDF trong thư mục tạm riêng (_office_pages xóa cả thư mục đó sau khi dựng ảnh)."""
+        pdf = Path(tempfile.mkdtemp(dir=self.tmp.name)) / "out.pdf"
+        make_pdf(pdf, pages)
+        return pdf
+
+    def mega_pptx(self) -> Path:
+        from PIL import Image
+        png = Path(self.tmp.name) / "chart.png"
+        Image.new("RGB", (300, 200), (61, 220, 151)).save(png)
+        pp = self.base / "mega-sale.pptx"
+        make_pptx(pp, png)
+        return pp
+
+    def test_assets_key_follows_content_not_path(self):
+        """Tệp gửi lên từ trình duyệt nằm ở thư mục tạm mới mỗi lần: cùng nội dung thì dùng lại ảnh đã dựng."""
+        a, b = self.base / "a.pptx", Path(self.tmp.name) / "khac-ten.pptx"
+        a.write_bytes(b"noi dung 1")
+        b.write_bytes(b"noi dung 1")
+        self.assertEqual(decks.assets_key(str(a)), decks.assets_key(str(b)))
+        b.write_bytes(b"noi dung 2")
+        self.assertNotEqual(decks.assets_key(str(a)), decks.assets_key(str(b)))
+        c = self.base / "a.pdf"
+        c.write_bytes(b"noi dung 1")
+        self.assertNotEqual(decks.assets_key(str(a)), decks.assets_key(str(c)))
+
+    def test_pptx_exact_pages_from_libreoffice_keep_text_and_notes(self):
+        pp = self.mega_pptx()
+        calls = []
+
+        def fake_to_pdf(path):
+            calls.append(path)
+            return self.lo_pdf([["Trang 1"], ["Trang 2"]])
+        with mock.patch.object(decks, "_to_pdf", fake_to_pdf):
+            deck = artifacts.normalize_deck(decks.read_deck(str(pp)), max_slides=decks.MAX_PAGES)
+            again = decks.read_deck(str(pp))                  # mở lại đúng tệp đó: dùng ảnh đã dựng
+        self.assertEqual(len(calls), 1)
+        s1, s2 = deck["slides"]
+        self.assertEqual([s["layout"] for s in deck["slides"]], ["image", "image"])
+        self.assertEqual((s1["title"], s1["notes"]), ("Mục tiêu quý 4", "Nhấn mạnh doanh số tăng 25% so với quý 3."))
+        self.assertEqual(s1["bullets"], ["Doanh số 2.500.000.000đ", "120 thương hiệu mới"])
+        self.assertRegex(s2["image"], r"/api/deck-assets/[0-9a-f]{16}/2\.jpg$")
+        self.assertIsNotNone(decks.asset_path(*s2["image"].split("/")[-2:]))
+        self.assertIs(deck["source"]["exact"], True)
+        self.assertEqual([s["image"] for s in again["slides"]], [s1["image"], s2["image"]])
+        self.assertIs(again["source"]["exact"], True)
+        self.assertNotIn("_pure", again["slides"][0])
+        self.assertFalse(list(self.assets.glob("*/*m.*")))   # đã có ảnh cả slide: không ghi hình con
+
+    def test_pptx_page_count_mismatch_falls_back_to_app_layout(self):
+        """Số trang PDF khác số slide: không ghép hình (ghi chú sẽ lệch), dựng theo bố cục của ứng dụng, báo chưa đúng."""
+        pp = self.mega_pptx()
+        with mock.patch.object(decks, "_to_pdf", lambda path: self.lo_pdf([["1"], ["2"], ["3"]])):
+            deck = artifacts.normalize_deck(decks.read_deck(str(pp)), max_slides=decks.MAX_PAGES)
+        self.assertEqual([s["layout"] for s in deck["slides"]], ["media", "bullets"])
+        self.assertIs(deck["source"]["exact"], False)
+        self.assertFalse(list(self.assets.glob("*/*.jpg")))
+
+    def test_pptx_hidden_slides_are_skipped(self):
+        """Slide ẩn không trình chiếu (LibreOffice cũng không xuất): bỏ qua để hình và ghi chú không lệch nhau."""
+        from pptx import Presentation
+        prs = Presentation()
+        for k in (1, 2, 3):
+            s = prs.slides.add_slide(prs.slide_layouts[1])
+            s.shapes.title.text = f"Slide {k}"
+            s.notes_slide.notes_text_frame.text = f"Ghi chú {k}"
+        prs.slides[1]._element.set("show", "0")
+        pp = self.base / "co-slide-an.pptx"
+        prs.save(str(pp))
+        deck = decks.read_deck(str(pp), with_images=False)
+        self.assertEqual([(s["title"], s["notes"]) for s in deck["slides"]], [("Slide 1", "Ghi chú 1"), ("Slide 3", "Ghi chú 3")])
+        self.assertIn("Slide 2: Ghi chú 3", decks.read_text(str(pp)))
+
+    def test_pptx_all_picture_deck_uses_original_pictures(self):
+        """Bộ slide toàn ảnh (Canva xuất dạng ảnh): ảnh gốc đã đúng thiết kế, không cần LibreOffice."""
+        from PIL import Image
+        from pptx import Presentation
+        png = Path(self.tmp.name) / "slide.png"
+        Image.new("RGB", (1600, 900), (32, 20, 60)).save(png)
+        prs = Presentation()
+        prs.slide_width, prs.slide_height = 12192000, 6858000
+        for k in (1, 2):
+            s = prs.slides.add_slide(prs.slide_layouts[6])            # trang trống, không có ô tiêu đề
+            s.shapes.add_picture(str(png), 0, 0, prs.slide_width, prs.slide_height)
+            s.notes_slide.notes_text_frame.text = f"Lời trình bày {k}"
+        pp = self.base / "canva.pptx"
+        prs.save(str(pp))
+        with mock.patch.object(decks, "_to_pdf", lambda path: self.fail("không cần LibreOffice")):
+            deck = decks.read_deck(str(pp))
+        self.assertEqual([s["layout"] for s in deck["slides"]], ["image", "image"])
+        self.assertRegex(deck["slides"][1]["image"], r"/api/deck-assets/[0-9a-f]{16}/2m\.png$")
+        self.assertEqual(deck["slides"][1]["notes"], "Lời trình bày 2")
+        self.assertIs(deck["source"]["exact"], True)
+
+    def test_to_pdf_uses_own_profile_and_cleans_up_on_timeout(self):
+        pp = self.base / "x.pptx"
+        pp.write_bytes(b"x")
+        seen = {}
+
+        def fake_run(cmd, timeout):
+            seen["cmd"] = cmd
+            (Path(cmd[cmd.index("--outdir") + 1]) / "x.pdf").write_bytes(b"%PDF-1.4")
+            return subprocess.CompletedProcess(cmd, 0, b"", b"")
+        with mock.patch.object(decks, "_soffice", lambda: "/opt/lo/soffice"), mock.patch.object(decks, "_run", fake_run):
+            pdf = decks._to_pdf(pp)
+        shutil.rmtree(pdf.parent, ignore_errors=True)
+        cmd = seen["cmd"]
+        self.assertEqual(pdf.name, "x.pdf")
+        self.assertIn("/opt/lo/soffice", cmd)
+        self.assertIn("--headless", cmd)
+        self.assertTrue(any(c.startswith("-env:UserInstallation=file:") for c in cmd))
+        self.assertEqual((cmd[cmd.index("--convert-to") + 1], cmd[-1]), ("pdf", str(pp)))
+
+        made, real_mkdtemp = [], tempfile.mkdtemp
+
+        def mkdtemp(*a, **kw):
+            made.append(real_mkdtemp(*a, **kw))
+            return made[-1]
+
+        def slow(cmd, timeout):
+            raise subprocess.TimeoutExpired(cmd, timeout)
+        with mock.patch.object(decks, "_soffice", lambda: "/opt/lo/soffice"), mock.patch.object(decks, "_run", slow), \
+                mock.patch.object(decks.tempfile, "mkdtemp", mkdtemp):
+            self.assertIsNone(decks._to_pdf(pp))
+        self.assertFalse(Path(made[0]).exists())
+
+    def test_run_stops_a_hung_converter(self):
+        t0 = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            decks._run([sys.executable, "-c", "import time; time.sleep(30)"], 1)
+        self.assertLess(time.monotonic() - t0, 15)
 
     def test_docx_headings_become_slides(self):
         dx = self.base / "ke-hoach.docx"
@@ -261,6 +397,17 @@ class PresentDialogTests(TempLibrary, unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(s["script"] for s in nd["slides"]))
         self.assertTrue(self.events("ai_ask_done"))
         self.assertIsNone(self.s._ask)
+
+    async def test_pptx_not_exact_tells_user_why(self):
+        """Máy không có LibreOffice: PowerPoint hiện theo bố cục của ứng dụng, trợ lý nói rõ và chỉ cách sửa."""
+        from PIL import Image
+        png = Path(self.tmp.name) / "chart.png"
+        Image.new("RGB", (300, 200), (61, 220, 151)).save(png)
+        make_pptx(self.base / "mega-sale.pptx", png)
+        with mock.patch.object(decks, "_soffice", lambda: None):
+            await self.s.open_path(str(self.base / "mega-sale.pptx"))
+        says = [e["text"] for e in self.events("ai_say")]
+        self.assertTrue(any("2 slide" in t and "bố cục của ứng dụng" in t and "LibreOffice" in t for t in says), says)
 
     async def test_present_this_page_asks_how_then_presents_only_that_page(self):
         await self.open_pdf()

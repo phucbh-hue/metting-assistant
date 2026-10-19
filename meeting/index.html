@@ -6248,8 +6248,8 @@ async function renderLibrarySettings(box) {
           <button type="button" class="icon-btn" data-act="lib-remove" data-dir="${esc(d)}" aria-label="Bỏ thư mục ${esc(d)}" title="Bỏ thư mục"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></li>`).join('')}
       </ul>
       <form id="lib-form" class="flex gap-2"><input id="lib-dir" class="input" autocomplete="off" placeholder="Ví dụ: D:\\Tài liệu\\Thuyết trình" aria-label="Đường dẫn thư mục tài liệu"><button class="btn btn-ghost btn-sm shrink-0" type="submit" style="height:38px">Thêm thư mục</button></form>
-      <p class="text-[12px] text-muted mt-2">${r.libreoffice ? 'Đã có LibreOffice: PowerPoint hiện đúng thiết kế từng slide.'
-        : 'Máy chưa có LibreOffice: PowerPoint hiện chữ, ghi chú và hình lớn nhất của từng slide. Muốn hiện đúng thiết kế, lưu thêm bản PDF (File > Save As > PDF) rồi mở bản PDF, hoặc cài LibreOffice.'} PDF luôn hiện đúng hình từng trang.</p>`;
+      <p class="text-[12px] text-muted mt-2">${r.libreoffice ? 'Đã có LibreOffice: PowerPoint hiện đúng thiết kế từng slide, vẫn giữ ghi chú người trình bày.'
+        : 'Máy chưa có LibreOffice: PowerPoint hiện chữ, ghi chú và hình lớn nhất của từng slide (bộ slide toàn ảnh vẫn đúng hình). Muốn hiện đúng thiết kế, cài LibreOffice (miễn phí, tự nhận) rồi mở lại tệp, hoặc lưu thêm bản PDF (File > Save As > PDF) rồi mở bản PDF.'} PDF luôn hiện đúng hình từng trang.</p>`;
     $('#lib-form', box).addEventListener('submit', async e => {
       e.preventDefault();
       const d = $('#lib-dir', box).value.trim(); if (!d) return;

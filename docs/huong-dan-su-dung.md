@@ -4,7 +4,7 @@ description: >
   Hướng dẫn cho người dùng nội bộ UrBox: đăng nhập, tạo và chạy cuộc họp, trợ lý AI, trò chơi có thưởng,
   biên bản và mẫu biên bản, nhóm cuộc họp, lịch Google và bot Google Meet, chế độ BD, kho tri thức WikiBox,
   hồ sơ giọng nói và toàn bộ phần Cài đặt. Kèm video demo có phụ đề.
-version: 3.21.0
+version: 3.21.1
 updated: 19/10/2026
 owner: phuc.bh@urbox.vn
 video: huong-dan/video-demo.mp4
@@ -12,7 +12,7 @@ video: huong-dan/video-demo.mp4
 
 # Hướng dẫn sử dụng UrBox Meeting Copilot
 
-- Phiên bản: 3.21.0. Cập nhật: 19/10/2026. Phụ trách: phuc.bh@urbox.vn.
+- Phiên bản: 3.21.1. Cập nhật: 19/10/2026. Phụ trách: phuc.bh@urbox.vn.
 - Ảnh và video trong tài liệu dùng dữ liệu mẫu và tài khoản giả (`*.demo@urbox.vn`), không có dữ liệu thật.
 - Dữ liệu tra cứu nội bộ của trợ lý (ticket Jira, danh bạ, kiến trúc hệ thống) hiện là dữ liệu mẫu. Kho tri
   thức thật của công ty dùng WikiBox khi người tạo cuộc họp đã kết nối (mục 13.4).
@@ -20,6 +20,8 @@ video: huong-dan/video-demo.mp4
   link.
 - Bản 3.21.0 (19/10/2026): nhiều người cùng dùng Copilot trong một cuộc họp Google Meet chỉ cần một bot, mỗi
   người có cuộc họp riêng (mục 10.6). Phần này chưa có ảnh chụp.
+- Bản 3.21.1 (19/10/2026): PowerPoint mở để trình bày hiện đúng thiết kế từng slide, vẫn giữ ghi chú người
+  trình bày (mục 7.4).
 
 ## Mục lục
 
@@ -346,7 +348,11 @@ Con số trên thẻ là số sản phẩm.
   - **Chọn tệp kịch bản**;
   - **Dán kịch bản**;
   - **Để tôi trình bày**.
-- PowerPoint nên lưu thêm bản PDF để hiện đúng thiết kế.
+- PowerPoint hiện **đúng thiết kế** từng slide (font, màu, bố cục, hình), vẫn giữ ghi chú người trình bày để
+  trợ lý đọc theo. Lần đầu mở một tệp mất khoảng 15-40 giây để dựng hình; mở lại đúng tệp đó thì hiện ngay.
+  Slide ẩn được bỏ qua như khi trình chiếu.
+- Không dựng được hình đúng thiết kế (tệp lỗi, hoặc bản chạy trên máy chưa cài LibreOffice) thì trợ lý báo rõ
+  và hiện chữ, hình theo bố cục của ứng dụng.
 
 ### 7.6. Trò chơi có thưởng
 
@@ -785,6 +791,7 @@ WikiBox (`wiki.urbox.dev`) là kho tri thức của công ty. Kết nối rồi 
 | "Chỉ tài khoản @urbox.vn được dùng ứng dụng này" | Đăng nhập lại bằng tài khoản Google công ty |
 | "Phiên đăng nhập đã hết hạn" | Đăng nhập lại (phiên kéo dài 12 giờ) |
 | "Không kết nối được máy chủ" | Kiểm tra mạng; vẫn lỗi thì báo quản trị viên |
+| PowerPoint hiện khác thiết kế, trợ lý báo "đang hiện theo bố cục của ứng dụng" | Bản web: mở lại tệp. Bản trên máy: cài LibreOffice (miễn phí) rồi mở lại. Hoặc lưu thêm bản PDF (File > Save As > PDF) rồi mở bản PDF (bản PDF không có ghi chú người trình bày) |
 | "Trình duyệt chưa cho phép dùng micro" | Bấm biểu tượng ổ khóa trên thanh địa chỉ, cho phép micro, bật mic lại |
 | "Không tìm thấy micro nào" | Cắm micro hoặc tai nghe rồi thử lại |
 | "Một thiết bị khác vừa bật mic cho cuộc họp này" | Mỗi cuộc họp một nguồn mic: tắt mic ở thiết bị kia |
@@ -809,7 +816,9 @@ WikiBox (`wiki.urbox.dev`) là kho tri thức của công ty. Kết nối rồi 
 - **Tài liệu mở để trình bày**:
   - tối đa 50 MB mỗi tệp;
   - nhận `.pdf .pptx .ppt .docx .md .txt .json`;
-  - PowerPoint nên kèm bản PDF để hiện đúng thiết kế.
+  - PowerPoint dùng font ít gặp (ngoài Arial, Calibri, Times New Roman, Roboto, Open Sans, Lato, Montserrat,
+    Inter, Be Vietnam Pro...) có thể hiện bằng font thay thế gần giống; cần đúng tuyệt đối thì mở bản PDF;
+  - bản chạy trên máy cần cài LibreOffice để PowerPoint hiện đúng thiết kế.
 - **Tài liệu nhóm BD**: tối đa 25 MB mỗi tệp, 100 tài liệu. PDF dạng ảnh chụp không đọc được chữ.
 - **Tìm kiếm của chế độ BD** dựa theo từ khóa (bỏ dấu khi so), không hiểu từ đồng nghĩa. Tài liệu nên dùng
   đúng từ mà khách hay nói.
