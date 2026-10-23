@@ -88,7 +88,8 @@ async def lifespan(_app: FastAPI):
     db.flush()                  # lưu trên máy: ghi nốt phần còn chờ trước khi tắt
 
 
-app = FastAPI(title="Meeting Assistant AI", version="3.2.0", lifespan=lifespan)
+APP_VERSION = "3.22.0"              # dấu hiệu phiên bản ở /healthz để kiểm tra bản mới đã lên server chưa (giữ khớp package.json)
+app = FastAPI(title="Meeting Assistant AI", version=APP_VERSION, lifespan=lifespan)
 _MEETING_PATH = re.compile(r"^/(?:api/meetings|ws/meeting)/(\d+)(?:/|$)")
 _ARTIFACT_PATH = re.compile(r"^/api/artifacts/(\d+)(?:/|$)")
 _GROUP_PATH = re.compile(r"^/api/groups/(\d+)(?:/|$)")
@@ -351,7 +352,7 @@ def web_config():
 @app.get("/healthz")
 def healthz():
     """Kiểm tra server còn sống (cho nền tảng chạy server; không cần đăng nhập, không lộ thông tin)."""
-    return {"status": "ok"}
+    return {"status": "ok", "version": APP_VERSION}
 
 
 # ==============================================================================
