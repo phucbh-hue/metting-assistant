@@ -23,9 +23,10 @@ let ws = {};          // {mic, tab} -> WebSocket
 let nodes = [];       // giữ tham chiếu, không thì bị GC giữa chừng
 let tracks = [];
 let echoGuard = true;
+let meetMuted = false;        // nút tắt mic của app họp (mute-watch.js báo sang): đang mute thì gửi im lặng cho luồng mic
 let env = { mic: [], tab: [] };
 let silence = null;
-let stats = { sent: 0, muted: 0, tabSent: 0, tabLoud: 0, wait: 0, corr: 0, lag: 0 };
+let stats = { sent: 0, muted: 0, meet: 0, tabSent: 0, tabLoud: 0, wait: 0, corr: 0, lag: 0 };
 
 function wsUrl(base, mid, token, stream) {
   const path = stream === 'tab' ? `/ws/meeting/${mid}/tab` : `/ws/meeting/${mid}/audio`;
@@ -85,12 +86,16 @@ function pipe(stream, name, base, mid, token) {
     // Gửi sớm khi server chưa "ready" thì server dồn lại rồi đẩy một lèo cho Soniox, lệch nhịp realtime.
     if (sock.readyState !== WebSocket.OPEN || !ready) { stats.wait++; return; }
     if (name === 'tab') { stats.tabSent++; if (Math.max(...e) >= ECHO.floor) stats.tabLoud++; }
-    if (name === 'mic' && isEcho()) {
-      // Gửi IM LẶNG chứ không bỏ khối: bỏ khối làm dòng thời gian của luồng mic co lại, mốc giờ lệch dần so với tab.
-      if (!silence || silence.byteLength !== pcm.byteLength) silence = new ArrayBuffer(pcm.byteLength);
-      sock.send(silence);
-      stats.muted++;
-      return;
+    if (name === 'mic') {
+      const echo = isEcho();                   // gọi kể cả khi sẽ chặn vì mute: đây là chỗ duy nhất cập nhật corr/lag cho popup
+      if (meetMuted || echo) {
+        // Gửi IM LẶNG chứ không bỏ khối: bỏ khối làm dòng thời gian của luồng mic co lại, mốc giờ lệch dần so với tab.
+        if (!silence || silence.byteLength !== pcm.byteLength) silence = new ArrayBuffer(pcm.byteLength);
+        sock.send(silence);
+        stats.muted++;
+        if (meetMuted) stats.meet++;
+        return;
+      }
     }
     sock.send(pcm);
     if (name === 'mic') stats.sent++;
@@ -142,15 +147,19 @@ function stop() {
   if (ctx) { try { ctx.close(); } catch (e) {} ctx = null; }
   const d = document.getElementById('playback'); if (d) d.srcObject = null;
   env = { mic: [], tab: [] };
-  stats = { sent: 0, muted: 0, tabSent: 0, tabLoud: 0, wait: 0, corr: 0, lag: 0 };
+  meetMuted = false;
+  stats = { sent: 0, muted: 0, meet: 0, tabSent: 0, tabLoud: 0, wait: 0, corr: 0, lag: 0 };
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   if (msg.cmd === 'offscreen:start') {
     echoGuard = msg.echo !== false;
+    meetMuted = false;
     start(msg).then(reply).catch(e => { stop(); reply({ ok: false, error: String(e && e.message || e) }); });
     return true;
   }
   if (msg.cmd === 'offscreen:stop') { stop(); reply({ ok: true }); return true; }
   if (msg.cmd === 'offscreen:stats') { reply(stats); return true; }
+  // mute-watch.js (content script trên tab họp) báo trạng thái nút tắt mic của app. Rẻ, bắn cả khi không thu.
+  if (msg.cmd === 'meet:mute') { meetMuted = !!msg.muted; return; }
 });

@@ -45,6 +45,7 @@ Muốn chạy với server trên máy thì mở app ở `http://localhost:8080` 
 | `offscreen.js` | Nơi thật sự bắt audio (mic + tab), chống vọng âm, mở hai WebSocket (MV3 cấm service worker dùng `getUserMedia`) |
 | `pcm-worklet.js` | Float32 → PCM S16LE 16kHz, gom khối 100ms, kèm đường bao năng lượng (cho bộ chống vọng âm) |
 | `permission.html` / `permission.js` | Tab xin quyền micro (không xin được từ popup vì popup mất focus rồi đóng) |
+| `mute-watch.js` | Content script trên tab họp: đọc nút tắt mic của app rồi báo offscreen im theo (fail-open) |
 
 Server: WebSocket `/ws/meeting/{mid}/tab?token=<token người dùng>` (`meeting/app.py`), thành luồng `"tab"` trong
 `meeting/live.py` (không chiếm "nguồn mic", chạy song song).
@@ -60,9 +61,18 @@ Server: WebSocket `/ws/meeting/{mid}/tab?token=<token người dùng>` (`meeting
 - **Reload extension không tự sửa tab đang mở.** Sau khi sửa code, vào `chrome://extensions` bấm **reload** rồi F5
   tab app để nạp lại `token-bridge.js`.
 
+## Im theo nút tắt mic của app họp
+
+`mute-watch.js` đọc nút tắt mic của nền tảng; khi anh chị mute trong app, extension gửi im lặng cho luồng mic (vẫn giữ
+đúng mốc thời gian). **Fail-open**: không đọc được nút thì coi như KHÔNG mute (thà lọt vài câu còn hơn nuốt sạch tiếng).
+- **Google Meet** đọc `data-is-muted`; **Teams / Zoom** và nền tảng khác đọc nhãn nút ("Unmute"/"Bật tiếng" = đang tắt).
+- Meet / Teams / Zoom tự chạy (trong `host_permissions`). Nền tảng khác (**Callio**...): bấm **"Im theo nút tắt mic của
+  trang này"** trong popup một lần để cấp quyền đọc trang đó.
+- Chưa chắc đúng với mọi nền tảng vì mỗi app một DOM: nếu mute mà popup vẫn báo "Mic: gửi ..." tăng đều (không có "im
+  theo app"), gửi em HTML của nút tắt mic để chỉnh bộ dò.
+
 ## Chưa làm
 
-- Im theo nút mic của Meet/Teams (mute trong app họp thì extension vẫn thu mic). Tạm thời: **Dừng nghe** khi nói riêng.
 - Tự phát hiện cuộc họp kết thúc để dừng thu (hiện bấm **Dừng nghe**; hoặc để cuộc họp tự kết thúc sau 30 phút không
   ai nói).
 - Đóng gói lên Chrome Web Store (chế độ Private cho tên miền `urbox.vn`).

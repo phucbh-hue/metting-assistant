@@ -73,7 +73,12 @@ async function start({ mid, micOn }) {
     await chrome.tabs.create({ url: chrome.runtime.getURL('permission.html') });
     return { ok: false, error: 'Cần cấp quyền micro: một tab vừa mở ra, bấm "Cấp quyền micro" rồi quay lại bấm Bắt đầu. (Hoặc bỏ chọn "Thu cả tiếng tôi nói" nếu chỉ muốn thu tiếng người online.)' };
   }
-  if (r && r.ok) await chrome.storage.session.set({ running: { mid, tabId: tab.id, micOn: r.micOn, since: Date.now() } });
+  if (r && r.ok) {
+    await chrome.storage.session.set({ running: { mid, tabId: tab.id, micOn: r.micOn, since: Date.now() } });
+    // Đồng bộ mute: tiêm mute-watch.js vào tab họp (tab mở trước khi cài extension thì content script chưa có sẵn).
+    // Chỉ chạy được với host đã có quyền (Meet/Teams/Zoom trong manifest, hoặc nền tảng khác đã được cấp quyền).
+    try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['mute-watch.js'] }); } catch (e) {}
+  }
   return r;
 }
 
@@ -97,6 +102,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   if (msg.cmd === 'bg:create') { apiCall('/meetings', 'POST', { title: (msg.title || 'Cuộc họp online').slice(0, 200) }).then(reply); return true; }
   if (msg.cmd === 'bg:auth') { auth().then(reply); return true; }
   if (msg.cmd === 'bg:refresh') { refreshToken().then(reply); return true; }
+  if (msg.cmd === 'bg:injectMute') {   // bật đồng bộ mute cho nền tảng ngoài Meet/Teams/Zoom (popup đã xin quyền host)
+    chrome.scripting.executeScript({ target: { tabId: msg.tabId }, files: ['mute-watch.js'] })
+      .then(() => reply({ ok: true })).catch(e => reply({ ok: false, error: String(e && e.message || e) }));
+    return true;
+  }
   if (msg.cmd === 'bg:report') {              // offscreen báo lỗi luồng -> gắn vào trạng thái đang chạy để popup đọc
     if (msg.error) chrome.storage.session.get('running').then(({ running }) => {
       if (running) chrome.storage.session.set({ running: { ...running, error: msg.error } });

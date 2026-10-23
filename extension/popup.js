@@ -46,8 +46,9 @@ async function pollStats() {
   try { s = await send({ cmd: 'offscreen:stats' }); } catch (e) { return; }
   if (!s) return;
   const tabLoud = s.tabSent ? Math.round(100 * s.tabLoud / s.tabSent) : 0;
-  $('liveStats').textContent = `Tab: gửi ${s.tabSent} khối, có tiếng ${tabLoud}% · Mic: gửi ${s.sent}` +
-    (s.muted ? `, chặn vọng âm ${s.muted}` : '') + (s.wait ? ` · chờ server ${s.wait}` : '');
+  const micNote = s.meet ? `, im theo app ${s.meet}` : (s.muted ? `, chặn vọng âm ${s.muted}` : '');
+  $('liveStats').textContent = `Tab: gửi ${s.tabSent} khối, có tiếng ${tabLoud}% · Mic: gửi ${s.sent}${micNote}` +
+    (s.wait ? ` · chờ server ${s.wait}` : '');
   if (s.tabSent > 40 && tabLoud === 0) setMsg('Tab không phát ra tiếng nào - kiểm tra tab có bị tắt tiếng không, hoặc đã bấm trên đúng tab họp chưa.', 'err');
 }
 
@@ -79,6 +80,16 @@ async function init() {
   };
   $('start').onclick = doStart;
   $('stop').onclick = async () => { await send({ cmd: 'bg:stop' }); setMsg(''); await refreshRunningView(); };
+  $('muteSync').onclick = async () => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.url) { setMsg('Không đọc được tab đang mở.', 'err'); return; }
+    let origin; try { origin = new URL(tab.url).origin + '/*'; } catch (e) { setMsg('Tab này không đồng bộ được.', 'err'); return; }
+    let granted = false;
+    try { granted = await chrome.permissions.request({ origins: [origin] }); } catch (e) { granted = false; }
+    if (!granted) { setMsg('Chưa được cấp quyền đọc trang này nên chưa đồng bộ mute được (bấm lại và chọn Cho phép).', 'err'); return; }
+    const r = await send({ cmd: 'bg:injectMute', tabId: tab.id });
+    setMsg(r && r.ok ? 'Đã bật: mute trong app họp thì extension cũng im.' : (r && r.error || 'Không bật được'), r && r.ok ? 'ok' : 'err');
+  };
 
   const running = await refreshRunningView();
   const authed = await showAuth();
