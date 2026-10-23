@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Cấp quyền micro - Meeting Copilot</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { max-width: 520px; margin: 60px auto; padding: 0 20px; font: 15px/1.6 system-ui, "Segoe UI", sans-serif; }
+  h1 { font-size: 20px; }
+  button { padding: 10px 18px; font: inherit; border: 0; border-radius: 8px; background: #7c3aed; color: #fff; cursor: pointer; }
+  #out { margin-top: 18px; font-weight: 600; }
+  .ok { color: #1a7f37; }
+  .err { color: #c0392b; }
+  .mut { color: #777; font-size: 13px; }
+</style>
+
+<h1>Cấp quyền micro</h1>
+<p>Extension cần quyền micro để thu tiếng anh chị nói trong cuộc họp. Chỉ cần cấp một lần.</p>
+<p class="mut">Bước này phải làm ở tab riêng: nếu hỏi quyền từ popup thì popup mất focus rồi tự đóng, Chrome coi như đã
+   bỏ qua ("Permission dismissed").</p>
+
+<button id="ask">Cấp quyền micro</button>
+<div id="out"></div>
+
+<script src="permission.js"></script>

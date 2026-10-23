@@ -4,10 +4,13 @@ Nguồn âm thanh thứ tư cho Meeting Copilot, bên cạnh mic, tệp và bot 
 
 ## Làm gì
 
-Bật lên thì extension thu **tiếng của tab đang mở** (Google Meet, Teams web, Zoom web, webinar...) rồi gửi về
-Meeting Copilot thành luồng **"tab"**, chép lời như mic. Chạy **song song với mic** (họp nửa online nửa trực tiếp:
-mic lo tiếng người trong phòng, tab lo tiếng người online), nên **không cần bot Recall vào phòng** và **không tốn
-credit Recall**.
+Bật lên thì extension thu **hai nguồn** rồi gửi về Meeting Copilot, chép lời như mic:
+- **tiếng người online** phát ra từ tab (Google Meet, Teams web, Zoom web, webinar...) -> luồng **"tab"**
+  (`/ws/meeting/{mid}/tab`);
+- **tiếng anh chị nói** qua micro -> luồng **"mic"** (`/ws/meeting/{mid}/audio`). Bỏ chọn được nếu chỉ muốn thu tab.
+
+Nhờ vậy một công tắc là thu cả cuộc họp, **không cần bot Recall vào phòng** và **không tốn credit Recall**. Lần đầu bật
+mic, extension mở một tab xin **quyền micro** (chỉ một lần).
 
 > Chỉ dùng khi những người trong cuộc họp **đã được xin phép ghi âm từ trước** (chính sách chung của công ty).
 > Extension không hiện thông báo trong phòng họp.
@@ -38,9 +41,10 @@ Muốn chạy với server trên máy thì mở app ở `http://localhost:8080` 
 | `manifest.json` | MV3, quyền `tabCapture` + `offscreen`; content script đọc token trên origin của app |
 | `token-bridge.js` | Content script trên trang app: đọc `ma_token` rồi đưa cho extension |
 | `popup.html` / `popup.js` | Chọn / tạo cuộc họp, Bắt đầu / Dừng, hiện số khối đã gửi và tỉ lệ có tiếng |
-| `background.js` | Service worker: lấy `streamId` của tab, mở offscreen, gọi API `/api/meetings` |
-| `offscreen.js` | Nơi thật sự bắt audio (MV3 cấm service worker dùng `getUserMedia`/`AudioContext`) |
-| `pcm-worklet.js` | Float32 → PCM S16LE 16kHz, gom khối 100ms |
+| `background.js` | Service worker: lấy `streamId` của tab, mở offscreen, gọi API `/api/meetings`, mở tab xin quyền mic |
+| `offscreen.js` | Nơi thật sự bắt audio (mic + tab), chống vọng âm, mở hai WebSocket (MV3 cấm service worker dùng `getUserMedia`) |
+| `pcm-worklet.js` | Float32 → PCM S16LE 16kHz, gom khối 100ms, kèm đường bao năng lượng (cho bộ chống vọng âm) |
+| `permission.html` / `permission.js` | Tab xin quyền micro (không xin được từ popup vì popup mất focus rồi đóng) |
 
 Server: WebSocket `/ws/meeting/{mid}/tab?token=<token người dùng>` (`meeting/app.py`), thành luồng `"tab"` trong
 `meeting/live.py` (không chiếm "nguồn mic", chạy song song).
@@ -50,15 +54,15 @@ Server: WebSocket `/ws/meeting/{mid}/tab?token=<token người dùng>` (`meeting
 - **Bắt tiếng tab làm Chrome tắt tiếng tab đó.** `offscreen.html` có thẻ `<audio>` phát lại để vẫn nghe được họp;
   bỏ thẻ đó đi là ngồi họp trong im lặng.
 - **Phải bấm trên đúng tab họp.** `getMediaStreamId` lấy tab đang mở; mở popup ở tab khác là thu nhầm.
-- **Vọng âm khi không đeo tai nghe.** Nếu máy vừa bật mic (app) vừa thu tab qua loa ngoài, mic nghe lại tiếng loa.
-  Bản này chưa có bộ chống vọng âm (chỉ thu tab, không thu mic ở extension) - **nên đeo tai nghe** khi vừa dùng mic
-  phòng vừa thu tab.
+- **Vọng âm khi không đeo tai nghe.** Thu cả mic lẫn tab mà nghe qua loa ngoài thì tiếng người online lọt vào mic.
+  `offscreen.js` có bộ chống vọng âm bằng tương quan chéo (khối mic bám theo đường bao của tab ở độ trễ dương thì gửi
+  im lặng), nhưng **đeo tai nghe vẫn chắc hơn**.
 - **Reload extension không tự sửa tab đang mở.** Sau khi sửa code, vào `chrome://extensions` bấm **reload** rồi F5
   tab app để nạp lại `token-bridge.js`.
 
 ## Chưa làm
 
-- Chống vọng âm mic↔tab (bản interview có; ở đây chưa cần vì chỉ thu tab).
+- Im theo nút mic của Meet/Teams (mute trong app họp thì extension vẫn thu mic). Tạm thời: **Dừng nghe** khi nói riêng.
 - Tự phát hiện cuộc họp kết thúc để dừng thu (hiện bấm **Dừng nghe**; hoặc để cuộc họp tự kết thúc sau 30 phút không
   ai nói).
 - Đóng gói lên Chrome Web Store (chế độ Private cho tên miền `urbox.vn`).

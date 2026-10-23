@@ -32,7 +32,7 @@ async function refreshRunningView() {
   $('pick').style.display = live ? 'none' : '';
   $('live').style.display = live ? '' : 'none';
   if (live) {
-    $('liveInfo').textContent = `Đang nghe tab và gửi về cuộc họp #${run.mid}.`;
+    $('liveInfo').textContent = `Đang nghe ${run.micOn ? 'tab + mic' : 'tab'} và gửi về cuộc họp #${run.mid}.`;
     if (run.error) setMsg(run.error, 'err');
     if (!statsTimer) statsTimer = setInterval(pollStats, 1000);
   } else if (statsTimer) {
@@ -45,9 +45,10 @@ async function pollStats() {
   let s = null;
   try { s = await send({ cmd: 'offscreen:stats' }); } catch (e) { return; }
   if (!s) return;
-  const loud = s.sent ? Math.round(100 * s.loud / s.sent) : 0;
-  $('liveStats').textContent = `Đã gửi ${s.sent} khối · có tiếng ${loud}%` + (s.wait ? ` · chờ server ${s.wait}` : '');
-  if (s.sent > 40 && loud === 0) setMsg('Đang gửi nhưng tab không phát ra tiếng nào - kiểm tra tab có bị tắt tiếng không, hoặc đã bấm trên đúng tab họp chưa.', 'err');
+  const tabLoud = s.tabSent ? Math.round(100 * s.tabLoud / s.tabSent) : 0;
+  $('liveStats').textContent = `Tab: gửi ${s.tabSent} khối, có tiếng ${tabLoud}% · Mic: gửi ${s.sent}` +
+    (s.muted ? `, chặn vọng âm ${s.muted}` : '') + (s.wait ? ` · chờ server ${s.wait}` : '');
+  if (s.tabSent > 40 && tabLoud === 0) setMsg('Tab không phát ra tiếng nào - kiểm tra tab có bị tắt tiếng không, hoặc đã bấm trên đúng tab họp chưa.', 'err');
 }
 
 async function doStart() {
@@ -62,7 +63,7 @@ async function doStart() {
     mid = c.data.id || c.data.meeting_id;
   }
   if (!mid) { setMsg('Chọn một cuộc họp hoặc nhập tên để tạo mới.', 'err'); $('start').disabled = false; return; }
-  const r = await send({ cmd: 'bg:start', mid: Number(mid) });
+  const r = await send({ cmd: 'bg:start', mid: Number(mid), micOn: $('micOn').checked });
   $('start').disabled = false;
   if (!r || !r.ok) { setMsg(r && r.error || 'Không bắt đầu được', 'err'); return; }
   await refreshRunningView();

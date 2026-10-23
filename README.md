@@ -19,10 +19,11 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 
 ## Bản 3.22.0: extension thu tiếng tab (nghe họp online không cần bot)
 
-Thêm nguồn âm thanh thứ tư, bên cạnh mic / tệp / bot Recall: một **extension Chrome** (`extension/`) thu **tiếng của
-tab đang mở** (Google Meet, Teams web, Zoom web, webinar...) và gửi về server thành luồng **"tab"**, chép lời như mic.
-- Chạy **song song với mic** (họp nửa online nửa trực tiếp): mic lo tiếng trong phòng, tab lo tiếng người online, không
-  cần bot Recall vào phòng và không tốn credit Recall.
+Thêm nguồn âm thanh thứ tư, bên cạnh mic / tệp / bot Recall: một **extension Chrome** (`extension/`) thu cả **tiếng
+người online** (tiếng tab -> luồng "tab", `/ws/meeting/{mid}/tab`) lẫn **tiếng anh chị nói** (mic -> luồng "mic",
+`/ws/meeting/{mid}/audio`), gửi về server chép lời như mic. Một công tắc là thu cả cuộc họp.
+- Không cần bot Recall vào phòng và không tốn credit Recall. Có bộ chống vọng âm mic↔tab (tương quan chéo trong
+  `offscreen.js`); lần đầu bật mic thì mở tab xin quyền micro. Bỏ chọn mic được nếu chỉ muốn thu tiếng người online.
 - Server: WebSocket `/ws/meeting/{mid}/tab?token=<token người dùng>` (`meeting/app.py`) -> `start_audio(..., "tab",
   claim_owner=False)` trong `meeting/live.py`: luồng phụ, không chiếm "nguồn mic" của cuộc họp.
 - Xác thực bằng chính token đăng nhập của người dùng: content script `token-bridge.js` đọc `ma_token` trên trang app

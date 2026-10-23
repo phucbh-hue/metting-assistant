@@ -25,8 +25,9 @@ video: huong-dan/video-demo.mp4
 - Bản 3.21.2 (23/10/2026): kết nối kho tri thức WikiBox bằng đăng nhập Google, không cần API key (mục 13.4).
 - Bản 3.21.3 (23/10/2026): bật mic/thu liên tục không còn bị Soniox "giới hạn" ngắt giữa chừng; phòng mở quá
   30 phút mà không ai nói thì tự kết thúc kèm recap.
-- Bản 3.22.0 (23/10/2026): thêm **extension Chrome thu tiếng tab** cho họp online - nghe tiếng người trong Google
-  Meet/Teams/Zoom qua tab, chép lời như mic, không cần bot vào phòng (cài theo `extension/README.md`).
+- Bản 3.22.0 (23/10/2026): thêm **extension Chrome** cho họp online - thu cả tiếng người trong Google
+  Meet/Teams/Zoom (qua tab) lẫn tiếng mình nói (mic), chép lời như mic, không cần bot vào phòng (cài theo
+  `extension/README.md`).
 
 ## Mục lục
 

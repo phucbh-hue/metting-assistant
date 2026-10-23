@@ -54,7 +54,7 @@ async function apiCall(path, method, body) {
   }
 }
 
-async function start({ mid }) {
+async function start({ mid, micOn }) {
   const { base, token } = await auth();
   if (!base || !token) return { ok: false, error: 'Chưa có quyền đăng nhập.' };
   await ensureOffscreen();
@@ -68,8 +68,12 @@ async function start({ mid }) {
   } catch (e) {
     return { ok: false, error: `Không thu được tiếng tab này (${e.message || e}). Mở popup ngay trên tab cuộc họp rồi bấm lại.` };
   }
-  const r = await chrome.runtime.sendMessage({ cmd: 'offscreen:start', base, mid, token, streamId });
-  if (r && r.ok) await chrome.storage.session.set({ running: { mid, tabId: tab.id, since: Date.now() } });
+  const r = await chrome.runtime.sendMessage({ cmd: 'offscreen:start', base, mid, token, streamId, micOn: micOn !== false });
+  if (r && r.needMic) {        // chưa cấp quyền mic: mở tab xin quyền (không xin được từ popup/offscreen)
+    await chrome.tabs.create({ url: chrome.runtime.getURL('permission.html') });
+    return { ok: false, error: 'Cần cấp quyền micro: một tab vừa mở ra, bấm "Cấp quyền micro" rồi quay lại bấm Bắt đầu. (Hoặc bỏ chọn "Thu cả tiếng tôi nói" nếu chỉ muốn thu tiếng người online.)' };
+  }
+  if (r && r.ok) await chrome.storage.session.set({ running: { mid, tabId: tab.id, micOn: r.micOn, since: Date.now() } });
   return r;
 }
 

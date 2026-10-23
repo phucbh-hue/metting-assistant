@@ -38,10 +38,16 @@
       <input id="newTitle" placeholder="Tên cuộc họp" maxlength="200">
     </div>
     <div class="row">
-      <button id="start">Bắt đầu nghe tab này</button>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="micOn" checked style="width:auto">
+        <span>Thu cả tiếng tôi nói (mic) - lần đầu cần cấp quyền micro</span>
+      </label>
     </div>
-    <div class="row muted">Mở popup ngay trên tab đang họp (Google Meet, Teams, Zoom web...). Nên đeo tai nghe để tiếng
-      họp không vọng vào mic phòng.</div>
+    <div class="row">
+      <button id="start">Bắt đầu nghe</button>
+    </div>
+    <div class="row muted">Mở popup ngay trên tab đang họp (Google Meet, Teams, Zoom web...). Extension thu tiếng người
+      online (qua tab) và tiếng anh chị nói (mic). Nên đeo tai nghe để tiếng họp không vọng vào mic.</div>
   </div>
 
   <div id="live" style="display:none">
