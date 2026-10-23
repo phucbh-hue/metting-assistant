@@ -19,6 +19,10 @@
     }
     return null;
   }
+  // Nút điều khiển của CHỦ phòng, không phải nút mic của mình: "Mute all", "Ask to unmute", "yêu cầu bật mic"... Bỏ qua,
+  // không thì quét nhầm làm tưởng mình đang mute rồi nuốt tiếng.
+  const HOST_CTRL = /\b(all|everyone|participant|guests?)\b|tất cả|mọi người|người tham gia|ask to|yêu cầu/i;
+
   // Teams / Zoom / Callio...: nút mic mời hành động - "Unmute"/"Bật tiếng" nghĩa là ĐANG tắt; "Mute"/"Tắt tiếng" là đang mở.
   function labelState() {
     const sels = ['#microphone-button', '[data-tid="toggle-mute"]', '[data-tid="microphone-button"]',
@@ -26,19 +30,21 @@
     for (const sel of sels) {
       for (const el of document.querySelectorAll(sel)) {
         const lab = `${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''} ${el.getAttribute('data-tooltip') || ''}`;
-        if (!MIC.test(lab)) continue;
+        if (!MIC.test(lab) || HOST_CTRL.test(lab)) continue;
         const s = lab.toLowerCase();
-        if (/unmute|bật\s*(tiếng|micro|mic|âm)|mở\s*(tiếng|mic)|đang tắt/.test(s)) return true;   // kiểm "unmute" trước "mute"
-        if (/\bmute\b|tắt\s*(tiếng|micro|mic|âm)|đang bật/.test(s)) return false;
+        if (/\bunmute\b|bật\s*(tiếng|micro|mic|âm)|mở\s*(tiếng|mic)/.test(s)) return true;   // kiểm "unmute" trước "mute"
+        if (/\bmute\b|tắt\s*(tiếng|micro|mic|âm)/.test(s)) return false;
       }
     }
     return null;
   }
   function readMuted() {
-    if (host.endsWith('meet.google.com')) { const m = meetState(); if (m !== null) return m; }
+    // Google Meet: CHỈ dùng data-is-muted (chuẩn, tin được). Không đọc được thì coi như KHÔNG mute - tuyệt đối không quét
+    // nhãn nút lung tung trên trang Meet (nhiều nút "unmute" của chủ phòng -> dương tính giả -> nuốt tiếng người dùng).
+    if (host.endsWith('meet.google.com')) return meetState();
     const m = labelState();
     if (m !== null) return m;
-    return meetState();                      // phòng khi nền tảng khác cũng dùng data-is-muted
+    return meetState();                      // nền tảng khác: thử data-is-muted phòng khi cũng dùng
   }
 
   let last = null;

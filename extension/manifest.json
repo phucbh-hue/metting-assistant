@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "UrBox Meeting Copilot - thu tiếng tab",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Thu tiếng cuộc họp online (mic + tiếng tab) rồi gửi về Meeting Copilot để chép lời, không cần bot vào phòng.",
   "permissions": ["tabCapture", "offscreen", "storage", "scripting", "tabs"],
   "host_permissions": [
