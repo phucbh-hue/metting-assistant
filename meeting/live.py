@@ -630,7 +630,8 @@ class MeetingSession:
         self.started_at = float(meeting.get("started_at") or time.time())
         self.streams: Dict[str, MeetingStream] = {}
         self.subscribers: Set[asyncio.Queue] = set()
-        self.audio_owner: Optional[object] = None
+        self.audio_owner: Optional[object] = None    # thiết bị đang bật mic (một nguồn mic mỗi cuộc họp)
+        self.tab_owner: Optional[object] = None       # extension đang thu tiếng tab (luồng "tab", chạy song song với mic)
         self.disposed = False
 
         segments = segments or []
@@ -1318,13 +1319,16 @@ class MeetingSession:
         self.meeting["host_id"] = host_id
 
     # ------------------------------------------------------------- audio ---
-    async def start_audio(self, owner: object, name: str = "mic", diarize: bool = True) -> MeetingStream:
+    async def start_audio(self, owner: object, name: str = "mic", diarize: bool = True,
+                          claim_owner: bool = True) -> MeetingStream:
+        """claim_owner=False: luồng phụ (extension thu tiếng tab) chạy song song mà không chiếm "nguồn mic" của cuộc họp."""
         stream = self.streams.get(name)
         if stream is None or stream.closed:
             stream = MeetingStream(name, self, diarize=diarize)
             self.streams[name] = stream
         await stream.ensure_open()
-        self.audio_owner = owner
+        if claim_owner:
+            self.audio_owner = owner
         return stream
 
     async def stop_audio(self, owner: object, name: str = "mic"):

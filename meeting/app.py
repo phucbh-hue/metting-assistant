@@ -2474,6 +2474,56 @@ async def ws_audio(ws: WebSocket, mid: int):
         log.info("meeting.app: mic ngắt kết nối cho cuộc họp %d", mid)
 
 
+@app.websocket("/ws/meeting/{mid}/tab")
+async def ws_tab(ws: WebSocket, mid: int):
+    """Extension thu tiếng tab cuộc họp (Google Meet / Teams / Zoom web...) gửi PCM16 16kHz về đây, thành luồng "tab".
+    Chạy SONG SONG với mic (họp nửa online nửa trực tiếp): mic lo tiếng trong phòng, tab lo tiếng người online, không
+    cần bot Recall vào phòng. Xác thực bằng ?token= của người dùng (AuthMiddleware) như mọi WebSocket khác."""
+    await ws.accept()
+    m = await asyncio.to_thread(db.get_meeting, mid)
+    if not m:
+        await ws.send_text(_dumps({"type": "error", "code": 4004, "text": "Cuộc họp không tồn tại."}))
+        await ws.close(code=4004)
+        return
+    if m.get("status") == "ended":
+        await ws.send_text(_dumps({"type": "error", "code": 4003, "text": "Cuộc họp này đã kết thúc."}))
+        await ws.close(code=4003)
+        return
+    s = await live.get_session(mid)
+    owner = object()
+    s.tab_owner = owner
+    try:
+        stream = await s.start_audio(owner, "tab", diarize=True, claim_owner=False)
+    except Exception as e:
+        await ws.send_text(_dumps({"type": "error", "code": 4500, "text": f"Không mở được dịch vụ nhận dạng giọng nói: {e}"}))
+        await ws.close(code=4500)
+        return
+    await ws.send_text(_dumps({"type": "ready", "stream": "tab", "meeting_id": mid}))
+    log.info("meeting.app: extension thu tiếng tab cho cuộc họp %d", mid)
+    try:
+        while True:
+            msg = await ws.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+            if s.tab_owner is not owner:
+                await ws.send_text(_dumps({"type": "error", "code": 4009,
+                                           "text": "Một thiết bị khác vừa bật thu tiếng tab cho cuộc họp này."}))
+                break
+            if msg.get("bytes"):
+                await stream.feed(msg["bytes"])
+            elif msg.get("text") == "stop":
+                break
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        if s.tab_owner is owner:
+            s.tab_owner = None
+            st = s.streams.get("tab")
+            if st is not None and not st.closed:
+                await st.pause()
+        log.info("meeting.app: extension ngắt thu tiếng tab cho cuộc họp %d", mid)
+
+
 @app.websocket("/ws/meeting/{mid}/bd")
 async def ws_bd(ws: WebSocket, mid: int):
     """Kênh riêng của bảng BD: các lượt hỏi đáp trên khung chat, vai trò Khách / Đội mình. Kênh sự kiện chung (màn hình

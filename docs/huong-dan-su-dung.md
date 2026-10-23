@@ -4,7 +4,7 @@ description: >
   Hướng dẫn cho người dùng nội bộ UrBox: đăng nhập, tạo và chạy cuộc họp, trợ lý AI, trò chơi có thưởng,
   biên bản và mẫu biên bản, nhóm cuộc họp, lịch Google và bot Google Meet, chế độ BD, kho tri thức WikiBox,
   hồ sơ giọng nói và toàn bộ phần Cài đặt. Kèm video demo có phụ đề.
-version: 3.21.3
+version: 3.22.0
 updated: 23/10/2026
 owner: phuc.bh@urbox.vn
 video: huong-dan/video-demo.mp4
@@ -12,7 +12,7 @@ video: huong-dan/video-demo.mp4
 
 # Hướng dẫn sử dụng UrBox Meeting Copilot
 
-- Phiên bản: 3.21.3. Cập nhật: 23/10/2026. Phụ trách: phuc.bh@urbox.vn.
+- Phiên bản: 3.22.0. Cập nhật: 23/10/2026. Phụ trách: phuc.bh@urbox.vn.
 - Ảnh và video trong tài liệu dùng dữ liệu mẫu và tài khoản giả (`*.demo@urbox.vn`), không có dữ liệu thật.
 - Dữ liệu tra cứu nội bộ của trợ lý (ticket Jira, danh bạ, kiến trúc hệ thống) hiện là dữ liệu mẫu. Kho tri
   thức thật của công ty dùng WikiBox khi người tạo cuộc họp đã kết nối (mục 13.4).
@@ -23,6 +23,10 @@ video: huong-dan/video-demo.mp4
 - Bản 3.21.1 (19/10/2026): PowerPoint mở để trình bày hiện đúng thiết kế từng slide, vẫn giữ ghi chú người
   trình bày (mục 7.4).
 - Bản 3.21.2 (23/10/2026): kết nối kho tri thức WikiBox bằng đăng nhập Google, không cần API key (mục 13.4).
+- Bản 3.21.3 (23/10/2026): bật mic/thu liên tục không còn bị Soniox "giới hạn" ngắt giữa chừng; phòng mở quá
+  30 phút mà không ai nói thì tự kết thúc kèm recap.
+- Bản 3.22.0 (23/10/2026): thêm **extension Chrome thu tiếng tab** cho họp online - nghe tiếng người trong Google
+  Meet/Teams/Zoom qua tab, chép lời như mic, không cần bot vào phòng (cài theo `extension/README.md`).
 
 ## Mục lục
 

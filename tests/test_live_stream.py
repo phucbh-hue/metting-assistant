@@ -192,6 +192,17 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await self.wait_for(lambda: len(FakeSoniox.instances) == 2 and not self.stream.down))
         self.assertEqual(self.stream._fatal, "")
 
+    async def test_tab_stream_runs_alongside_mic(self):
+        """Extension thu tiếng tab là luồng riêng, chạy song song với mic và KHÔNG chiếm nguồn mic của cuộc họp."""
+        self.assertIs(self.s.audio_owner, self.owner)
+        tab_owner = object()
+        tab = await self.s.start_audio(tab_owner, "tab", claim_owner=False)
+        self.assertIs(self.s.audio_owner, self.owner)        # tab không tiếp quản nguồn mic
+        self.assertIn("tab", self.s.streams)
+        self.assertTrue(self.s._capturing())
+        await tab.feed(tone(1.0))
+        self.assertEqual(len(FakeSoniox.instances), 2)       # mic + tab = hai phiên Soniox riêng
+
     async def test_proactive_session_rollover_before_cap(self):
         """Tự đổi phiên trước giới hạn 300 phút để không bị Soniox cắt giữa câu."""
         await self.stream.feed(tone(1.0))

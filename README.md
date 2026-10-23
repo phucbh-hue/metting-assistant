@@ -17,6 +17,21 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 
 ---
 
+## Bản 3.22.0: extension thu tiếng tab (nghe họp online không cần bot)
+
+Thêm nguồn âm thanh thứ tư, bên cạnh mic / tệp / bot Recall: một **extension Chrome** (`extension/`) thu **tiếng của
+tab đang mở** (Google Meet, Teams web, Zoom web, webinar...) và gửi về server thành luồng **"tab"**, chép lời như mic.
+- Chạy **song song với mic** (họp nửa online nửa trực tiếp): mic lo tiếng trong phòng, tab lo tiếng người online, không
+  cần bot Recall vào phòng và không tốn credit Recall.
+- Server: WebSocket `/ws/meeting/{mid}/tab?token=<token người dùng>` (`meeting/app.py`) -> `start_audio(..., "tab",
+  claim_owner=False)` trong `meeting/live.py`: luồng phụ, không chiếm "nguồn mic" của cuộc họp.
+- Xác thực bằng chính token đăng nhập của người dùng: content script `token-bridge.js` đọc `ma_token` trên trang app
+  rồi đưa cho extension (cookie không tới được `chrome-extension://`). Người dùng đăng nhập app một lần là đủ.
+- Chỉ dùng khi mọi người **đã được xin phép ghi âm từ trước**: extension không hiện thông báo trong phòng họp.
+- Hướng dẫn cài (dev, load unpacked) và giới hạn: `extension/README.md`. Chưa chống vọng âm mic↔tab (nên đeo tai nghe
+  khi vừa dùng mic phòng vừa thu tab).
+- Test: `tests/test_live_stream.py::test_tab_stream_runs_alongside_mic`.
+
 ## Bản 3.21.3: Soniox không còn bị "giới hạn", phòng trống tự kết thúc
 
 Hai việc để bật mic/thu liên tục không bị ngắt và không tốn phí cho phòng trống:
