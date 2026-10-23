@@ -17,6 +17,21 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 
 ---
 
+## Bản 3.21.3: Soniox không còn bị "giới hạn", phòng trống tự kết thúc
+
+Hai việc để bật mic/thu liên tục không bị ngắt và không tốn phí cho phòng trống:
+- **Xử lý giới hạn Soniox.** Soniox giới hạn mỗi phiên realtime 300 phút và mỗi tổ chức ~10 kết nối đồng thời
+  (phiên để không cũng tính). Trước đây bật liên tục lâu, hoặc nhiều luồng chạy song song (mic + từng người trong
+  Meet + tab), bị trả về 429 rồi app coi là "ngắt kết nối liên tục" và dừng hẳn. Nay: tự **đổi phiên** trước mốc
+  300 phút (`SONIOX_MAX_SESSION_S`, mặc định 290 phút); gặp 429/giới hạn thì nối lại **chậm rãi** và không tính vào
+  ngưỡng ngắt liên tục; `max_duration_reached` được coi là đổi phiên, không báo lỗi. Phân loại lỗi ở
+  `meeting.live.soniox_error_kind`.
+- **Tự kết thúc phòng trống.** Cuộc họp đang được ghi (mic / extension thu tiếng tab / bot Meet) mà mở quá
+  `MEETING_IDLE_END_S` (mặc định 30 phút) vẫn chưa ai nói câu nào thì tự kết thúc và lập một recap ngắn
+  (`artifacts.empty_recap`), đỡ để Soniox/Recall chạy cho phòng không có người. Đặt `MEETING_IDLE_END_S=0` để tắt.
+- Test: `tests/test_live_stream.py` (giới hạn đồng thời, đổi phiên theo thời lượng, tự đổi phiên),
+  `tests/test_meeting_session.py` (tự kết thúc + recap, không kết thúc khi đã có người nói / không có nguồn ghi).
+
 ## Bản 3.21.2: kết nối WikiBox bằng đăng nhập Google
 
 Từ 23/10/2026 WikiBox cho Copilot đăng nhập OAuth: đăng ký ứng dụng tự động (`/api/v1/oauth/register`) nhận cả

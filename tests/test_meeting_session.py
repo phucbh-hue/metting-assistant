@@ -509,5 +509,39 @@ class LifecycleTests(SessionTestCase):
         self.assertIn("meeting_status", types)
 
 
+class IdleAutoEndTests(SessionTestCase):
+    """Mở quá lâu mà chưa ai nói câu nào -> tự kết thúc cuộc họp và lập recap (đỡ tốn Soniox/Recall cho phòng trống)."""
+
+    async def test_auto_end_and_recap_when_no_speech(self):
+        with mock.patch.object(live, "IDLE_END_S", 0.01), mock.patch.object(live, "IDLE_CHECK_S", 0.03):
+            mid = db.create_meeting("Phòng trống")
+            s = await live.get_session(mid)
+            s.audio_owner = object()                 # đang ghi (mic / extension) nhưng im lặng
+            q = await s.subscribe()                  # khởi động worker + watchdog
+            ended = await self.settle(s, lambda: db.get_meeting(mid).get("status") == "ended", timeout=5)
+        self.assertTrue(ended)
+        recap = [a for a in db.get_artifacts(mid) if a.get("kind") == "minutes"]
+        self.assertEqual(len(recap), 1)
+        self.assertIn("Không ghi nhận lời thoại", recap[0]["content"])
+        self.assertTrue(any(e["type"] == "artifact_created" for e in self.events(q)))
+
+    async def test_no_auto_end_when_someone_spoke(self):
+        with mock.patch.object(live, "IDLE_END_S", 0.01), mock.patch.object(live, "IDLE_CHECK_S", 0.03):
+            mid = db.create_meeting("Có người nói")
+            s = await live.get_session(mid)
+            s.audio_owner = object()
+            await self.feed(s, [(0, "1", 1.2)])      # đã có một câu -> không được tự kết thúc
+            await asyncio.sleep(0.2)
+        self.assertNotEqual(db.get_meeting(mid).get("status"), "ended")
+
+    async def test_no_auto_end_without_capture_source(self):
+        with mock.patch.object(live, "IDLE_END_S", 0.01), mock.patch.object(live, "IDLE_CHECK_S", 0.03):
+            mid = db.create_meeting("Chỉ mở xem")
+            s = await live.get_session(mid)
+            await s.subscribe()                      # mở phòng xem, không ghi âm -> không tự kết thúc
+            await asyncio.sleep(0.2)
+        self.assertNotEqual(db.get_meeting(mid).get("status"), "ended")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1676,6 +1676,23 @@ def import_deck(meeting_id: int, path: str) -> Dict[str, Any]:
     return db.get_artifact(aid)
 
 
+def empty_recap(meeting_id: int, title: str, meeting: Optional[Dict[str, Any]] = None,
+                duration_min: Optional[float] = None, reason: str = "để trống quá lâu") -> Dict[str, Any]:
+    """Recap ngắn cho cuộc họp KHÔNG ghi nhận lời nói nào (tự kết thúc khi mở lâu mà không ai nói). Không gọi AI."""
+    meeting = meeting or {}
+    lines = [f"# Recap: {title}", "", f"- Thời gian bắt đầu: {_fmt_date(meeting.get('started_at'))}"]
+    if duration_min is not None:
+        lines.append(f"- Mở trong khoảng {int(duration_min)} phút")
+    lines += ["- Kết quả: **Không ghi nhận lời thoại nào**", "",
+              f"Cuộc họp tự kết thúc vì {reason} mà không có ai nói, nên chưa có nội dung để lập biên bản.",
+              "Nếu buổi họp thật sự diễn ra, kiểm tra lại nguồn âm thanh: mic, extension thu tiếng tab, hoặc bot Google Meet."]
+    content = "\n".join(lines)
+    meta = {"auto": True, "empty": True}
+    aid = db.save_artifact(meeting_id=meeting_id, kind="minutes", title=f"Recap: {title}", content=content,
+                           prompt_trigger="Recap tự động (không có lời thoại)", meta=meta)
+    return {"id": aid, "kind": "minutes", "title": f"Recap: {title}", "content": content, "meta": meta}
+
+
 async def generate_slides(meeting_id: int, prompt_request: str, context_text: str = "",
                           data_text: str = "") -> Dict[str, Any]:
     set_meeting(meeting_id, "slide")

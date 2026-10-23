@@ -4,7 +4,7 @@ description: >
   Hướng dẫn cho người dùng nội bộ UrBox: đăng nhập, tạo và chạy cuộc họp, trợ lý AI, trò chơi có thưởng,
   biên bản và mẫu biên bản, nhóm cuộc họp, lịch Google và bot Google Meet, chế độ BD, kho tri thức WikiBox,
   hồ sơ giọng nói và toàn bộ phần Cài đặt. Kèm video demo có phụ đề.
-version: 3.21.2
+version: 3.21.3
 updated: 23/10/2026
 owner: phuc.bh@urbox.vn
 video: huong-dan/video-demo.mp4
@@ -12,7 +12,7 @@ video: huong-dan/video-demo.mp4
 
 # Hướng dẫn sử dụng UrBox Meeting Copilot
 
-- Phiên bản: 3.21.2. Cập nhật: 23/10/2026. Phụ trách: phuc.bh@urbox.vn.
+- Phiên bản: 3.21.3. Cập nhật: 23/10/2026. Phụ trách: phuc.bh@urbox.vn.
 - Ảnh và video trong tài liệu dùng dữ liệu mẫu và tài khoản giả (`*.demo@urbox.vn`), không có dữ liệu thật.
 - Dữ liệu tra cứu nội bộ của trợ lý (ticket Jira, danh bạ, kiến trúc hệ thống) hiện là dữ liệu mẫu. Kho tri
   thức thật của công ty dùng WikiBox khi người tạo cuộc họp đã kết nối (mục 13.4).
@@ -799,6 +799,8 @@ WikiBox (`wiki.urbox.dev`) là kho tri thức của công ty. Kết nối rồi 
 | "Trình duyệt chưa cho phép dùng micro" | Bấm biểu tượng ổ khóa trên thanh địa chỉ, cho phép micro, bật mic lại |
 | "Không tìm thấy micro nào" | Cắm micro hoặc tai nghe rồi thử lại |
 | "Một thiết bị khác vừa bật mic cho cuộc họp này" | Mỗi cuộc họp một nguồn mic: tắt mic ở thiết bị kia |
+| "Soniox đang giới hạn số kết nối" | Đang ghi quá nhiều cuộc họp cùng lúc (Soniox cho ~10 kết nối đồng thời). Ứng dụng tự nối lại; bớt cuộc họp đang ghi hoặc đợi một lát |
+| Cuộc họp tự kết thúc kèm recap "Không ghi nhận lời thoại nào" | Phòng mở quá 30 phút mà không ai nói nên tự kết thúc cho đỡ tốn. Kiểm tra lại nguồn âm thanh (mic, extension thu tiếng tab, bot Meet) rồi tạo cuộc họp mới |
 | Trợ lý không phản hồi khi gọi tên | Gọi tên kèm yêu cầu trong cùng câu; thêm "Tên gọi khác" trong Cài đặt nếu tên bị chép sai |
 | Gán nhầm người nói | Bấm tên ở đầu đoạn, chọn "Câu này là của..." hoặc gộp người nói; lưu mẫu giọng để lần sau tự nhận ra |
 | "Chưa lưu Drive: cần kết nối" | Cài đặt, mục Google (Drive và Lịch): kết nối bằng đúng tài khoản trùng email đăng nhập |

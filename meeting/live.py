@@ -55,6 +55,15 @@ MAX_SEGMENT_S = 20.0            # Câu dài hơn: cắt tại dấu câu để t
 AUDIO_KEEP_S = 180              # Giữ tối đa ngần này giây audio để cắt clip / phát lại
 REPLAY_MAX_S = 15.0             # Tối đa số giây audio phát lại sau khi nối lại Soniox
 IDLE_CLOSE_S = float(os.getenv("SONIOX_IDLE_CLOSE_S", "30"))
+# Soniox giới hạn MỖI phiên realtime 300 phút và mỗi tổ chức ~10 kết nối đồng thời (phiên để không cũng tính). Bật mic
+# liên tục quá 300 phút sẽ bị cắt (max_duration_reached); nhiều luồng (mic + từng người trong Meet + tab) chạy song song
+# dễ chạm trần đồng thời (max_concurrent_connections_reached, mã 429). Ta tự đổi phiên trước giới hạn thời gian, và khi
+# bị giới hạn thì nối lại chậm rãi chứ không coi là lỗi chí mạng.
+MAX_SESSION_S = float(os.getenv("SONIOX_MAX_SESSION_S", str(290 * 60)))
+# Cuộc họp đang được ghi (mic / extension thu tiếng tab / bot Meet) mà mở quá ngần này giây vẫn chưa ai nói câu nào thì
+# tự kết thúc và lập recap: đỡ để phòng trống ngốn Soniox/Recall. Đặt 0 để tắt.
+IDLE_END_S = float(os.getenv("MEETING_IDLE_END_S", str(30 * 60)))
+IDLE_CHECK_S = float(os.getenv("MEETING_IDLE_CHECK_S", "60"))
 # Họp nửa online nửa trực tiếp: tiếng người trong Meet phát ra loa của máy trong phòng có thể lọt vào mic của ứng dụng.
 # Khi người trong Meet vừa nói, câu của mic được giữ ECHO_HOLD_S giây rồi so với câu Meet cùng lúc: trùng thì bỏ.
 ECHO_HOLD_S = float(os.getenv("MEET_ECHO_HOLD_S", "2.0"))
@@ -85,6 +94,23 @@ def _unfinished(command: str) -> bool:
 # ==============================================================================
 # SONIOX REALTIME STREAM
 # ==============================================================================
+def soniox_error_kind(code: int, msg: str) -> str:
+    """Phân loại lỗi Soniox để biết cách xử lý.
+
+    - "rollover": hết 300 phút/phiên (max_duration_reached) -> đổi phiên ngay, không báo lỗi.
+    - "limit": chạm trần đồng thời / rate (mã 429, max_concurrent_connections_reached...) -> nối lại chậm rãi.
+    - "fatal": sai cấu hình, khóa, hết tiền (400/401/402/403) -> nối lại cũng vô ích.
+    - "transient": lỗi khác -> nối lại như thường."""
+    m = (msg or "").lower()
+    if "duration" in m:
+        return "rollover"
+    if code == 429 or any(k in m for k in ("concurrent", "limit", "quota", "rate", "too many")):
+        return "limit"
+    if code in (400, 401, 402, 403):
+        return "fatal"
+    return "transient"
+
+
 class MeetingStream:
     """Luồng nhận âm thanh PCM và gửi sang Soniox Realtime STT."""
     RT_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
@@ -118,6 +144,8 @@ class MeetingStream:
         self._rec: Optional[recording.Run] = None   # lượt ghi âm đang mở (chỉ khi cuộc họp bật ghi âm)
         self._reconnects: List[float] = []
         self._hold_task: Optional[asyncio.Task] = None
+        self._sess_started = 0.0      # monotonic lúc mở phiên Soniox hiện tại (tự đổi phiên trước giới hạn 300 phút)
+        self._soft = ""               # lý do nối lại "nhẹ": "limit" (Soniox giới hạn) / "rollover" (đổi phiên định kỳ)
 
     # ------------------------------------------------------------ status ---
     def _set_state(self, state: str, message: str = ""):
@@ -178,6 +206,7 @@ class MeetingStream:
             sent = end
         self.down = False
         self.last_audio = time.monotonic()
+        self._sess_started = time.monotonic()
         self._set_state("live" if not self.paused else "paused")
         log.info("meeting.live: mở Soniox session %d stream %s epoch %d (phát lại %.1fs)",
                  self.session.id, self.name, self.epoch, (self.fed - start) / BPS)
@@ -206,32 +235,40 @@ class MeetingStream:
                 except Exception:
                     return
 
+    # Lịch chờ giữa các lần nối lại (giây). limit: chờ lâu hơn và thử nhiều lần để trần đồng thời kịp hạ; rollover: nhanh.
+    _BACKOFF = {"": [0.5, 1, 2, 4, 8, 8, 15], "rollover": [0.5, 1, 2, 4, 8],
+                "limit": [8, 12, 15, 20, 20, 30, 30, 30, 30, 30]}
+
     def _lost(self, reason: str):
         if self.closed or self.reconnecting or self._fatal:
             return
+        soft, self._soft = self._soft, ""      # "limit"/"rollover": nối lại nhẹ, không tính vào ngưỡng ngắt liên tục
         now = time.monotonic()
-        self._reconnects = [t for t in self._reconnects if now - t < 300] + [now]
-        if len(self._reconnects) > 8:
-            self._fatal = f"Soniox ngắt kết nối liên tục ({reason})"
-            self.down = True
-            self._set_state("error", self._fatal + ". Hãy tắt rồi bật lại mic.")
-            return
+        if not soft:
+            self._reconnects = [t for t in self._reconnects if now - t < 300] + [now]
+            if len(self._reconnects) > 8:
+                self._fatal = f"Soniox ngắt kết nối liên tục ({reason})"
+                self.down = True
+                self._set_state("error", self._fatal + ". Hãy tắt rồi bật lại mic.")
+                return
         self.down = True
         self.reconnecting = True
-        log.warning("session %d stream %s: %s - đang tự động nối lại Soniox...", self.session.id, self.name, reason)
-        self._set_state("reconnecting", reason)
-        asyncio.create_task(self._reconnect(int(self.final_pos * BPS)))
+        msg = ({"limit": "Soniox đang giới hạn số kết nối, em tự nối lại...",
+                "rollover": "Đang đổi phiên Soniox (giới hạn 300 phút mỗi phiên)..."}.get(soft, reason))
+        log.warning("session %d stream %s: %s - nối lại Soniox (%s)...", self.session.id, self.name, reason, soft or "thường")
+        self._set_state("reconnecting", msg)
+        asyncio.create_task(self._reconnect(int(self.final_pos * BPS), soft))
 
-    async def _reconnect(self, replay_from: int):
+    async def _reconnect(self, replay_from: int, soft: str = ""):
         old, self.ws = self.ws, None
         if old is not None:
             self._closing.add(old)
             try:
-                await old.close()
+                await old.close()               # đóng hẳn phiên cũ trước khi mở phiên mới (trần đồng thời tính cả phiên để không)
             except Exception:
                 pass
         try:
-            for i, wait in enumerate([0.5, 1, 2, 4, 8, 8, 15], 1):
+            for i, wait in enumerate(self._BACKOFF.get(soft, self._BACKOFF[""]), 1):
                 await asyncio.sleep(wait)
                 if self.closed or self._fatal:
                     return
@@ -242,7 +279,8 @@ class MeetingStream:
                     return
                 except Exception as e:
                     log.warning("session %d: nối lại Soniox lần %d thất bại: %s", self.session.id, i, e)
-            self._set_state("error", "Không nối lại được Soniox. Hãy tắt rồi bật lại mic.")
+            self._set_state("error", ("Soniox vẫn giới hạn số kết nối. Hãy bớt cuộc họp đang ghi hoặc thử lại sau."
+                                      if soft == "limit" else "Không nối lại được Soniox. Hãy tắt rồi bật lại mic."))
         finally:
             self.reconnecting = False
 
@@ -292,6 +330,11 @@ class MeetingStream:
             drop = len(self.audio) - keep
             del self.audio[:drop]
             self.audio_base += drop
+        if (self.is_open and not self.reconnecting and self._sess_started
+                and time.monotonic() - self._sess_started >= MAX_SESSION_S):
+            self._soft = "rollover"             # tới gần 300 phút: tự đổi phiên trước khi Soniox cắt giữa chừng
+            self._lost("phiên Soniox tới giới hạn thời gian")
+            return
         if self.ws is None and not self.reconnecting and not self._open_lock.locked():
             self._lost("chưa có kết nối Soniox")
             return
@@ -369,11 +412,16 @@ class MeetingStream:
                     continue
                 m = json.loads(raw)
                 if m.get("error_code"):
-                    lost = f"Soniox {m.get('error_code')}: {m.get('error_message', '')}"
-                    if int(m.get("error_code") or 0) in (400, 401, 402, 403):
+                    code = int(m.get("error_code") or 0)
+                    lost = f"Soniox {code}: {m.get('error_message', '')}"
+                    kind = soniox_error_kind(code, m.get("error_message", ""))
+                    if kind == "fatal":
                         self._fatal = lost   # lỗi cấu hình/tài khoản: nối lại cũng vô ích
                         self._set_state("error", lost)
-                    await self.session.emit({"type": "error", "text": lost})
+                        await self.session.emit({"type": "error", "text": lost})
+                    else:                    # giới hạn / đổi phiên / lỗi tạm: nối lại chứ không báo lỗi gắt cho người dùng
+                        self._soft = kind if kind in ("limit", "rollover") else ""
+                        log.warning("session %d stream %s: %s (%s)", self.session.id, self.name, lost, kind)
                     break
                 interim, interim_raw = "", None
                 for tok in m.get("tokens", []):
@@ -681,7 +729,8 @@ class MeetingSession:
     def _ensure_workers(self):
         if self._workers or self.disposed:
             return
-        self._workers = [asyncio.create_task(self._proc_loop()), asyncio.create_task(self._db_loop())]
+        self._workers = [asyncio.create_task(self._proc_loop()), asyncio.create_task(self._db_loop()),
+                         asyncio.create_task(self._idle_watch())]
         if self._backfill:
             self._db(db.update_segments_speaker_by_seqs, self.id, self._backfill)
             self._backfill = []
@@ -2645,6 +2694,38 @@ class MeetingSession:
         return items
 
     # --------------------------------------------------------- lifecycle ---
+    def _capturing(self) -> bool:
+        """Có nguồn âm thanh đang chạy (mic / extension thu tiếng tab / bot Meet): chỉ tự kết thúc phòng đang thực sự ghi."""
+        return (self.audio_owner is not None or bool(self.meet_bot)
+                or any(not s.closed for s in self.streams.values()))
+
+    async def _idle_watch(self):
+        """Mở quá IDLE_END_S mà chưa ai nói câu nào -> tự kết thúc cuộc họp và lập recap. Chỉ với phòng đang được ghi
+        (không phải cuộc họp riêng nhận lời thoại từ bot dùng chung: phòng gốc tự lo)."""
+        if IDLE_END_S <= 0:
+            return
+        try:
+            while not self.disposed:
+                await asyncio.sleep(IDLE_CHECK_S)
+                if (self.is_live() and self.copy_of is None and not self.segments and self._speech_at == 0.0
+                        and self._capturing() and self.clock() >= IDLE_END_S):
+                    await self._auto_finish()
+                    return
+        except asyncio.CancelledError:
+            pass
+
+    async def _auto_finish(self):
+        mins = int(self.clock() // 60)
+        log.info("meeting.live: cuộc họp %d không có lời nói %d phút -> tự kết thúc + recap", self.id, mins)
+        await self._say(f"Đã khoảng {mins} phút không có ai nói, em xin kết thúc cuộc họp và lưu lại recap ạ.", quiet=True)
+        try:
+            art = await asyncio.to_thread(artifacts.empty_recap, self.id, self.title, self.meeting, float(mins))
+            self._art_cache[art["id"]] = art
+            await self.emit({"type": "artifact_created", "artifact": art})
+        except Exception as e:
+            log.warning("meeting.live: tạo recap tự động lỗi: %s", e)
+        await self.finish(generate_minutes=False)
+
     async def finish(self, generate_minutes: bool = True) -> Dict[str, Any]:
         """Kết thúc cuộc họp: chốt chữ cuối, lưu trạng thái 'ended', lập biên bản ở chế độ nền."""
         for s in list(self.streams.values()):

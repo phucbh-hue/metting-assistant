@@ -172,6 +172,35 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.8)
         self.assertEqual(len(FakeSoniox.instances), 1)
 
+    async def test_concurrency_limit_reconnects_without_fatal(self):
+        """429 trần đồng thời (Soniox tính cả phiên để không): nối lại chậm rãi, KHÔNG coi là ngắt liên tục."""
+        ws = FakeSoniox.instances[0]
+        await self.stream.feed(tone(1.0))
+        with mock.patch.dict(live.MeetingStream._BACKOFF, {"limit": [0.05, 0.05, 0.05]}):
+            ws.push({"error_code": 429, "error_message": "max_concurrent_connections_reached"})
+            self.assertTrue(await self.wait_for(lambda: len(FakeSoniox.instances) == 2 and not self.stream.down))
+        self.assertEqual(self.stream._fatal, "")
+        self.assertNotEqual(self.stream.state, "error")
+        self.assertEqual(self.stream._reconnects, [])        # giới hạn không tính vào ngưỡng 8 lần/5 phút
+
+    async def test_duration_cap_rolls_over(self):
+        """Hết 300 phút/phiên (max_duration_reached): mở phiên mới, không báo lỗi."""
+        ws = FakeSoniox.instances[0]
+        await self.stream.feed(tone(1.0))
+        with mock.patch.dict(live.MeetingStream._BACKOFF, {"rollover": [0.05]}):
+            ws.push({"error_code": 429, "error_message": "max_duration_reached"})
+            self.assertTrue(await self.wait_for(lambda: len(FakeSoniox.instances) == 2 and not self.stream.down))
+        self.assertEqual(self.stream._fatal, "")
+
+    async def test_proactive_session_rollover_before_cap(self):
+        """Tự đổi phiên trước giới hạn 300 phút để không bị Soniox cắt giữa câu."""
+        await self.stream.feed(tone(1.0))
+        self.assertEqual(len(FakeSoniox.instances), 1)
+        with mock.patch.object(live, "MAX_SESSION_S", 0.0), mock.patch.dict(live.MeetingStream._BACKOFF, {"rollover": [0.05]}):
+            await self.stream.feed(tone(0.2))                # feed này phát hiện phiên quá hạn -> đổi phiên
+            self.assertTrue(await self.wait_for(lambda: len(FakeSoniox.instances) == 2 and not self.stream.down))
+        self.assertEqual(self.stream._fatal, "")
+
 
 if __name__ == "__main__":
     unittest.main()
