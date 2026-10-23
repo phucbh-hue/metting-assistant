@@ -3,7 +3,7 @@
 WikiBox là nền tảng RAG của UrBox (giao diện "WikiBox", máy chủ MCP ở <WIKIBOX_URL>/mcp, 6 công cụ chỉ đọc: tìm tài liệu,
 đọc nội dung, hỏi Thủ thư...). Thông tin công khai của máy chủ (/.well-known/oauth-protected-resource) cho biết:
 - OAuth 2.1 + PKCE S256, tự đăng ký client (dynamic client registration), quyền `wikibox.read`, token Bearer ở header;
-- hoặc API key cá nhân tạo ở WikiBox > Tùy chỉnh cá nhân > WikiBox MCP (cũng gửi dạng Bearer).
+- hoặc API key cá nhân tạo ở wiki.urbox.dev/platform/wikibox-mcp, mục API key của bạn (cũng gửi dạng Bearer).
 Cả hai đều chạy DƯỚI QUYỀN CỦA CHÍNH NGƯỜI ĐÓ trong workspace họ chọn: mỗi người chỉ đọc được tài liệu mình được xem.
 
 Kết nối của từng người (bản web: email đăng nhập; bản trên máy: một kết nối chung LOCAL). Server giữ token (mã hóa
@@ -60,7 +60,7 @@ class OAuthBlocked(WikiboxError):
         super().__init__(
             f"WikiBox chưa cho phép {origin} đăng nhập bằng OAuth. Quản trị viên WikiBox thêm {origin} vào danh sách "
             "\"Origin redirect được phép\" (trang quản trị WikiBox, cấu hình nền tảng, mục MCP OAuth). Trong lúc chờ, "
-            "anh chị dùng API key cá nhân: WikiBox > Tùy chỉnh cá nhân > WikiBox MCP > Tạo key mới.")
+            "anh chị dùng API key cá nhân: wiki.urbox.dev/platform/wikibox-mcp > API key của bạn > Tạo key mới.")
 
 
 def base_url() -> str:
@@ -275,7 +275,7 @@ async def exchange(code: str, state: str) -> Dict[str, str]:
 
 
 async def save_key(email: str, api_key: str) -> Dict[str, Any]:
-    """Dán API key cá nhân (WikiBox > Tùy chỉnh cá nhân > WikiBox MCP > Tạo key mới). Thử đọc công cụ trước khi lưu."""
+    """Dán API key cá nhân (wiki.urbox.dev/platform/wikibox-mcp > API key của bạn > Tạo key mới). Thử đọc công cụ trước khi lưu."""
     owner = who(email)
     key = (api_key or "").strip()
     if key.lower().startswith("bearer "):

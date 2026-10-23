@@ -1,7 +1,7 @@
 """Bộ slide "UrBox Meeting Copilot" trình bày với DH/LM (19/10/2026), kèm kịch bản.
 
-Nội dung: điểm khác biệt; tài liệu của nhóm và ứng dụng UrWiki (UrWiki là ứng dụng hỗ trợ, tách rời Meeting Copilot);
-truy cập UrWiki lấy dữ liệu; DH/LM quản lý cuộc họp của thành viên; bot Recall.ai tính phí; lưu trữ realtime và sau họp.
+Nội dung: điểm khác biệt; tài liệu của nhóm và ứng dụng WikiBox (WikiBox là ứng dụng hỗ trợ, tách rời Meeting Copilot);
+truy cập WikiBox lấy dữ liệu; DH/LM quản lý cuộc họp của thành viên; bot Recall.ai tính phí; lưu trữ realtime và sau họp.
 
 Đầu ra (docs/pitch/):
 - "UrBox Meeting Copilot - Trinh bay 19.10.2026.pptx": chữ, hình, bảng là đối tượng thật nên sửa được; tải lên Google
@@ -31,6 +31,7 @@ ASSETS = BUILD / "assets"
 PREVIEW = BUILD / "preview"
 NAME = "UrBox Meeting Copilot - Trinh bay 19.10.2026"
 DATE = "19/10/2026"
+STATUS_DATE = "23/10/2026"                 # trạng thái kết nối WikiBox
 OWNER = "phuc.bh@urbox.vn"
 
 W, H = 13.333, 7.5                      # 16:9, đơn vị inch
@@ -274,7 +275,7 @@ def s01() -> Slide:
     s.add(pill(0.8, 1.45, 3.55, f"Trình bày nội bộ · {DATE}", GOLD, INK, size=13, h=0.42))
     s.add(T(0.8, 2.08, 8.2, 0.95, "UrBox Meeting Copilot", size=44, bold=True, color=WHITE, line=1.0, name="title"))
     s.add(T(0.8, 3.2, 7.2, 1.45, "Trợ lý AI trong cuộc họp: hỗ trợ ngay lúc họp, lưu trữ cả realtime lẫn sau buổi họp, "
-            "dùng ứng dụng UrWiki làm kho tri thức", size=20, color=SOFT, line=1.15, name="subtitle"))
+            "dùng ứng dụng WikiBox làm kho tri thức", size=20, color=SOFT, line=1.15, name="subtitle"))
     s.add(T(0.8, 4.95, 7.2, 0.4, "Dành cho DH/LM và các phòng ban của UrBox", size=15, color=WHITE, bold=True,
             name="audience"))
     s.add(T(0.8, 6.45, 7.2, 0.4, f"Phụ trách: {OWNER} · Bản 3.21", size=13, color=SOFT, name="owner"))
@@ -289,8 +290,8 @@ def s02() -> Slide:
            "Mỗi điểm có slide riêng phía sau, số trên thẻ là thứ tự trình bày")
     items = [
         ("spark", "Điểm khác biệt", "Hỗ trợ ngay lúc họp, bằng dữ liệu của UrBox"),
-        ("book", "Tài liệu nhóm và UrWiki", "Hai nguồn tách rời, mỗi nguồn một dấu riêng"),
-        ("search", "Truy cập UrWiki", "Tra tài liệu chính thức ngay trong buổi họp"),
+        ("book", "Tài liệu nhóm và WikiBox", "Hai nguồn tách rời, mỗi nguồn một dấu riêng"),
+        ("search", "Truy cập WikiBox", "Tra tài liệu chính thức ngay trong buổi họp"),
         ("users", "DH/LM quản lý cuộc họp", "Nhóm theo phòng ban, biên bản cùng một chuẩn"),
         ("coin", "Bot Recall.ai", "Bot tính phí 0,5 USD mỗi giờ, một bot mỗi cuộc họp"),
         ("db", "Lưu trữ", "Lưu từng câu khi nói, biên bản lên Drive sau họp"),
@@ -314,7 +315,7 @@ def s03() -> Slide:
            "So với Gemini trong Google Meet, Otter, Fireflies, tl;dv: mạnh ở chép lời, tóm tắt sau buổi họp")
     items = [
         ("ask", "Gợi ý trả lời khách sau 4-8 giây",
-         "Bảng BD lấy từ tài liệu nhóm, cuộc họp trước và UrWiki, có dấu nguồn; chỉ đội mình thấy"),
+         "Bảng BD lấy từ tài liệu nhóm, cuộc họp trước và WikiBox, có dấu nguồn; chỉ đội mình thấy"),
         ("mic", "Trợ lý giọng nói tiếng Việt",
          "Gọi \"UrBox ơi\" để tra cứu, tóm tắt, soạn slide, sơ đồ, dashboard ngay trên màn hình họp"),
         ("users", "Biết chính xác ai đang nói",
@@ -360,16 +361,16 @@ def s04() -> Slide:
     s.add(T(x, 6.2, w, 0.62, "Không phải hẹn \"em kiểm tra rồi gửi lại\", và biết thông tin lấy từ đâu", size=14,
             line=1.05, name="result"))
     s.add(Pic(ASSETS / "shot-bd.png", 5.6, 2.3, 7.13, 4.21, name="screenshot"))
-    s.add(T(5.6, 6.55, 7.13, 0.32, "K: tài liệu nhóm · M: cuộc họp trước · U: UrWiki · W: trên mạng · dữ liệu mẫu",
+    s.add(T(5.6, 6.55, 7.13, 0.32, "K: tài liệu nhóm · M: cuộc họp trước · U: WikiBox · W: trên mạng · dữ liệu mẫu",
             size=11.5, color=MUTED, name="legend"))
     footer(s, 4)
     return s
 
 
 def s05() -> Slide:
-    s = Slide(message="Tài liệu riêng của nhóm tải lên Copilot; tài liệu chung của công ty đọc từ ứng dụng UrWiki.")
-    header(s, "2 · Tài liệu nhóm và UrWiki", "Hai nguồn tri thức, hai nơi quản lý riêng",
-           "Tài liệu riêng của nhóm tải lên Meeting Copilot; tài liệu chung của công ty đọc từ ứng dụng UrWiki")
+    s = Slide(message="Tài liệu riêng của nhóm tải lên Copilot; tài liệu chung của công ty đọc từ ứng dụng WikiBox.")
+    header(s, "2 · Tài liệu nhóm và WikiBox", "Hai nguồn tri thức, hai nơi quản lý riêng",
+           "Tài liệu riêng của nhóm tải lên Meeting Copilot; tài liệu chung của công ty đọc từ ứng dụng WikiBox")
     cw = (CW - 0.3) / 2
     cards = [
         (MARGIN, "folder", "Tài liệu của nhóm", ("Trong Meeting Copilot", TINT, PURPLE), [
@@ -377,10 +378,10 @@ def s05() -> Slide:
             "PDF, Word, PowerPoint, .txt; tối đa 25 MB, 100 tài liệu",
             "Chỉ giữ phần chữ, không giữ tệp gốc",
             "Dùng cho Bảng BD, hỏi trên mọi cuộc họp (dấu K)"]),
-        (MARGIN + cw + 0.3, "plug", "Ứng dụng UrWiki (wiki.urbox.dev)", ("Ứng dụng riêng", GOLD, INK), [
+        (MARGIN + cw + 0.3, "plug", "Ứng dụng WikiBox (wiki.urbox.dev)", ("Ứng dụng riêng", GOLD, INK), [
             "Kho chính thức: sản phẩm, quy trình, chính sách",
-            "Mỗi người tự kết nối tài khoản UrWiki của mình",
-            "Chỉ đọc, đúng quyền xem của người đó trên UrWiki",
+            "Mỗi người tự kết nối tài khoản WikiBox của mình",
+            "Chỉ đọc, đúng quyền xem của người đó trên WikiBox",
             "Dùng cho trợ lý và Bảng BD (dấu U)"]),
     ]
     for x, icon, head, (tag, tfill, tcolor), lines in cards:
@@ -394,15 +395,15 @@ def s05() -> Slide:
     s.add(T(MARGIN + 0.3, 5.7, 2.0, 0.85, "Để ở đâu?", size=16, bold=True, color=PURPLE, valign="middle", name="where-h"))
     s.add(T(2.55, 5.7, 4.9, 0.85, "Riêng của nhóm hoặc của một khách (giá riêng, điều khoản, JD) → **tài liệu của nhóm**",
             size=14, valign="middle", line=1.05, name="where-a"))
-    s.add(T(7.65, 5.7, 4.95, 0.85, "Chung cả công ty, cần một bản chuẩn → **UrWiki**, không tải bản sao vào Copilot",
+    s.add(T(7.65, 5.7, 4.95, 0.85, "Chung cả công ty, cần một bản chuẩn → **WikiBox**, không tải bản sao vào Copilot",
             size=14, valign="middle", line=1.05, name="where-b"))
     footer(s, 5)
     return s
 
 
 def s06() -> Slide:
-    s = Slide(message="UrWiki là ứng dụng hỗ trợ, nối qua cổng chỉ đọc; hai bên không ghi đè nội dung của nhau.")
-    header(s, "2 · Nguyên tắc thiết kế", "UrWiki là ứng dụng hỗ trợ, không gộp vào Copilot",
+    s = Slide(message="WikiBox là ứng dụng hỗ trợ, nối qua cổng chỉ đọc; hai bên không ghi đè nội dung của nhau.")
+    header(s, "2 · Nguyên tắc thiết kế", "WikiBox là ứng dụng hỗ trợ, không gộp vào Copilot",
            "Hai ứng dụng độc lập, nối với nhau qua một cổng chỉ đọc, để nội dung không chồng chéo")
     bw, bh, y = 4.55, 1.78, 2.3
     s.add(Box(MARGIN, y, bw, bh, fill=PURPLE, radius=0.2, name="copilot"))
@@ -411,21 +412,21 @@ def s06() -> Slide:
     s.add(T(MARGIN + 0.3, y + 0.66, bw - 0.6, 1.05, "Cuộc họp, lời thoại, biên bản\nTài liệu riêng của nhóm\n"
             "Nhóm, phân quyền, mẫu giọng", size=13.5, color=SOFT, after=2, line=1.05, name="copilot-list"))
     rx = W - MARGIN - bw
-    s.add(Box(rx, y, bw, bh, fill=WHITE, line=PURPLE, line_w=1.5, radius=0.2, name="urwiki"))
-    s.add(T(rx + 0.3, y + 0.18, bw - 0.6, 0.42, "Ứng dụng UrWiki", size=18, bold=True, color=PURPLE, name="urwiki-h"))
+    s.add(Box(rx, y, bw, bh, fill=WHITE, line=PURPLE, line_w=1.5, radius=0.2, name="wikibox"))
+    s.add(T(rx + 0.3, y + 0.18, bw - 0.6, 0.42, "Ứng dụng WikiBox", size=18, bold=True, color=PURPLE, name="wikibox-h"))
     s.add(T(rx + 0.3, y + 0.66, bw - 0.6, 1.05, "wiki.urbox.dev\nSản phẩm, quy trình, chính sách\n"
-            "Do các phòng ban tự cập nhật", size=13.5, color=MUTED, after=2, line=1.05, name="urwiki-list"))
+            "Do các phòng ban tự cập nhật", size=13.5, color=MUTED, after=2, line=1.05, name="wikibox-list"))
     mx, mw = MARGIN + bw + 0.2, rx - (MARGIN + bw + 0.2) - 0.2
     s.add(T(mx, y + 0.1, mw, 0.34, "Cổng MCP", size=14, bold=True, color=PURPLE, align="center", name="gate"))
     s.add(Box(mx + 0.1, y + 0.55, mw - 0.2, 0.5, fill=GOLD, shape="arrow_lr", name="arrow"))
     s.add(T(mx, y + 1.15, mw, 0.6, "chỉ đọc · theo quyền từng người", size=12, color=MUTED, align="center", line=1.0,
             name="gate-sub"))
     rules = [
-        ("Một chiều, chỉ đọc", "Copilot không thêm, sửa, xóa gì trên UrWiki và không ghi dữ liệu họp sang đó"),
+        ("Một chiều, chỉ đọc", "Copilot không thêm, sửa, xóa gì trên WikiBox và không ghi dữ liệu họp sang đó"),
         ("Không sao chép", "Hỏi lúc nào đọc lúc đó nên luôn là bản mới nhất, không có bản cũ nằm trong Copilot"),
-        ("Mỗi nguồn một dấu", "K tài liệu nhóm, M cuộc họp trước, U UrWiki: người nghe biết thông tin từ đâu"),
+        ("Mỗi nguồn một dấu", "K tài liệu nhóm, M cuộc họp trước, U WikiBox: người nghe biết thông tin từ đâu"),
         ("Khi hai nguồn khác nhau", "Giá, điều khoản riêng cho khách theo K; kiến thức chung theo U; chỗ khác ghi cho đội"),
-        ("Tách được bất cứ lúc nào", "UrWiki chậm quá 8 giây hoặc ngắt kết nối thì Copilot vẫn chạy bằng nguồn còn lại"),
+        ("Tách được bất cứ lúc nào", "WikiBox chậm quá 8 giây hoặc ngắt kết nối thì Copilot vẫn chạy bằng nguồn còn lại"),
     ]
     for i, (head, body) in enumerate(rules):
         yy = 4.32 + i * 0.5
@@ -437,14 +438,14 @@ def s06() -> Slide:
 
 
 def s07() -> Slide:
-    s = Slide(message="Trợ lý và Bảng BD lấy dữ liệu từ UrWiki ngay trong buổi họp, mỗi ý có nguồn U.")
-    header(s, "3 · Truy cập UrWiki", "Lấy dữ liệu từ UrWiki ngay trong buổi họp",
-           "Trợ lý và Bảng BD tìm trên UrWiki bằng tài khoản của người tạo cuộc họp")
+    s = Slide(message="Trợ lý và Bảng BD lấy dữ liệu từ WikiBox ngay trong buổi họp, mỗi ý có nguồn U.")
+    header(s, "3 · Truy cập WikiBox", "Lấy dữ liệu từ WikiBox ngay trong buổi họp",
+           "Trợ lý và Bảng BD tìm trên WikiBox bằng tài khoản của người tạo cuộc họp")
     steps = [
         ("ask", "Hỏi", "\"UrBox ơi, chính sách đổi voucher là gì?\" hoặc khách hỏi"),
-        ("search", "Tìm trên UrWiki", "Máy chủ Copilot tìm, cùng lúc với tài liệu nhóm và các buổi trước"),
+        ("search", "Tìm trên WikiBox", "Máy chủ Copilot tìm, cùng lúc với tài liệu nhóm và các buổi trước"),
         ("spark", "Trả lời có nguồn", "AI chỉ dùng đoạn tìm được, gắn U1, U2 sau từng ý"),
-        ("file", "Mở tài liệu gốc", "Bấm U1 để mở đúng trang trên UrWiki"),
+        ("file", "Mở tài liệu gốc", "Bấm U1 để mở đúng trang trên WikiBox"),
     ]
     gap = 0.34
     cw = (CW - 3 * gap) / 4
@@ -461,15 +462,15 @@ def s07() -> Slide:
     s.add(Box(MARGIN, 4.75, bw, 2.02, fill=WHITE, line=LINE, radius=0.2, name="connect"))
     s.add(*tile(MARGIN + 0.28, 4.98, 0.55, "plug"))
     s.add(T(MARGIN + 1.0, 4.98, bw - 1.3, 0.5, "Kết nối một lần", size=16, bold=True, valign="middle", name="connect-h"))
-    s.add(T(MARGIN + 0.28, 5.62, bw - 0.56, 1.05, "Cài đặt > Kho tri thức: đăng nhập UrWiki hoặc dán API key\n"
-            "Chỉ đọc, đúng quyền xem của mình; ngắt kết nối lúc nào cũng được",
+    s.add(T(MARGIN + 0.28, 5.62, bw - 0.56, 1.05, "Cài đặt > Kho tri thức: đăng nhập bằng Google hoặc API key\n"
+            "Chỉ đọc, đúng quyền của mình; ngắt lúc nào cũng được",
             size=13, color=MUTED, after=3, bullet=True, line=1.05, name="connect-t"))
     x2 = MARGIN + bw + 0.3
     s.add(Box(x2, 4.75, bw, 2.02, fill=GOLDTINT, radius=0.2, name="status"))
     s.add(*tile(x2 + 0.28, 4.98, 0.55, "gauge", fill=WHITE))
-    s.add(T(x2 + 1.0, 4.98, bw - 1.3, 0.5, f"Trạng thái {DATE}", size=16, bold=True, valign="middle", name="status-h"))
-    s.add(T(x2 + 0.28, 5.62, bw - 0.56, 1.12, "Đã tích hợp qua MCP (14/10/2026), cần chạy thử với tài khoản thật\n"
-            "Đăng nhập trực tiếp chờ quản trị UrWiki cho phép; trước mắt dùng API key",
+    s.add(T(x2 + 1.0, 4.98, bw - 1.3, 0.5, f"Trạng thái {STATUS_DATE}", size=16, bold=True, valign="middle", name="status-h"))
+    s.add(T(x2 + 0.28, 5.62, bw - 0.56, 1.12, "WikiBox đã cho Copilot đăng nhập trực tiếp bằng tài khoản Google\n"
+            "Đã tích hợp qua MCP; cần chạy thử với tài liệu thật",
             size=13, color=INK, after=3, bullet=True, line=1.05, name="status-t"))
     footer(s, 7)
     return s
@@ -589,13 +590,13 @@ def s11() -> Slide:
 
 
 def s12() -> Slide:
-    s = Slide(message="Năm việc để triển khai: credit Recall, kết nối UrWiki, nhóm theo phòng ban, thí điểm, phát triển tiếp.")
+    s = Slide(message="Năm việc để triển khai: credit Recall, kết nối WikiBox, nhóm theo phòng ban, thí điểm, phát triển tiếp.")
     header(s, "Bước tiếp theo", "Đề xuất triển khai và việc cần quyết định", "Thí điểm 2 tuần trước khi mở rộng")
     rows = [
         ("Nạp credit Recall.ai", "Ngân sách tham khảo khoảng 1.000.000đ cho 80 giờ họp có bot mỗi tháng",
          "Quản trị viên, Tài chính"),
-        ("Mở kết nối UrWiki", "Quản trị UrWiki cho phép địa chỉ của Copilot; chạy thử với tài khoản thật",
-         "Quản trị UrWiki"),
+        ("Kết nối WikiBox", "Mỗi người đăng nhập WikiBox bằng Google trong Cài đặt; chạy thử với tài liệu thật",
+         "Từng người dùng"),
         ("Mỗi phòng ban một nhóm", "DH/LM làm chủ nhóm, thêm thành viên, chọn mẫu biên bản, tải tài liệu riêng",
          "DH/LM"),
         ("Thí điểm 2 tuần", "2-3 phòng ban (ví dụ BD, Engineering); đo số cuộc họp, thời gian có biên bản, "
@@ -622,7 +623,7 @@ def s13() -> Slide:
     s.add(T(0.8, 2.0, 7.5, 1.0, "Cảm ơn anh chị", size=48, bold=True, color=WHITE, line=1.0, name="title"))
     s.add(T(0.8, 3.05, 7.5, 0.6, "Hỏi đáp", size=26, bold=True, color=GOLD, name="subtitle"))
     s.add(T(0.8, 4.05, 7.6, 1.9, "Ứng dụng: urbox-meeting-api.onrender.com (đăng nhập @urbox.vn)\n"
-            "Hướng dẫn: mục 10.6 (bot Meet dùng chung), mục 13.4 (UrWiki)\n"
+            "Hướng dẫn: mục 10.6 (bot Meet dùng chung), mục 13.4 (WikiBox)\n"
             f"Phụ trách: {OWNER}", size=15, color=SOFT, after=6, line=1.1, name="info"))
     s.add(Box(8.75, 1.35, 3.9, 3.9, fill="7A3BD8", shape="oval", name="halo"))
     s.add(Pic(ASSETS / "mascot.png", 9.25, 1.85, 2.9, 2.83, name="mascot"))
@@ -638,19 +639,19 @@ NOTES = [
     # 1
     "Dạ em chào anh chị. Hôm nay em trình bày về UrBox Meeting Copilot, trợ lý AI dùng trong các cuộc họp của UrBox. "
     "Trong khoảng mười tám phút, em đi qua sáu nội dung: điểm khác biệt so với các công cụ ghi chú họp đang có; cách dùng "
-    "tài liệu của nhóm và ứng dụng UrWiki; cách trợ lý lấy dữ liệu từ UrWiki; cách giúp DH và LM quản lý cuộc họp của các "
+    "tài liệu của nhóm và ứng dụng WikiBox; cách trợ lý lấy dữ liệu từ WikiBox; cách giúp DH và LM quản lý cuộc họp của các "
     "thành viên; chi phí bot Recall.ai; và cách lưu trữ dữ liệu cả trong lúc họp lẫn sau buổi họp. Cuối buổi em có đề "
     "xuất triển khai và các việc cần anh chị quyết định.",
     # 2
     "Đây là sáu điểm chính. Một, Meeting Copilot hỗ trợ ngay trong lúc họp bằng dữ liệu của UrBox, không chỉ ghi chép "
-    "sau buổi. Hai, tri thức đến từ hai nguồn tách rời: tài liệu riêng của nhóm tải lên Copilot, và ứng dụng UrWiki của "
-    "công ty. Ba, trợ lý tra được UrWiki ngay trong buổi, có nguồn. Bốn, DH và LM nắm được cuộc họp của cả nhóm. Năm, "
+    "sau buổi. Hai, tri thức đến từ hai nguồn tách rời: tài liệu riêng của nhóm tải lên Copilot, và ứng dụng WikiBox của "
+    "công ty. Ba, trợ lý tra được WikiBox ngay trong buổi, có nguồn. Bốn, DH và LM nắm được cuộc họp của cả nhóm. Năm, "
     "bot Recall.ai là dịch vụ tính phí, khoảng nửa đô la mỗi giờ, một bot cho cả cuộc họp. Sáu, dữ liệu được lưu ngay khi "
     "nói và có biên bản trên Google Drive sau buổi họp.",
     # 3
     "Các công cụ như Gemini trong Google Meet, Otter hay Fireflies đã làm tốt phần chép lời và tóm tắt sau buổi họp. "
     "Meeting Copilot khác ở sáu điểm. Thứ nhất, khi khách hỏi, đội BD có gợi ý trả lời sau bốn đến tám giây, lấy từ tài "
-    "liệu nhóm, các buổi họp trước và UrWiki, có dấu nguồn. Thứ hai, trợ lý nghe tiếng Việt: chỉ cần gọi \"UrBox ơi\" là "
+    "liệu nhóm, các buổi họp trước và WikiBox, có dấu nguồn. Thứ hai, trợ lý nghe tiếng Việt: chỉ cần gọi \"UrBox ơi\" là "
     "tra cứu, tóm tắt, soạn slide, sơ đồ ngay trên màn hình họp. Thứ ba, hệ thống biết ai đang nói nhờ mẫu giọng dùng "
     "chung của công ty, kể cả khi họp trực tiếp; đo trên hai cuộc họp thật nội bộ, đúng chín mươi bảy và chín mươi tám "
     "phần trăm số câu. Thứ tư, biên bản tự nhắc khi buổi này nói khác điều đã chốt. Thứ năm, họp kết hợp trong phòng và "
@@ -661,29 +662,29 @@ NOTES = [
     "Đây là một ví dụ cụ thể. Khách hỏi: phí tích hợp API bao nhiêu, có khác lần trước không. Chỉ bốn đến tám giây sau, "
     "trên Bảng BD mở ở máy của đội mình đã có gợi ý: năm triệu đồng, thu một lần, lấy từ bảng giá của nhóm, dấu K1. Trợ "
     "lý còn ghi chú: buổi ngày hai tháng mười đội mình đã báo bốn triệu, nên giải thích phần chênh lệch, dấu M1. Mỗi ý đều "
-    "có dấu nguồn: K là tài liệu nhóm, M là cuộc họp trước, U là UrWiki, W là thông tin trên mạng khi đội bấm tra thêm. "
+    "có dấu nguồn: K là tài liệu nhóm, M là cuộc họp trước, U là WikiBox, W là thông tin trên mạng khi đội bấm tra thêm. "
     "Bảng này không chiếu lên màn hình chung và trợ lý không đọc thành tiếng, nên khách không thấy.",
     # 5
     "Về tài liệu, Copilot dùng hai nguồn và hai nơi quản lý riêng. Bên trái là tài liệu của nhóm: chủ nhóm tải lên bảng "
-    "giá, hồ sơ năng lực, FAQ, JD; hệ thống chỉ giữ phần chữ, không giữ tệp gốc. Bên phải là UrWiki, một ứng dụng riêng của "
-    "công ty tại wiki.urbox.dev; trên trang hiện vẫn ghi tên WikiBox. Copilot không chứa UrWiki mà kết nối vào: mỗi người "
-    "tự kết nối tài khoản UrWiki của mình, chỉ đọc, đúng quyền xem. Nguyên tắc chọn nơi để tài liệu: cái gì riêng của nhóm "
-    "hay của một khách thì để ở tài liệu nhóm; cái gì chung cả công ty, cần một bản chuẩn, thì để trên UrWiki và không "
+    "giá, hồ sơ năng lực, FAQ, JD; hệ thống chỉ giữ phần chữ, không giữ tệp gốc. Bên phải là WikiBox, một ứng dụng riêng của "
+    "công ty tại wiki.urbox.dev. Copilot không chứa WikiBox mà kết nối vào: mỗi người "
+    "tự kết nối tài khoản WikiBox của mình, chỉ đọc, đúng quyền xem. Nguyên tắc chọn nơi để tài liệu: cái gì riêng của nhóm "
+    "hay của một khách thì để ở tài liệu nhóm; cái gì chung cả công ty, cần một bản chuẩn, thì để trên WikiBox và không "
     "tải bản sao vào Copilot.",
     # 6
-    "Đây là nguyên tắc thiết kế quan trọng nhất: UrWiki là ứng dụng hỗ trợ, không gộp vào Meeting Copilot. Hai bên độc "
-    "lập, nối qua một cổng MCP chỉ đọc. Một, Copilot chỉ đọc, không thêm sửa xóa gì trên UrWiki và không ghi dữ liệu họp "
+    "Đây là nguyên tắc thiết kế quan trọng nhất: WikiBox là ứng dụng hỗ trợ, không gộp vào Meeting Copilot. Hai bên độc "
+    "lập, nối qua một cổng MCP chỉ đọc. Một, Copilot chỉ đọc, không thêm sửa xóa gì trên WikiBox và không ghi dữ liệu họp "
     "sang đó. Hai, không sao chép: hỏi lúc nào đọc lúc đó, nên luôn là bản mới nhất. Ba, mỗi nguồn một dấu riêng để người "
     "nghe biết thông tin từ đâu. Bốn, khi hai nguồn nói khác nhau: giá và điều khoản riêng cho khách theo tài liệu nhóm, "
-    "kiến thức chung theo UrWiki, chỗ khác nhau được ghi cho đội. Năm, tách được: UrWiki chậm quá tám giây hay ngắt kết "
+    "kiến thức chung theo WikiBox, chỗ khác nhau được ghi cho đội. Năm, tách được: WikiBox chậm quá tám giây hay ngắt kết "
     "nối thì Copilot vẫn chạy bằng các nguồn còn lại. Nhờ vậy nội dung hai bên không chồng chéo.",
     # 7
-    "Lấy dữ liệu từ UrWiki trong buổi họp gồm bốn bước. Người họp hỏi bằng giọng nói, ví dụ \"UrBox ơi, quy trình đổi "
-    "voucher hết hạn thế nào?\", hoặc khách hỏi và Bảng BD tự nhận ra. Máy chủ Copilot tìm trên UrWiki bằng tài khoản của "
+    "Lấy dữ liệu từ WikiBox trong buổi họp gồm bốn bước. Người họp hỏi bằng giọng nói, ví dụ \"UrBox ơi, quy trình đổi "
+    "voucher hết hạn thế nào?\", hoặc khách hỏi và Bảng BD tự nhận ra. Máy chủ Copilot tìm trên WikiBox bằng tài khoản của "
     "người tạo cuộc họp, song song với tài liệu nhóm và các buổi trước. AI chỉ dùng các đoạn tìm được và gắn dấu U1, U2. "
-    "Bấm U1 là mở đúng tài liệu gốc trên UrWiki. Kết nối chỉ làm một lần trong Cài đặt, bằng đăng nhập hoặc API key. Về "
-    "trạng thái: phần tích hợp xong ngày mười bốn tháng mười, cần chạy thử với tài khoản UrWiki thật; đăng nhập trực tiếp "
-    "cần quản trị UrWiki cho phép địa chỉ của Copilot, trong lúc chờ thì dùng API key.",
+    "Bấm U1 là mở đúng tài liệu gốc trên WikiBox. Kết nối chỉ làm một lần trong Cài đặt: đăng nhập "
+    "WikiBox bằng tài khoản Google công ty, hoặc dán API key. Về trạng thái: WikiBox đã cho Copilot đăng nhập trực tiếp; "
+    "cần chạy thử với tài liệu thật.",
     # 8
     "Với DH và LM, mục tiêu là nắm được cuộc họp của cả nhóm mà không phải dự từng buổi. DH hoặc LM làm chủ nhóm theo "
     "phòng ban hay dự án; các buổi họp định kỳ trên lịch tự vào đúng nhóm. Biên bản theo một mẫu chuẩn của nhóm, luôn có "
@@ -711,13 +712,13 @@ NOTES = [
     "ngày; giọng nói chỉ lưu dạng vector số, không lưu âm thanh mẫu.",
     # 12
     "Em đề xuất năm việc. Một, nạp credit Recall.ai, ngân sách tham khảo khoảng một triệu đồng cho tám mươi giờ họp có bot "
-    "mỗi tháng, cần phòng Tài chính xác nhận. Hai, quản trị UrWiki cho phép địa chỉ của Copilot để đăng nhập trực tiếp, "
-    "và chạy thử với tài khoản thật. Ba, mỗi phòng ban tạo một nhóm, DH hoặc LM làm chủ nhóm, chọn mẫu biên bản và tải "
+    "mỗi tháng, cần phòng Tài chính xác nhận. Hai, mỗi người kết nối WikiBox một lần trong Cài đặt, đăng nhập "
+    "bằng tài khoản Google công ty, và chạy thử với tài liệu thật. Ba, mỗi phòng ban tạo một nhóm, DH hoặc LM làm chủ nhóm, chọn mẫu biên bản và tải "
     "tài liệu riêng. Bốn, thí điểm hai tuần với hai, ba phòng ban, đo số cuộc họp, thời gian có biên bản và số gợi ý dùng "
     "được. Năm, đội phát triển mở tính năng hỏi trên mọi cuộc họp cho mọi nhóm.",
     # 13
     "Em cảm ơn anh chị đã lắng nghe, em xin nhận câu hỏi. Ứng dụng chạy tại địa chỉ trên màn hình, đăng nhập bằng tài "
-    "khoản @urbox.vn. Hướng dẫn chi tiết ở mục 10.6 cho bot Google Meet dùng chung và mục 13.4 cho UrWiki.",
+    "khoản @urbox.vn. Hướng dẫn chi tiết ở mục 10.6 cho bot Google Meet dùng chung và mục 13.4 cho WikiBox.",
 ]
 
 QA = [
@@ -727,24 +728,25 @@ QA = [
       "Gemini mạnh ở ghi chú, tóm tắt cuộc họp online. Copilot tập trung vào lúc đang họp, dùng tài liệu và lịch sử họp "
       "của UrBox, chạy cả họp trực tiếp, có nhóm và phân quyền theo UrBox."),
      ("Điểm nào công cụ khác thật sự không làm được?",
-      "Không khẳng định tuyệt đối. Gợi ý trả lời, nhớ xuyên cuộc họp, tra UrWiki cần dữ liệu nội bộ của UrBox mà công cụ "
+      "Không khẳng định tuyệt đối. Gợi ý trả lời, nhớ xuyên cuộc họp, tra WikiBox cần dữ liệu nội bộ của UrBox mà công cụ "
       "bên ngoài không có sẵn; nhận ra người nói dùng hồ sơ giọng chung của công ty, chạy cả khi họp trực tiếp.")],
     [("AI có bịa giá hay chính sách không?",
-      "Chỉ dùng nguồn trong tài liệu nhóm, các buổi trước và UrWiki; mỗi ý có dấu nguồn bấm xem được. Thiếu thông tin thì "
+      "Chỉ dùng nguồn trong tài liệu nhóm, các buổi trước và WikiBox; mỗi ý có dấu nguồn bấm xem được. Thiếu thông tin thì "
       "gợi ý \"bên em kiểm tra và gửi lại\", độ chắc thấp."),
      ("Mỗi câu gợi ý tốn bao nhiêu?",
       "Đo ngày 10-11/10/2026 với Claude Sonnet 5.5: 0,007-0,013 USD mỗi câu (khoảng 250đ), 4-8 giây.")],
     [("Sao không đưa hết tài liệu vào Copilot cho tiện?",
-      "Hai bản sao sẽ lệch nhau theo thời gian. UrWiki là nơi chuẩn của công ty nên Copilot chỉ đọc lúc cần; tài liệu "
-      "nhóm dành cho thứ riêng của nhóm hoặc của khách mà UrWiki không có."),
-     ("UrWiki và WikiBox có phải một không?",
-      "Là một: ứng dụng tại wiki.urbox.dev, trang hiện ghi tên WikiBox; trong Cài đặt của Copilot mục này cũng tên WikiBox.")],
-    [("Nếu UrWiki và tài liệu nhóm nói khác nhau thì sao?",
-      "Giá, điều khoản riêng cho khách theo tài liệu nhóm (K); kiến thức chung theo UrWiki (U); chỗ khác nhau ghi trong "
+      "Hai bản sao sẽ lệch nhau theo thời gian. WikiBox là nơi chuẩn của công ty nên Copilot chỉ đọc lúc cần; tài liệu "
+      "nhóm dành cho thứ riêng của nhóm hoặc của khách mà WikiBox không có."),
+     ("Đăng nhập WikiBox thế nào?",
+      "Cài đặt > Kho tri thức WikiBox > Kết nối WikiBox, đăng nhập bằng tài khoản Google công ty, chọn không gian làm việc, "
+      "bấm Cho phép. Quyền chỉ đọc, thu hồi được bất cứ lúc nào.")],
+    [("Nếu WikiBox và tài liệu nhóm nói khác nhau thì sao?",
+      "Giá, điều khoản riêng cho khách theo tài liệu nhóm (K); kiến thức chung theo WikiBox (U); chỗ khác nhau ghi trong "
       "phần ghi chú cho đội để người họp quyết định."),
-     ("Copilot có làm thay đổi nội dung UrWiki không?",
+     ("Copilot có làm thay đổi nội dung WikiBox không?",
       "Không. Kết nối chỉ đọc (quyền tìm và đọc), không có thao tác thêm, sửa, xóa.")],
-    [("Ai thấy được tài liệu UrWiki qua Copilot?",
+    [("Ai thấy được tài liệu WikiBox qua Copilot?",
       "Copilot tìm bằng quyền của người tạo cuộc họp. Câu trả lời hiện trong phòng họp đó, nên người khác trong phòng cũng "
       "thấy; với tài liệu nhạy cảm, người tạo cuộc họp cân nhắc trước khi hỏi."),
      ("Có tốn thêm phí AI không?",
@@ -791,7 +793,7 @@ def to_pptx(slides: List[Slide], path: Path) -> None:
     prs.slide_width, prs.slide_height = Inches(W), Inches(H)
     prs.core_properties.title = "UrBox Meeting Copilot"
     prs.core_properties.author = OWNER
-    prs.core_properties.subject = f"Trình bày nội bộ {DATE}: khác biệt, UrWiki, DH/LM, Recall.ai, lưu trữ"
+    prs.core_properties.subject = f"Trình bày nội bộ {DATE}: khác biệt, WikiBox, DH/LM, Recall.ai, lưu trữ"
     blank = prs.slide_layouts[6]
     align = {"left": PP_ALIGN.LEFT, "center": PP_ALIGN.CENTER, "right": PP_ALIGN.RIGHT}
     anchor = {"top": MSO_ANCHOR.TOP, "middle": MSO_ANCHOR.MIDDLE, "bottom": MSO_ANCHOR.BOTTOM}
@@ -1029,8 +1031,8 @@ INTRO = [
     "Số liệu: chi phí Recall.ai theo trang giá Recall.ai ngày 19/10/2026 (0,5 USD mỗi giờ, tính theo giây), tỷ giá tham "
     "khảo 25.000đ/USD; ngân sách cần phòng Tài chính xác nhận. Độ chính xác nhận người nói đo trên 2 cuộc họp thật nội "
     "bộ. Gợi ý BD đo ngày 10-11/10/2026 với dữ liệu mẫu.",
-    "UrWiki là ứng dụng tại wiki.urbox.dev (trang hiện ghi tên WikiBox). Trong Cài đặt của Copilot, mục kết nối cũng mang "
-    "tên WikiBox.",
+    "WikiBox là ứng dụng kho tri thức của công ty tại wiki.urbox.dev; trong Cài đặt của Copilot là mục Kho tri thức "
+    "WikiBox.",
     "Ảnh chụp màn hình trong slide dùng dữ liệu mẫu (Khách hàng ABC, tài khoản demo).",
 ]
 PREP = [

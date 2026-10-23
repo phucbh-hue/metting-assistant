@@ -7,7 +7,7 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng người Việt tự nhiên của Soniox, đọc rõ cả từ tiếng
 Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy, miễn phí), vừa làm vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.21.1 - cập nhật 19/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.21.2 - cập nhật 23/10/2026 - phụ trách: phuc.bh@urbox.vn
 - Hướng dẫn sử dụng cho người dùng (đăng nhập, mọi tính năng, Cài đặt) kèm video demo:
   [docs/huong-dan-su-dung.md](docs/huong-dan-su-dung.md).
 - Bộ slide demo để Jarvis tự trình bày (mở tệp, chọn "Theo ghi chú trong tệp"):
@@ -16,6 +16,14 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
+
+## Bản 3.21.2: kết nối WikiBox bằng đăng nhập Google
+
+Từ 23/10/2026 WikiBox cho Copilot đăng nhập OAuth: đăng ký ứng dụng tự động (`/api/v1/oauth/register`) nhận cả
+`https://urbox-meeting-api.onrender.com` lẫn `http://localhost:8080`, trang đăng nhập WikiBox có "Đăng nhập bằng
+Google". Mã OAuth (`meeting/wikibox.py`) không đổi; Cài đặt ghi rõ các bước, hướng dẫn mục 13.4 cập nhật, chỉ dẫn
+tạo API key trỏ tới `wiki.urbox.dev/platform/wikibox-mcp`. Tên gọi chính thức là WikiBox (không còn UrWiki): bộ
+slide và kịch bản trong `docs/pitch/` đã đổi theo.
 
 ## Bản 3.21.1: PowerPoint hiện đúng thiết kế
 

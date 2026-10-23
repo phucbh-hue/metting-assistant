@@ -16,8 +16,8 @@ owner: phuc.bh@urbox.vn
 - Số liệu: chi phí Recall.ai theo trang giá Recall.ai ngày 19/10/2026 (0,5 USD mỗi giờ, tính theo giây), tỷ
   giá tham khảo 25.000đ/USD; ngân sách cần phòng Tài chính xác nhận. Độ chính xác nhận người nói đo trên 2
   cuộc họp thật nội bộ. Gợi ý BD đo ngày 10-11/10/2026 với dữ liệu mẫu.
-- UrWiki là ứng dụng tại wiki.urbox.dev (trang hiện ghi tên WikiBox). Trong Cài đặt của Copilot, mục kết nối
-  cũng mang tên WikiBox.
+- WikiBox là ứng dụng kho tri thức của công ty tại wiki.urbox.dev; trong Cài đặt của Copilot là mục Kho tri
+  thức WikiBox.
 - Ảnh chụp màn hình trong slide dùng dữ liệu mẫu (Khách hàng ABC, tài khoản demo).
 
 ## Chuẩn bị trước buổi trình bày
@@ -32,9 +32,9 @@ owner: phuc.bh@urbox.vn
 
 Dạ em chào anh chị. Hôm nay em trình bày về UrBox Meeting Copilot, trợ lý AI dùng trong các cuộc họp của
 UrBox. Trong khoảng mười tám phút, em đi qua sáu nội dung: điểm khác biệt so với các công cụ ghi chú họp đang
-có; cách dùng tài liệu của nhóm và ứng dụng UrWiki; cách trợ lý lấy dữ liệu từ UrWiki; cách giúp DH và LM quản
-lý cuộc họp của các thành viên; chi phí bot Recall.ai; và cách lưu trữ dữ liệu cả trong lúc họp lẫn sau buổi
-họp. Cuối buổi em có đề xuất triển khai và các việc cần anh chị quyết định.
+có; cách dùng tài liệu của nhóm và ứng dụng WikiBox; cách trợ lý lấy dữ liệu từ WikiBox; cách giúp DH và LM
+quản lý cuộc họp của các thành viên; chi phí bot Recall.ai; và cách lưu trữ dữ liệu cả trong lúc họp lẫn sau
+buổi họp. Cuối buổi em có đề xuất triển khai và các việc cần anh chị quyết định.
 
 ### Slide 2. Sáu điểm chính của Meeting Copilot (1:00)
 
@@ -42,9 +42,9 @@ họp. Cuối buổi em có đề xuất triển khai và các việc cần anh 
 
 Đây là sáu điểm chính. Một, Meeting Copilot hỗ trợ ngay trong lúc họp bằng dữ liệu của UrBox, không chỉ ghi
 chép sau buổi. Hai, tri thức đến từ hai nguồn tách rời: tài liệu riêng của nhóm tải lên Copilot, và ứng dụng
-UrWiki của công ty. Ba, trợ lý tra được UrWiki ngay trong buổi, có nguồn. Bốn, DH và LM nắm được cuộc họp của
-cả nhóm. Năm, bot Recall.ai là dịch vụ tính phí, khoảng nửa đô la mỗi giờ, một bot cho cả cuộc họp. Sáu, dữ
-liệu được lưu ngay khi nói và có biên bản trên Google Drive sau buổi họp.
+WikiBox của công ty. Ba, trợ lý tra được WikiBox ngay trong buổi, có nguồn. Bốn, DH và LM nắm được cuộc họp
+của cả nhóm. Năm, bot Recall.ai là dịch vụ tính phí, khoảng nửa đô la mỗi giờ, một bot cho cả cuộc họp. Sáu,
+dữ liệu được lưu ngay khi nói và có biên bản trên Google Drive sau buổi họp.
 
 ### Slide 3. Hỗ trợ ngay lúc họp, bằng dữ liệu của UrBox (2:00)
 
@@ -52,9 +52,9 @@ liệu được lưu ngay khi nói và có biên bản trên Google Drive sau bu
 
 Các công cụ như Gemini trong Google Meet, Otter hay Fireflies đã làm tốt phần chép lời và tóm tắt sau buổi
 họp. Meeting Copilot khác ở sáu điểm. Thứ nhất, khi khách hỏi, đội BD có gợi ý trả lời sau bốn đến tám giây,
-lấy từ tài liệu nhóm, các buổi họp trước và UrWiki, có dấu nguồn. Thứ hai, trợ lý nghe tiếng Việt: chỉ cần gọi
-"UrBox ơi" là tra cứu, tóm tắt, soạn slide, sơ đồ ngay trên màn hình họp. Thứ ba, hệ thống biết ai đang nói
-nhờ mẫu giọng dùng chung của công ty, kể cả khi họp trực tiếp; đo trên hai cuộc họp thật nội bộ, đúng chín
+lấy từ tài liệu nhóm, các buổi họp trước và WikiBox, có dấu nguồn. Thứ hai, trợ lý nghe tiếng Việt: chỉ cần
+gọi "UrBox ơi" là tra cứu, tóm tắt, soạn slide, sơ đồ ngay trên màn hình họp. Thứ ba, hệ thống biết ai đang
+nói nhờ mẫu giọng dùng chung của công ty, kể cả khi họp trực tiếp; đo trên hai cuộc họp thật nội bộ, đúng chín
 mươi bảy và chín mươi tám phần trăm số câu. Thứ tư, biên bản tự nhắc khi buổi này nói khác điều đã chốt. Thứ
 năm, họp kết hợp trong phòng và online, nhiều người cùng dùng Copilot chỉ cần một bot. Thứ sáu, quản lý theo
 nhóm, dữ liệu nằm trên hạ tầng của UrBox. Em không khẳng định công cụ khác không có từng phần; điểm mạnh là
@@ -66,8 +66,8 @@ gộp tất cả trên dữ liệu và quy trình của UrBox.
   trung vào lúc đang họp, dùng tài liệu và lịch sử họp của UrBox, chạy cả họp trực tiếp, có nhóm và phân quyền
   theo UrBox.
 - *Điểm nào công cụ khác thật sự không làm được?* Không khẳng định tuyệt đối. Gợi ý trả lời, nhớ xuyên cuộc
-  họp, tra UrWiki cần dữ liệu nội bộ của UrBox mà công cụ bên ngoài không có sẵn; nhận ra người nói dùng hồ sơ
-  giọng chung của công ty, chạy cả khi họp trực tiếp.
+  họp, tra WikiBox cần dữ liệu nội bộ của UrBox mà công cụ bên ngoài không có sẵn; nhận ra người nói dùng hồ
+  sơ giọng chung của công ty, chạy cả khi họp trực tiếp.
 
 ### Slide 4. Khách hỏi điều BD chưa nắm: vài giây là có gợi ý (1:30)
 
@@ -76,70 +76,69 @@ gộp tất cả trên dữ liệu và quy trình của UrBox.
 Đây là một ví dụ cụ thể. Khách hỏi: phí tích hợp API bao nhiêu, có khác lần trước không. Chỉ bốn đến tám giây
 sau, trên Bảng BD mở ở máy của đội mình đã có gợi ý: năm triệu đồng, thu một lần, lấy từ bảng giá của nhóm,
 dấu K1. Trợ lý còn ghi chú: buổi ngày hai tháng mười đội mình đã báo bốn triệu, nên giải thích phần chênh
-lệch, dấu M1. Mỗi ý đều có dấu nguồn: K là tài liệu nhóm, M là cuộc họp trước, U là UrWiki, W là thông tin
+lệch, dấu M1. Mỗi ý đều có dấu nguồn: K là tài liệu nhóm, M là cuộc họp trước, U là WikiBox, W là thông tin
 trên mạng khi đội bấm tra thêm. Bảng này không chiếu lên màn hình chung và trợ lý không đọc thành tiếng, nên
 khách không thấy.
 
 **Câu hỏi dự kiến:**
 
-- *AI có bịa giá hay chính sách không?* Chỉ dùng nguồn trong tài liệu nhóm, các buổi trước và UrWiki; mỗi ý có
-  dấu nguồn bấm xem được. Thiếu thông tin thì gợi ý "bên em kiểm tra và gửi lại", độ chắc thấp.
+- *AI có bịa giá hay chính sách không?* Chỉ dùng nguồn trong tài liệu nhóm, các buổi trước và WikiBox; mỗi ý
+  có dấu nguồn bấm xem được. Thiếu thông tin thì gợi ý "bên em kiểm tra và gửi lại", độ chắc thấp.
 - *Mỗi câu gợi ý tốn bao nhiêu?* Đo ngày 10-11/10/2026 với Claude Sonnet 5.5: 0,007-0,013 USD mỗi câu (khoảng
   250đ), 4-8 giây.
 
 ### Slide 5. Hai nguồn tri thức, hai nơi quản lý riêng (1:30)
 
-- **Thông điệp:** Tài liệu riêng của nhóm tải lên Copilot; tài liệu chung của công ty đọc từ ứng dụng UrWiki.
+- **Thông điệp:** Tài liệu riêng của nhóm tải lên Copilot; tài liệu chung của công ty đọc từ ứng dụng WikiBox.
 
 Về tài liệu, Copilot dùng hai nguồn và hai nơi quản lý riêng. Bên trái là tài liệu của nhóm: chủ nhóm tải lên
-bảng giá, hồ sơ năng lực, FAQ, JD; hệ thống chỉ giữ phần chữ, không giữ tệp gốc. Bên phải là UrWiki, một ứng
-dụng riêng của công ty tại wiki.urbox.dev; trên trang hiện vẫn ghi tên WikiBox. Copilot không chứa UrWiki mà
-kết nối vào: mỗi người tự kết nối tài khoản UrWiki của mình, chỉ đọc, đúng quyền xem. Nguyên tắc chọn nơi để
-tài liệu: cái gì riêng của nhóm hay của một khách thì để ở tài liệu nhóm; cái gì chung cả công ty, cần một bản
-chuẩn, thì để trên UrWiki và không tải bản sao vào Copilot.
+bảng giá, hồ sơ năng lực, FAQ, JD; hệ thống chỉ giữ phần chữ, không giữ tệp gốc. Bên phải là WikiBox, một ứng
+dụng riêng của công ty tại wiki.urbox.dev. Copilot không chứa WikiBox mà kết nối vào: mỗi người tự kết nối tài
+khoản WikiBox của mình, chỉ đọc, đúng quyền xem. Nguyên tắc chọn nơi để tài liệu: cái gì riêng của nhóm hay
+của một khách thì để ở tài liệu nhóm; cái gì chung cả công ty, cần một bản chuẩn, thì để trên WikiBox và không
+tải bản sao vào Copilot.
 
 **Câu hỏi dự kiến:**
 
-- *Sao không đưa hết tài liệu vào Copilot cho tiện?* Hai bản sao sẽ lệch nhau theo thời gian. UrWiki là nơi
+- *Sao không đưa hết tài liệu vào Copilot cho tiện?* Hai bản sao sẽ lệch nhau theo thời gian. WikiBox là nơi
   chuẩn của công ty nên Copilot chỉ đọc lúc cần; tài liệu nhóm dành cho thứ riêng của nhóm hoặc của khách mà
-  UrWiki không có.
-- *UrWiki và WikiBox có phải một không?* Là một: ứng dụng tại wiki.urbox.dev, trang hiện ghi tên WikiBox;
-  trong Cài đặt của Copilot mục này cũng tên WikiBox.
+  WikiBox không có.
+- *Đăng nhập WikiBox thế nào?* Cài đặt > Kho tri thức WikiBox > Kết nối WikiBox, đăng nhập bằng tài khoản
+  Google công ty, chọn không gian làm việc, bấm Cho phép. Quyền chỉ đọc, thu hồi được bất cứ lúc nào.
 
-### Slide 6. UrWiki là ứng dụng hỗ trợ, không gộp vào Copilot (1:45)
+### Slide 6. WikiBox là ứng dụng hỗ trợ, không gộp vào Copilot (1:45)
 
-- **Thông điệp:** UrWiki là ứng dụng hỗ trợ, nối qua cổng chỉ đọc; hai bên không ghi đè nội dung của nhau.
+- **Thông điệp:** WikiBox là ứng dụng hỗ trợ, nối qua cổng chỉ đọc; hai bên không ghi đè nội dung của nhau.
 
-Đây là nguyên tắc thiết kế quan trọng nhất: UrWiki là ứng dụng hỗ trợ, không gộp vào Meeting Copilot. Hai bên
-độc lập, nối qua một cổng MCP chỉ đọc. Một, Copilot chỉ đọc, không thêm sửa xóa gì trên UrWiki và không ghi dữ
-liệu họp sang đó. Hai, không sao chép: hỏi lúc nào đọc lúc đó, nên luôn là bản mới nhất. Ba, mỗi nguồn một dấu
-riêng để người nghe biết thông tin từ đâu. Bốn, khi hai nguồn nói khác nhau: giá và điều khoản riêng cho khách
-theo tài liệu nhóm, kiến thức chung theo UrWiki, chỗ khác nhau được ghi cho đội. Năm, tách được: UrWiki chậm
-quá tám giây hay ngắt kết nối thì Copilot vẫn chạy bằng các nguồn còn lại. Nhờ vậy nội dung hai bên không
-chồng chéo.
+Đây là nguyên tắc thiết kế quan trọng nhất: WikiBox là ứng dụng hỗ trợ, không gộp vào Meeting Copilot. Hai bên
+độc lập, nối qua một cổng MCP chỉ đọc. Một, Copilot chỉ đọc, không thêm sửa xóa gì trên WikiBox và không ghi
+dữ liệu họp sang đó. Hai, không sao chép: hỏi lúc nào đọc lúc đó, nên luôn là bản mới nhất. Ba, mỗi nguồn một
+dấu riêng để người nghe biết thông tin từ đâu. Bốn, khi hai nguồn nói khác nhau: giá và điều khoản riêng cho
+khách theo tài liệu nhóm, kiến thức chung theo WikiBox, chỗ khác nhau được ghi cho đội. Năm, tách được:
+WikiBox chậm quá tám giây hay ngắt kết nối thì Copilot vẫn chạy bằng các nguồn còn lại. Nhờ vậy nội dung hai
+bên không chồng chéo.
 
 **Câu hỏi dự kiến:**
 
-- *Nếu UrWiki và tài liệu nhóm nói khác nhau thì sao?* Giá, điều khoản riêng cho khách theo tài liệu nhóm (K);
-  kiến thức chung theo UrWiki (U); chỗ khác nhau ghi trong phần ghi chú cho đội để người họp quyết định.
-- *Copilot có làm thay đổi nội dung UrWiki không?* Không. Kết nối chỉ đọc (quyền tìm và đọc), không có thao
+- *Nếu WikiBox và tài liệu nhóm nói khác nhau thì sao?* Giá, điều khoản riêng cho khách theo tài liệu nhóm
+  (K); kiến thức chung theo WikiBox (U); chỗ khác nhau ghi trong phần ghi chú cho đội để người họp quyết định.
+- *Copilot có làm thay đổi nội dung WikiBox không?* Không. Kết nối chỉ đọc (quyền tìm và đọc), không có thao
   tác thêm, sửa, xóa.
 
-### Slide 7. Lấy dữ liệu từ UrWiki ngay trong buổi họp (1:30)
+### Slide 7. Lấy dữ liệu từ WikiBox ngay trong buổi họp (1:30)
 
-- **Thông điệp:** Trợ lý và Bảng BD lấy dữ liệu từ UrWiki ngay trong buổi họp, mỗi ý có nguồn U.
+- **Thông điệp:** Trợ lý và Bảng BD lấy dữ liệu từ WikiBox ngay trong buổi họp, mỗi ý có nguồn U.
 
-Lấy dữ liệu từ UrWiki trong buổi họp gồm bốn bước. Người họp hỏi bằng giọng nói, ví dụ "UrBox ơi, quy trình
-đổi voucher hết hạn thế nào?", hoặc khách hỏi và Bảng BD tự nhận ra. Máy chủ Copilot tìm trên UrWiki bằng tài
+Lấy dữ liệu từ WikiBox trong buổi họp gồm bốn bước. Người họp hỏi bằng giọng nói, ví dụ "UrBox ơi, quy trình
+đổi voucher hết hạn thế nào?", hoặc khách hỏi và Bảng BD tự nhận ra. Máy chủ Copilot tìm trên WikiBox bằng tài
 khoản của người tạo cuộc họp, song song với tài liệu nhóm và các buổi trước. AI chỉ dùng các đoạn tìm được và
-gắn dấu U1, U2. Bấm U1 là mở đúng tài liệu gốc trên UrWiki. Kết nối chỉ làm một lần trong Cài đặt, bằng đăng
-nhập hoặc API key. Về trạng thái: phần tích hợp xong ngày mười bốn tháng mười, cần chạy thử với tài khoản
-UrWiki thật; đăng nhập trực tiếp cần quản trị UrWiki cho phép địa chỉ của Copilot, trong lúc chờ thì dùng API
-key.
+gắn dấu U1, U2. Bấm U1 là mở đúng tài liệu gốc trên WikiBox. Kết nối chỉ làm một lần trong Cài đặt: đăng nhập
+WikiBox bằng tài khoản Google công ty, hoặc dán API key. Về trạng thái: WikiBox đã cho Copilot đăng nhập trực
+tiếp; cần chạy thử với tài liệu thật.
 
 **Câu hỏi dự kiến:**
 
-- *Ai thấy được tài liệu UrWiki qua Copilot?* Copilot tìm bằng quyền của người tạo cuộc họp. Câu trả lời hiện
+- *Ai thấy được tài liệu WikiBox qua Copilot?* Copilot tìm bằng quyền của người tạo cuộc họp. Câu trả lời hiện
   trong phòng họp đó, nên người khác trong phòng cũng thấy; với tài liệu nhạy cảm, người tạo cuộc họp cân nhắc
   trước khi hỏi.
 - *Có tốn thêm phí AI không?* Chỉ phần chữ tìm được được gửi kèm câu hỏi cho AI; chi phí mỗi câu tăng không
@@ -218,14 +217,15 @@ người đồng ý và tự xóa sau ba mươi ngày; giọng nói chỉ lưu d
 
 ### Slide 12. Đề xuất triển khai và việc cần quyết định (1:30)
 
-- **Thông điệp:** Năm việc để triển khai: credit Recall, kết nối UrWiki, nhóm theo phòng ban, thí điểm, phát
+- **Thông điệp:** Năm việc để triển khai: credit Recall, kết nối WikiBox, nhóm theo phòng ban, thí điểm, phát
   triển tiếp.
 
 Em đề xuất năm việc. Một, nạp credit Recall.ai, ngân sách tham khảo khoảng một triệu đồng cho tám mươi giờ họp
-có bot mỗi tháng, cần phòng Tài chính xác nhận. Hai, quản trị UrWiki cho phép địa chỉ của Copilot để đăng nhập
-trực tiếp, và chạy thử với tài khoản thật. Ba, mỗi phòng ban tạo một nhóm, DH hoặc LM làm chủ nhóm, chọn mẫu
-biên bản và tải tài liệu riêng. Bốn, thí điểm hai tuần với hai, ba phòng ban, đo số cuộc họp, thời gian có
-biên bản và số gợi ý dùng được. Năm, đội phát triển mở tính năng hỏi trên mọi cuộc họp cho mọi nhóm.
+có bot mỗi tháng, cần phòng Tài chính xác nhận. Hai, mỗi người kết nối WikiBox một lần trong Cài đặt, đăng
+nhập bằng tài khoản Google công ty, và chạy thử với tài liệu thật. Ba, mỗi phòng ban tạo một nhóm, DH hoặc LM
+làm chủ nhóm, chọn mẫu biên bản và tải tài liệu riêng. Bốn, thí điểm hai tuần với hai, ba phòng ban, đo số
+cuộc họp, thời gian có biên bản và số gợi ý dùng được. Năm, đội phát triển mở tính năng hỏi trên mọi cuộc họp
+cho mọi nhóm.
 
 **Câu hỏi dự kiến:**
 
@@ -237,4 +237,4 @@ biên bản và số gợi ý dùng được. Năm, đội phát triển mở t�
 - **Thông điệp:** Hỏi đáp.
 
 Em cảm ơn anh chị đã lắng nghe, em xin nhận câu hỏi. Ứng dụng chạy tại địa chỉ trên màn hình, đăng nhập bằng
-tài khoản @urbox.vn. Hướng dẫn chi tiết ở mục 10.6 cho bot Google Meet dùng chung và mục 13.4 cho UrWiki.
+tài khoản @urbox.vn. Hướng dẫn chi tiết ở mục 10.6 cho bot Google Meet dùng chung và mục 13.4 cho WikiBox.

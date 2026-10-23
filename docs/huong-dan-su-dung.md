@@ -4,15 +4,15 @@ description: >
   Hướng dẫn cho người dùng nội bộ UrBox: đăng nhập, tạo và chạy cuộc họp, trợ lý AI, trò chơi có thưởng,
   biên bản và mẫu biên bản, nhóm cuộc họp, lịch Google và bot Google Meet, chế độ BD, kho tri thức WikiBox,
   hồ sơ giọng nói và toàn bộ phần Cài đặt. Kèm video demo có phụ đề.
-version: 3.21.1
-updated: 19/10/2026
+version: 3.21.2
+updated: 23/10/2026
 owner: phuc.bh@urbox.vn
 video: huong-dan/video-demo.mp4
 ---
 
 # Hướng dẫn sử dụng UrBox Meeting Copilot
 
-- Phiên bản: 3.21.1. Cập nhật: 19/10/2026. Phụ trách: phuc.bh@urbox.vn.
+- Phiên bản: 3.21.2. Cập nhật: 23/10/2026. Phụ trách: phuc.bh@urbox.vn.
 - Ảnh và video trong tài liệu dùng dữ liệu mẫu và tài khoản giả (`*.demo@urbox.vn`), không có dữ liệu thật.
 - Dữ liệu tra cứu nội bộ của trợ lý (ticket Jira, danh bạ, kiến trúc hệ thống) hiện là dữ liệu mẫu. Kho tri
   thức thật của công ty dùng WikiBox khi người tạo cuộc họp đã kết nối (mục 13.4).
@@ -22,6 +22,7 @@ video: huong-dan/video-demo.mp4
   người có cuộc họp riêng (mục 10.6). Phần này chưa có ảnh chụp.
 - Bản 3.21.1 (19/10/2026): PowerPoint mở để trình bày hiện đúng thiết kế từng slide, vẫn giữ ghi chú người
   trình bày (mục 7.4).
+- Bản 3.21.2 (23/10/2026): kết nối kho tri thức WikiBox bằng đăng nhập Google, không cần API key (mục 13.4).
 
 ## Mục lục
 
@@ -722,10 +723,13 @@ thì nhờ quản trị viên.
 WikiBox (`wiki.urbox.dev`) là kho tri thức của công ty. Kết nối rồi thì trợ lý và Bảng BD tra tài liệu thật
 (sản phẩm, quy trình, chính sách) thay cho dữ liệu mẫu, trong các cuộc họp do mình tạo.
 
-- **Kết nối WikiBox**: đăng nhập WikiBox, chọn không gian làm việc, bấm **Cho phép**. Quyền chỉ đọc: tìm tài
-  liệu, đọc nội dung, hỏi Thủ thư; không thêm, sửa, xóa gì trên WikiBox.
-- Hoặc **Dùng API key**: tạo key ở WikiBox > Tùy chỉnh cá nhân > WikiBox MCP > Tạo key mới (key chỉ hiện một
-  lần), dán vào ô rồi bấm **Lưu**. Key cần quyền Truy xuất (retrieve).
+- **Kết nối WikiBox** (nên dùng): bấm nút, đăng nhập WikiBox bằng tài khoản Google công ty (**Đăng nhập bằng
+  Google**), chọn không gian làm việc, bấm **Cho phép**. Quyền chỉ đọc: tìm tài liệu, đọc nội dung, hỏi Thủ
+  thư; không thêm, sửa, xóa gì trên WikiBox. Xem hoặc thu hồi quyền đã cấp ở WikiBox > Cài đặt > Ứng dụng đã
+  kết nối. WikiBox báo hết hạn đăng nhập thì bấm **Kết nối WikiBox** lại.
+- Hoặc **Dùng API key** (khi không đăng nhập được trên trình duyệt): mở `wiki.urbox.dev/platform/wikibox-mcp`,
+  mục **API key của bạn** > **Tạo key mới** (key chỉ hiện một lần), dán vào ô rồi bấm **Lưu**. Key cần quyền
+  Truy xuất (retrieve).
 - Cả hai cách đều chạy dưới quyền của chính mình: chỉ đọc được tài liệu mình được xem trên WikiBox. Bảng BD
   của một cuộc họp dùng kết nối của người tạo cuộc họp.
 - **Kiểm tra**: gõ thử một câu tìm kiếm để xem kết quả. **Ngắt kết nối**: trợ lý quay về dữ liệu mẫu.
