@@ -64,13 +64,19 @@ MAX_SESSION_S = float(os.getenv("SONIOX_MAX_SESSION_S", str(290 * 60)))
 # tự kết thúc và lập recap: đỡ để phòng trống ngốn Soniox/Recall. Đặt 0 để tắt.
 IDLE_END_S = float(os.getenv("MEETING_IDLE_END_S", str(30 * 60)))
 IDLE_CHECK_S = float(os.getenv("MEETING_IDLE_CHECK_S", "60"))
-# Chống TRÙNG LẶP khi một câu nói vào server bằng nhiều đường cùng lúc (tiếng người online lọt vào mic phòng; vừa bật
-# bot Recall vừa bật extension thu tiếng tab...). Luồng dễ dính tiếng vọng (mic, và tab khi có cả bot) được giữ
-# ECHO_HOLD_S giây rồi so với câu của các luồng "xa" (meet*/tab) nói cùng lúc: trùng >= DEDUP_OVERLAP thì bỏ.
-# Các cơ chế rẻ hơn vẫn giữ: bỏ hẳn luồng Meet của chính người đang bật mic (meet_ignored), bỏ câu chép trùng (mirror).
+# Chống TRÙNG LẶP khi một câu nói vào server bằng nhiều đường cùng lúc: tiếng người online lọt vào mic phòng; vừa bật bot
+# Recall vừa bật extension thu tiếng tab; nhiều máy trong CÙNG phòng cùng vào Meet nên tiếng một người thành nhiều luồng.
+# Thứ tự ưu tiên giữ lại: meet (biết tên) > tab > mic. Khi trùng (>= DEDUP_OVERLAP từ VÀ chồng thời gian) thì bỏ bản ưu
+# tiên thấp hơn; hai luồng meet cùng hạng thì giữ bản tới trước. Luồng dễ dính tiếng vọng (mic, và tab khi có bot) nếu bản
+# "xa" chưa tới thì được giữ ECHO_HOLD_S giây chờ so. Cơ chế rẻ hơn vẫn giữ: bỏ hẳn luồng Meet của chính người đang bật
+# mic (meet_ignored), bỏ câu chép trùng của chính mình (mirror).
 ECHO_HOLD_S = float(os.getenv("MEET_ECHO_HOLD_S", "2.0"))
 DEDUP_OVERLAP = float(os.getenv("DEDUP_OVERLAP", "0.7"))       # tỉ lệ từ trùng để coi hai câu là một
 DEDUP_WINDOW_S = float(os.getenv("DEDUP_WINDOW_S", "3.0"))     # lệch thời gian tối đa để so hai câu (giây)
+# Hai bản thu CÙNG một tiếng nói trùng nhau về thời gian (chỉ lệch do độ trễ Soniox); còn hai người thay phiên nói câu
+# giống nhau thì nối tiếp, ít chồng thời gian. Chỉ bỏ khi khoảng thời gian trùng >= ngần này so với câu ngắn hơn, nhờ vậy
+# không bỏ nhầm câu THẬT của người nói sau ("ừ, chốt thứ sáu" ngay sau khi người khác vừa nói).
+DEDUP_TIME_OVERLAP = float(os.getenv("DEDUP_TIME_OVERLAP", "0.4"))
 # Mỗi luồng Meet là MỘT người (tắt tách người nói: Soniox đôi khi chia một giọng thành 2 nhãn). Máy phòng họp có nhiều
 # người cùng vào Meet thì đặt MEET_DIARIZE=1 để tách người trong luồng đó như mic.
 MEET_DIARIZE = os.getenv("MEET_DIARIZE", "0") == "1"
@@ -890,6 +896,11 @@ class MeetingSession:
         # Cách chống trùng: nếu bản của luồng xa ĐÃ có sẵn và trùng -> bỏ ngay (không giữ, không đảo thứ tự); nếu luồng xa
         # ĐANG nói dở (bản của nó có thể tới sau mic vài trăm ms) -> giữ mic lại chờ rồi mới so.
         if st.startswith("meet"):
+            # Nhiều máy trong CÙNG phòng cùng vào Meet: tiếng một người lọt vào mic của mọi máy -> nhiều luồng meet* cùng
+            # một câu. Giữ luồng tới trước, bỏ các luồng meet khác trùng (cùng ưu tiên "biết tên" nên giữ bản đầu tiên).
+            if self._dup_meet(st, t_start, t_end, text):
+                log.info("meeting.live: bỏ câu %s trùng luồng Meet khác (nhiều máy cùng phòng vào Meet): %s", st, text[:80])
+                return seq
             self._remote_texts.append((t_start, t_end, self._words(text), st))
         elif st == "tab":
             meet_only = (lambda s: s.startswith("meet"))
@@ -929,27 +940,42 @@ class MeetingSession:
         return (now - self._mirror_at < 5.0 or now - self._remote_voiced_at < 5.0
                 or any(g.active or now - g.last_voice < 5.0 for g in self._gates.values()))
 
+    @staticmethod
+    def _time_overlap(a0: float, a1: float, b0: float, b1: float) -> float:
+        """Khoảng thời gian hai câu chồng lên nhau, tính theo câu NGẮN hơn (1.0 = một câu nằm trọn trong câu kia)."""
+        inter = max(0.0, min(a1, b1) - max(a0, b0))
+        short = min(a1 - a0, b1 - b0)
+        return inter / short if short > 1e-6 else 0.0
+
+    def _match(self, mine: List[str], other: List[str]) -> bool:
+        if not other:
+            return False
+        if len(mine) < 3:                            # câu rất ngắn: phải trùng y hệt mới bỏ (tránh bỏ nhầm "vâng", "đúng rồi")
+            return mine == other
+        sm = difflib.SequenceMatcher(None, mine, other, autojunk=False)
+        return sum(b.size for b in sm.get_matching_blocks()) / len(mine) >= DEDUP_OVERLAP
+
     def _is_echo(self, t_start: float, t_end: float, text: str, want: Callable[[str], bool]) -> bool:
-        """Câu này có trùng câu của một luồng xa (want lọc theo tên luồng) nói cùng lúc không - kể cả câu đang nói dở."""
+        """Câu này có trùng câu của một luồng xa (want lọc theo tên luồng) nói CÙNG LÚC không - kể cả câu đang nói dở.
+        Câu đã chốt phải trùng cả chữ lẫn THỜI GIAN (hai bản thu một tiếng nói chồng thời gian; hai người thay phiên
+        nói câu giống nhau thì nối tiếp, ít chồng -> không bị bỏ nhầm)."""
         mine = self._words(text)
         if not mine:
             return False
-        cands = [w for ts, te, w, s in self._remote_texts
-                 if want(s) and ts - DEDUP_WINDOW_S <= t_end and te + DEDUP_WINDOW_S >= t_start]
-        for st in self.streams.values():
-            if want(st.name) and st._last_interim and st._last_interim[0]:
-                cands.append(self._words(st._last_interim[0]))
-        for other in cands:
-            if not other:
+        for ts, te, w, s in self._remote_texts:
+            if not want(s) or ts - DEDUP_WINDOW_S > t_end or te + DEDUP_WINDOW_S < t_start:
                 continue
-            if len(mine) < 3:                        # câu rất ngắn: phải trùng y hệt mới bỏ (tránh bỏ nhầm "vâng", "đúng rồi")
-                if mine == other:
-                    return True
-                continue
-            sm = difflib.SequenceMatcher(None, mine, other, autojunk=False)
-            if sum(b.size for b in sm.get_matching_blocks()) / len(mine) >= DEDUP_OVERLAP:
+            if self._time_overlap(t_start, t_end, ts, te) >= DEDUP_TIME_OVERLAP and self._match(mine, w):
                 return True
+        for st in self.streams.values():             # luồng xa đang NÓI DỞ (interim): coi như đang trùng thời gian
+            if want(st.name) and st._last_interim and st._last_interim[0]:
+                if self._match(mine, self._words(st._last_interim[0])):
+                    return True
         return False
+
+    def _dup_meet(self, st: str, t_start: float, t_end: float, text: str) -> bool:
+        """Câu từ một luồng Meet có trùng câu của luồng Meet KHÁC nói cùng lúc không (cùng một tiếng nói vào nhiều máy)."""
+        return self._is_echo(t_start, t_end, text, lambda s: s.startswith("meet") and s != st)
 
     def _hold(self, item: Dict[str, Any], want: Callable[[str], bool]):
         task = asyncio.create_task(self._hold_segment(item, want))

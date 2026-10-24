@@ -457,6 +457,36 @@ class MeetSpeakerTests(unittest.TestCase):
             return [(seg["speaker_label"], seg["text"]) for seg in s.segments]
         self.assertEqual(asyncio.run(go()), [("Trần Thị Lan", "Em xin báo cáo kết quả tháng này")])
 
+    def test_same_room_voice_on_several_meet_streams_is_deduped(self):
+        """Nhiều máy trong cùng phòng cùng vào Meet: tiếng một người lọt vào mic mọi máy -> nhiều luồng meet cùng một câu.
+        Giữ luồng tới trước, bỏ các luồng meet khác trùng. Câu THẬT của người khác trong Meet vẫn giữ."""
+        async def go():
+            mid = db.create_meeting("Họp", owner="an@urbox.vn")
+            s = await live.get_session(mid)
+            s.meet_people["meet7"] = {"name": "Trần Thị Lan", "email": "", "is_host": False, "speaking": True}
+            s.meet_people["meet8"] = {"name": "Máy phòng họp", "email": "", "is_host": False, "speaking": True}
+            await s.on_segment_finalized(1.0, 4.0, "1", "Chúng ta thống nhất phát hành vào thứ sáu tuần sau", stream="meet7")
+            await s.on_segment_finalized(1.3, 4.2, "1", "chúng ta thống nhất phát hành vào thứ sáu tuần sau", stream="meet8")
+            await s.on_segment_finalized(6.0, 8.0, "1", "Vâng em đồng ý với anh", stream="meet8")   # câu THẬT của người khác
+            await s.drain()
+            return [seg["text"] for seg in s.segments]
+        self.assertEqual(asyncio.run(go()),
+                         ["Chúng ta thống nhất phát hành vào thứ sáu tuần sau", "Vâng em đồng ý với anh"])
+
+    def test_sequential_similar_replies_are_kept_not_deduped(self):
+        """Hai người thay phiên nói câu GIỐNG NHAU nhưng NỐI TIẾP (ít chồng thời gian) là trao đổi thật, không được bỏ."""
+        async def go():
+            mid = db.create_meeting("Họp", owner="an@urbox.vn")
+            s = await live.get_session(mid)
+            s.meet_people["meet7"] = {"name": "Trần Thị Lan", "email": "", "is_host": False, "speaking": True}
+            with mock.patch.object(live, "ECHO_HOLD_S", 0.05):
+                await s.on_segment_finalized(1.0, 3.0, "1", "Mình chốt phát hành thứ sáu nhé", stream="meet7")
+                await s.on_segment_finalized(3.4, 5.4, "1", "Ừ chốt phát hành thứ sáu nhé", stream="mic")   # người trong phòng đáp lại
+                await s.drain()
+            return [seg["text"] for seg in s.segments]
+        self.assertEqual(asyncio.run(go()),
+                         ["Mình chốt phát hành thứ sáu nhé", "Ừ chốt phát hành thứ sáu nhé"])
+
 
 class CalendarApiTests(MeetBase):
     def setUp(self):

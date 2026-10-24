@@ -4,7 +4,7 @@ description: >
   Hướng dẫn cho người dùng nội bộ UrBox: đăng nhập, tạo và chạy cuộc họp, trợ lý AI, trò chơi có thưởng,
   biên bản và mẫu biên bản, nhóm cuộc họp, lịch Google và bot Google Meet, chế độ BD, kho tri thức WikiBox,
   hồ sơ giọng nói và toàn bộ phần Cài đặt. Kèm video demo có phụ đề.
-version: 3.23.0
+version: 3.23.1
 updated: 25/10/2026
 owner: phuc.bh@urbox.vn
 video: huong-dan/video-demo.mp4
@@ -12,7 +12,7 @@ video: huong-dan/video-demo.mp4
 
 # Hướng dẫn sử dụng UrBox Meeting Copilot
 
-- Phiên bản: 3.23.0. Cập nhật: 25/10/2026. Phụ trách: phuc.bh@urbox.vn.
+- Phiên bản: 3.23.1. Cập nhật: 25/10/2026. Phụ trách: phuc.bh@urbox.vn.
 - Ảnh và video trong tài liệu dùng dữ liệu mẫu và tài khoản giả (`*.demo@urbox.vn`), không có dữ liệu thật.
 - Dữ liệu tra cứu nội bộ của trợ lý (ticket Jira, danh bạ, kiến trúc hệ thống) hiện là dữ liệu mẫu. Kho tri
   thức thật của công ty dùng WikiBox khi người tạo cuộc họp đã kết nối (mục 13.4).
@@ -30,6 +30,8 @@ video: huong-dan/video-demo.mp4
   `extension/README.md`).
 - Bản 3.23.0 (25/10/2026): **chống trùng lặp lời thoại** - cùng một câu thu được qua nhiều nguồn (tiếng online
   lọt vào mic phòng, vừa bật bot vừa bật extension...) chỉ còn hiện một lần trong biên bản.
+- Bản 3.23.1 (25/10/2026): chống trùng cả khi nhiều máy trong cùng phòng cùng vào Meet; và không bỏ nhầm câu
+  đáp giống nhau của người nói sau (phải trùng cả thời gian mới coi là một).
 
 ## Mục lục
 

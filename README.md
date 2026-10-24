@@ -17,6 +17,18 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 
 ---
 
+## Bản 3.23.1: chống trùng cả khi nhiều máy cùng phòng vào Meet, và không bỏ nhầm trao đổi thật
+
+Mở rộng bộ chống trùng (3.23.0) cho hai tình huống còn thiếu:
+- **Nhiều máy trong CÙNG phòng cùng vào Meet.** Tiếng một người lọt vào mic của mọi máy nên thành nhiều luồng `meet`
+  cùng một câu. Nay câu từ một luồng Meet bị bỏ nếu trùng câu của luồng Meet KHÁC nói cùng lúc (`_dup_meet`); giữ bản
+  tới trước (đều "biết tên" nên không có bản nào hơn).
+- **Không bỏ nhầm câu thật của người nói sau.** Thêm điều kiện **chồng thời gian** (`DEDUP_TIME_OVERLAP`, 0,4): chỉ coi
+  là trùng khi hai câu chồng nhau về thời gian - hai bản thu CÙNG một tiếng nói thì chồng, còn hai người thay phiên nói
+  câu giống nhau ("Ừ, chốt thứ sáu" ngay sau người khác) thì nối tiếp, ít chồng -> giữ cả hai.
+- Test thêm: nhiều luồng Meet cùng phòng gộp một; câu đáp giống nhau nhưng nối tiếp vẫn giữ cả hai.
+- Vẫn ngoài phạm vi: trùng giữa HAI cuộc họp độc lập (mỗi người một phòng riêng cùng thu một phòng vật lý).
+
 ## Bản 3.23.0: chống trùng lặp lời thoại giữa các nguồn
 
 Một câu nói có thể vào server qua nhiều đường cùng lúc, gây TRÙNG trong transcript:
