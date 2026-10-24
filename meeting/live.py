@@ -64,9 +64,13 @@ MAX_SESSION_S = float(os.getenv("SONIOX_MAX_SESSION_S", str(290 * 60)))
 # tự kết thúc và lập recap: đỡ để phòng trống ngốn Soniox/Recall. Đặt 0 để tắt.
 IDLE_END_S = float(os.getenv("MEETING_IDLE_END_S", str(30 * 60)))
 IDLE_CHECK_S = float(os.getenv("MEETING_IDLE_CHECK_S", "60"))
-# Họp nửa online nửa trực tiếp: tiếng người trong Meet phát ra loa của máy trong phòng có thể lọt vào mic của ứng dụng.
-# Khi người trong Meet vừa nói, câu của mic được giữ ECHO_HOLD_S giây rồi so với câu Meet cùng lúc: trùng thì bỏ.
+# Chống TRÙNG LẶP khi một câu nói vào server bằng nhiều đường cùng lúc (tiếng người online lọt vào mic phòng; vừa bật
+# bot Recall vừa bật extension thu tiếng tab...). Luồng dễ dính tiếng vọng (mic, và tab khi có cả bot) được giữ
+# ECHO_HOLD_S giây rồi so với câu của các luồng "xa" (meet*/tab) nói cùng lúc: trùng >= DEDUP_OVERLAP thì bỏ.
+# Các cơ chế rẻ hơn vẫn giữ: bỏ hẳn luồng Meet của chính người đang bật mic (meet_ignored), bỏ câu chép trùng (mirror).
 ECHO_HOLD_S = float(os.getenv("MEET_ECHO_HOLD_S", "2.0"))
+DEDUP_OVERLAP = float(os.getenv("DEDUP_OVERLAP", "0.7"))       # tỉ lệ từ trùng để coi hai câu là một
+DEDUP_WINDOW_S = float(os.getenv("DEDUP_WINDOW_S", "3.0"))     # lệch thời gian tối đa để so hai câu (giây)
 # Mỗi luồng Meet là MỘT người (tắt tách người nói: Soniox đôi khi chia một giọng thành 2 nhãn). Máy phòng họp có nhiều
 # người cùng vào Meet thì đặt MEET_DIARIZE=1 để tách người trong luồng đó như mic.
 MEET_DIARIZE = os.getenv("MEET_DIARIZE", "0") == "1"
@@ -463,7 +467,7 @@ class MeetingStream:
         self._last_interim = key
         prof = self.session.speakers.peek(raw, epoch, self.name) if raw is not None else None
         if text:
-            self.session.note_interim()
+            self.session.note_interim(self.name)
         await self.session.emit({
             "type": "interim", "stream": self.name, "text": text,
             "speaker_key": prof.sid if prof else None,
@@ -699,7 +703,9 @@ class MeetingSession:
         self._meet_modes: Dict[str, str] = dict(((meeting.get("meet") or {}).get("modes") or {}))
         self._gates: Dict[str, VoiceGate] = {}
         self._stream_raws: Dict[str, Dict[int, Set[str]]] = {}
-        self._meet_texts: Deque[Tuple[float, float, List[str]]] = deque(maxlen=60)   # câu Meet gần đây (chặn tiếng vọng)
+        # Câu gần đây của các luồng "xa" (meet*/tab) để chống trùng: (t_start, t_end, các từ, tên luồng).
+        self._remote_texts: Deque[Tuple[float, float, List[str], str]] = deque(maxlen=80)
+        self._remote_voiced_at = 0.0          # lần cuối một luồng xa đang NÓI DỞ (interim): chỉ giữ mic để so trùng khi remote thực sự đang nói
         self.bd = None                                         # trợ lý BD (nhóm bật chế độ BD, bản 3.19)
         self.game = None                                       # trò chơi có thưởng đang chạy (meeting/game.py)
         self._held: Set[asyncio.Task] = set()
@@ -878,13 +884,30 @@ class MeetingSession:
         self._ensure_workers()
         item = {"seq": seq, "t_start": t_start, "t_end": t_end, "raw": raw_speaker, "text": text, "clip": clip_pcm,
                 "epoch": epoch, "stream": stream, "vector": vector, "voiced": voiced}
-        if str(stream).startswith("meet"):
-            self._meet_texts.append((t_start, t_end, self._words(text)))
-        elif stream == "mic" and self._meet_voice_recent():
-            task = asyncio.create_task(self._hold_mic(item))
-            self._held.add(task)
-            task.add_done_callback(self._held.discard)
-            return seq
+        st = str(stream)
+        # Luồng "xa" (meet*/tab) là bản ghi sạch của tiếng người online. mic (và tab khi có cả bot) dễ dính tiếng vọng
+        # của chúng, nên được chống trùng. Thứ tự ưu tiên giữ lại: meet (biết tên) > tab > mic.
+        # Cách chống trùng: nếu bản của luồng xa ĐÃ có sẵn và trùng -> bỏ ngay (không giữ, không đảo thứ tự); nếu luồng xa
+        # ĐANG nói dở (bản của nó có thể tới sau mic vài trăm ms) -> giữ mic lại chờ rồi mới so.
+        if st.startswith("meet"):
+            self._remote_texts.append((t_start, t_end, self._words(text), st))
+        elif st == "tab":
+            meet_only = (lambda s: s.startswith("meet"))
+            if self._has_live_meet():                              # vừa bot vừa extension: bỏ tab trùng bản của bot (biết tên)
+                if self._is_echo(t_start, t_end, text, meet_only):
+                    log.info("meeting.live: bỏ câu tab trùng bản của bot Meet (chống trùng lặp): %s", text[:80])
+                    return seq
+                if self._remote_voice_recent():
+                    self._hold(item, meet_only)
+                    return seq
+            self._remote_texts.append((t_start, t_end, self._words(text), "tab"))   # để mic sau đó so được với tab
+        elif st == "mic":                                          # mic dính tiếng người online (meet/tab lọt vào mic phòng)
+            if self._is_echo(t_start, t_end, text, self._is_remote):
+                log.info("meeting.live: bỏ câu mic trùng tiếng người online (chống trùng lặp): %s", text[:80])
+                return seq
+            if self._remote_voice_recent():
+                self._hold(item, self._is_remote)
+                return seq
         await self._queue.put(item)
         return seq
 
@@ -892,36 +915,55 @@ class MeetingSession:
     def _words(text: str) -> List[str]:
         return re.sub(r"[^\w\s]", " ", (text or "").casefold()).split()
 
-    def _meet_voice_recent(self) -> bool:
-        now = time.monotonic()
-        return now - self._mirror_at < 5.0 or any(g.active or now - g.last_voice < 5.0 for g in self._gates.values())
+    @staticmethod
+    def _is_remote(stream: str) -> bool:
+        """Luồng tiếng người online (bản ghi sạch): bot Meet từng người hoặc tiếng tab của extension."""
+        return stream.startswith("meet") or stream == "tab"
 
-    def _is_echo(self, t_start: float, t_end: float, text: str) -> bool:
-        """Câu của mic trùng câu người trong Meet nói cùng lúc (kể cả câu Meet đang nói dở chưa chốt)."""
+    def _has_live_meet(self) -> bool:
+        return any(n.startswith("meet") for n in self.streams)
+
+    def _remote_voice_recent(self) -> bool:
+        """Có luồng xa (meet/tab) vừa có tiếng trong ~5 giây: chỉ khi đó mới giữ mic để so trùng (khỏi trễ khi họp thường)."""
+        now = time.monotonic()
+        return (now - self._mirror_at < 5.0 or now - self._remote_voiced_at < 5.0
+                or any(g.active or now - g.last_voice < 5.0 for g in self._gates.values()))
+
+    def _is_echo(self, t_start: float, t_end: float, text: str, want: Callable[[str], bool]) -> bool:
+        """Câu này có trùng câu của một luồng xa (want lọc theo tên luồng) nói cùng lúc không - kể cả câu đang nói dở."""
         mine = self._words(text)
         if not mine:
             return False
-        cands = [w for ts, te, w in self._meet_texts if ts - 3.0 <= t_end and te + 3.0 >= t_start]
+        cands = [w for ts, te, w, s in self._remote_texts
+                 if want(s) and ts - DEDUP_WINDOW_S <= t_end and te + DEDUP_WINDOW_S >= t_start]
         for st in self.streams.values():
-            if st.name.startswith("meet") and st._last_interim and st._last_interim[0]:
+            if want(st.name) and st._last_interim and st._last_interim[0]:
                 cands.append(self._words(st._last_interim[0]))
         for other in cands:
             if not other:
                 continue
-            if len(mine) < 3:
+            if len(mine) < 3:                        # câu rất ngắn: phải trùng y hệt mới bỏ (tránh bỏ nhầm "vâng", "đúng rồi")
                 if mine == other:
                     return True
                 continue
             sm = difflib.SequenceMatcher(None, mine, other, autojunk=False)
-            if sum(b.size for b in sm.get_matching_blocks()) / len(mine) >= 0.7:
+            if sum(b.size for b in sm.get_matching_blocks()) / len(mine) >= DEDUP_OVERLAP:
                 return True
         return False
 
-    async def _hold_mic(self, item: Dict[str, Any]):
+    def _hold(self, item: Dict[str, Any], want: Callable[[str], bool]):
+        task = asyncio.create_task(self._hold_segment(item, want))
+        self._held.add(task)
+        task.add_done_callback(self._held.discard)
+
+    async def _hold_segment(self, item: Dict[str, Any], want: Callable[[str], bool]):
         await asyncio.sleep(ECHO_HOLD_S)
-        if self._is_echo(item["t_start"], item["t_end"], item["text"]):
-            log.info("meeting.live: bỏ câu mic trùng tiếng người trong Meet (phát ra loa): %s", item["text"][:80])
+        if self._is_echo(item["t_start"], item["t_end"], item["text"], want):
+            log.info("meeting.live: bỏ câu %s trùng tiếng người online (chống trùng lặp): %s",
+                     item.get("stream"), item["text"][:80])
             return
+        if item.get("stream") == "tab":              # tab đã qua kiểm trùng với bot: đưa vào bộ đệm để mic sau so được
+            self._remote_texts.append((item["t_start"], item["t_end"], self._words(item["text"]), "tab"))
         await self._queue.put(item)
 
     async def _process(self, it: Dict[str, Any]):
@@ -992,8 +1034,10 @@ class MeetingSession:
             from meeting import bd
             bd.on_segment(self, seg)                 # nhóm BD: gợi ý cho đội BD trên bảng riêng
 
-    def note_interim(self):
+    def note_interim(self, stream: Optional[str] = None):
         self._speech_at = time.monotonic()
+        if stream and self._is_remote(stream):        # luồng xa đang nói dở: đủ để giữ mic so trùng ngay từ câu đầu
+            self._remote_voiced_at = time.monotonic()
 
     async def _check_wake(self, seg: Dict[str, Any]):
         """Phát hiện lời gọi trợ lý.
@@ -1612,7 +1656,7 @@ class MeetingSession:
             if person and self.audio_owner is not None and same_person(person, self.mic_user):
                 return                      # máy này vừa bật mic trong phòng vừa vào Meet: mic đã chép câu này
             if str(item.get("stream") or "").startswith("meet"):
-                self._meet_texts.append((item["t_start"], item["t_end"], self._words(item["text"])))
+                self._remote_texts.append((item["t_start"], item["t_end"], self._words(item["text"]), str(item.get("stream"))))
                 self._mirror_at = time.monotonic()                # mic trong phòng (nếu bật) chặn tiếng vọng của câu này
             item = dict(item, seq=self.next_seq)
             self.next_seq += 1
@@ -1624,7 +1668,7 @@ class MeetingSession:
             return
         p = self.speakers.pinned(key) if key else None
         if ev.get("text"):
-            self.note_interim()
+            self.note_interim(ev.get("stream"))
         await self.emit({"type": "interim", "stream": ev.get("stream"), "text": ev.get("text") or "",
                          "speaker_key": p.sid if p is not None else None,
                          "speaker_label": p.label if p is not None else ev.get("speaker_label")})

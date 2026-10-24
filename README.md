@@ -17,6 +17,24 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 
 ---
 
+## Bản 3.23.0: chống trùng lặp lời thoại giữa các nguồn
+
+Một câu nói có thể vào server qua nhiều đường cùng lúc, gây TRÙNG trong transcript:
+- tiếng người online phát ra loa, lọt vào mic phòng (không đeo tai nghe) - vừa có ở luồng tab/meet, vừa có ở mic;
+- vừa bật bot Recall vừa bật extension: cùng tiếng người online vào qua cả luồng "meet" lẫn "tab";
+- máy trong phòng vừa bật mic vừa vào Meet bằng chính tài khoản đó - đã có cơ chế bỏ hẳn luồng Meet đó (`meet_ignored`).
+
+Gộp các cơ chế rời rạc thành một **bộ chống trùng giữa các luồng** trong `meeting/live.py`:
+- Luồng "xa" (meet*/tab) là bản ghi SẠCH của tiếng người online. Câu từ luồng dễ dính vọng (mic; và tab khi có cả bot)
+  bị bỏ nếu trùng >= `DEDUP_OVERLAP` (0,7) số từ với một câu "xa" nói trong khoảng ±`DEDUP_WINDOW_S` (3 giây).
+- Bỏ NGAY nếu bản "xa" đã có sẵn (không giữ, không đảo thứ tự câu); chỉ GIỮ câu lại chờ khi luồng xa đang nói dở
+  (bản của nó có thể tới sau mic vài trăm ms). Họp thường (chỉ mic) hoặc lúc không ai online nói thì không giữ -> không trễ.
+- Thứ tự ưu tiên giữ lại: meet (biết tên người) > tab > mic. Câu rất ngắn (< 3 từ) chỉ bỏ khi trùng y hệt.
+- Giữ nguyên các cơ chế rẻ: bỏ hẳn luồng Meet của người đang bật mic (`meet_ignored`), bỏ câu chép trùng (mirror).
+- Ngoài phạm vi: trùng giữa HAI cuộc họp độc lập (hai người mỗi người một phòng riêng cùng thu một phòng vật lý) -
+  đó là phòng riêng của từng người, không tự gộp.
+- Test: `tests/test_calendar_meet.py` (tab lọt vào mic; mic chờ bản tab tới rồi bỏ; tab trùng bản bot).
+
 ## Bản 3.22.0: extension thu tiếng tab (nghe họp online không cần bot)
 
 Thêm nguồn âm thanh thứ tư, bên cạnh mic / tệp / bot Recall: một **extension Chrome** (`extension/`) thu cả **tiếng

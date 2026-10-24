@@ -414,6 +414,49 @@ class MeetSpeakerTests(unittest.TestCase):
             return [seg["text"] for seg in s.segments]
         self.assertEqual(asyncio.run(go()), ["Bên em đã chốt phát hành ngày 15 tháng 12", "Vậy mình chốt luôn nhé"])
 
+    def test_tab_audio_leaking_into_room_mic_is_deduped(self):
+        """Extension thu tiếng tab (bản sạch của người online); tiếng đó phát ra loa lọt vào mic phòng -> bỏ bản mic trùng,
+        giữ bản tab. Câu THẬT của người trong phòng vẫn được giữ."""
+        async def go():
+            mid = db.create_meeting("Họp", owner="an@urbox.vn")
+            s = await live.get_session(mid)
+            with mock.patch.object(live, "ECHO_HOLD_S", 0.05):
+                await s.on_segment_finalized(1.0, 4.0, "1", "Quý này doanh thu tăng hai mươi phần trăm", stream="tab")
+                await s.on_segment_finalized(1.5, 4.3, "1", "quý này doanh thu tăng hai mươi phần trăm", stream="mic")
+                await s.on_segment_finalized(6.0, 8.0, "1", "Vậy mình chốt kế hoạch marketing nhé", stream="mic")
+                await s.drain()
+            return [seg["text"] for seg in s.segments]
+        self.assertEqual(asyncio.run(go()),
+                         ["Quý này doanh thu tăng hai mươi phần trăm", "Vậy mình chốt kế hoạch marketing nhé"])
+
+    def test_mic_held_until_tab_arrives_then_deduped(self):
+        """Bản mic chốt TRƯỚC bản tab (độ trễ Soniox khác nhau): mic được giữ lại chờ, bản tab tới rồi mới so và bỏ bản mic."""
+        async def go():
+            mid = db.create_meeting("Họp", owner="an@urbox.vn")
+            s = await live.get_session(mid)
+            with mock.patch.object(live, "ECHO_HOLD_S", 0.1):
+                s.note_interim("tab")                                           # tab đang nói dở -> mic sẽ được giữ chờ
+                await s.on_segment_finalized(1.0, 4.0, "1", "Doanh thu quý này tăng rất mạnh so với năm ngoái", stream="mic")
+                await asyncio.sleep(0.02)
+                await s.on_segment_finalized(1.1, 4.1, "1", "doanh thu quý này tăng rất mạnh so với năm ngoái", stream="tab")
+                await s.drain()
+            return [seg["text"] for seg in s.segments]
+        self.assertEqual(asyncio.run(go()), ["doanh thu quý này tăng rất mạnh so với năm ngoái"])
+
+    def test_tab_deduped_against_bot_when_both_running(self):
+        """Vừa bật bot Recall vừa bật extension: cùng tiếng người online vào qua cả hai -> giữ bản bot (biết tên), bỏ tab."""
+        async def go():
+            mid = db.create_meeting("Họp", owner="an@urbox.vn")
+            s = await live.get_session(mid)
+            s.meet_people["meet7"] = {"name": "Trần Thị Lan", "email": "", "is_host": False, "speaking": True}
+            s.streams["meet7"] = live.MeetingStream("meet7", s)                 # có luồng bot -> _has_live_meet() = True
+            with mock.patch.object(live, "ECHO_HOLD_S", 0.05):
+                await s.on_segment_finalized(1.0, 4.0, "1", "Em xin báo cáo kết quả tháng này", stream="meet7")
+                await s.on_segment_finalized(1.2, 4.2, "1", "em xin báo cáo kết quả tháng này", stream="tab")
+                await s.drain()
+            return [(seg["speaker_label"], seg["text"]) for seg in s.segments]
+        self.assertEqual(asyncio.run(go()), [("Trần Thị Lan", "Em xin báo cáo kết quả tháng này")])
+
 
 class CalendarApiTests(MeetBase):
     def setUp(self):
