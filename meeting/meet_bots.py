@@ -41,6 +41,10 @@ END_GRACE_S = 120
 ACTIVE = ("pending", "scheduled", "joining", "waiting", "in_call")
 NOT_JOINED = ("pending", "scheduled")
 SWITCH_WAIT_S = 30               # cuộc họp nhận âm thanh vừa kết thúc: chờ chuyển sang cuộc họp riêng khác tối đa ngần này
+# Recall báo bot đã vào và "đang ghi", nhưng server chỉ thật sự có lời thoại khi nhận được âm thanh (mở WebSocket + tạo
+# cuộc họp). Trong lúc chờ âm thanh, hiện "đang kết nối âm thanh" chứ không phải "đang chép lời"; chờ quá ngần này giây
+# vẫn chưa có âm thanh thì báo cách kiểm tra (thường do PUBLIC_BASE_URL / server không nhận được kết nối từ Recall).
+NO_AUDIO_GRACE_S = 75
 SKIP_KEEP = 300
 _locks: Dict[str, asyncio.Lock] = {}
 _tick_lock = asyncio.Lock()                  # vòng lặp nền và nút bấm (bật công tắc, bỏ qua) không chạy chồng lên nhau
@@ -99,8 +103,13 @@ def public(rec: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Trạng thái bot để hiện trên giao diện (không có token)."""
     if not rec:
         return None
-    return {k: rec.get(k) for k in ("rid", "status", "status_msg", "code", "sub_code", "meeting_id", "owner", "start",
-                                    "ws_open", "updated_at")}
+    out = {k: rec.get(k) for k in ("rid", "status", "status_msg", "code", "sub_code", "meeting_id", "owner", "start",
+                                   "ws_open", "updated_at")}
+    # recording = server ĐANG thật sự nhận âm thanh và đã có cuộc họp. Bot "in_call" theo Recall nhưng chưa nhận được âm
+    # thanh thì recording=False: giao diện hiện "đang kết nối âm thanh" thay vì "đang chép lời" (tránh cảnh báo bot đang
+    # nghe nhưng mục Đang diễn ra lại không có cuộc họp).
+    out["recording"] = bool(rec.get("ws_open") and rec.get("meeting_id"))
+    return out
 
 
 def find_for_event(email: str, ev: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -699,10 +708,18 @@ async def watch(now: float) -> None:
         st = recall.last_status(bot)
         ph = recall.phase(st["code"])
         msg = recall.status_text(st["code"], st["sub_code"])
-        no_audio = ("Bot đã vào cuộc họp nhưng chưa gửi được âm thanh về server (quản trị viên kiểm tra PUBLIC_BASE_URL "
+        no_audio = ("Bot đã vào cuộc họp nhưng server CHƯA nhận được âm thanh (quản trị viên kiểm tra PUBLIC_BASE_URL "
                     "và server có nhận kết nối WebSocket từ Recall không)")
-        if ph == "in_call" and not rec.get("ws_open") and not rec.get("meeting_id") and now - rec["start"] > 180:
-            msg = no_audio
+        have_audio = bool(rec.get("ws_open") or rec.get("meeting_id"))
+        if ph == "in_call":
+            in_call_at = rec.get("in_call_at") or now        # lần đầu Recall báo "đã vào": mốc để tính thời gian chờ âm thanh
+            if not rec.get("in_call_at"):
+                rec = _update(rec, in_call_at=in_call_at)
+            if not have_audio:                               # Recall bảo "đang ghi" nhưng server chưa có âm thanh/cuộc họp
+                msg = (no_audio if now - in_call_at > NO_AUDIO_GRACE_S
+                       else "Bot đã vào cuộc họp, đang kết nối âm thanh về server...")
+        elif rec.get("in_call_at"):
+            rec = _update(rec, in_call_at=0.0)
         if ph in ("ended", "failed") and not rec.get("ws_open"):
             # "Bot đã xong" che mất lý do: chưa từng vào thì nói vì sao (chưa ai cho vào, Meet chặn khách...)
             if not st["joined"]:

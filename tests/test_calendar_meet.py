@@ -238,6 +238,27 @@ class SchedulingTests(MeetBase):
         self.assertIn("người trong tổ chức", rec["status_msg"])
         self.assertTrue(self.recall.bots[rec["bot_id"]]["media_deleted"])
 
+    def test_in_call_without_audio_shows_connecting_not_recording(self):
+        """Recall báo bot 'đang ghi' nhưng server CHƯA nhận âm thanh (chưa có cuộc họp): KHÔNG hiện 'đang chép lời' nữa
+        (bug: màn hình báo bot đang nghe nhưng mục Đang diễn ra không có cuộc họp)."""
+        self.autojoin("an@urbox.vn", events=[event("e1", NOW + 5 * 60)])
+        self.tick()
+        [rec] = self.records()
+        self.recall.status(rec["bot_id"], "in_call_recording")              # Recall: đã vào, đang ghi
+        self.tick(NOW + 5 * 60)
+        [rec] = self.records()
+        self.assertEqual(rec["status"], "in_call")
+        self.assertFalse(meet_bots.public(rec)["recording"])                # server chưa thật sự nhận âm thanh
+        self.assertIn("kết nối âm thanh", rec["status_msg"])
+        self.tick(NOW + 5 * 60 + meet_bots.NO_AUDIO_GRACE_S + 10)           # chờ lâu vẫn chưa có âm thanh
+        [rec] = self.records()
+        self.assertIn("CHƯA nhận được âm thanh", rec["status_msg"])
+
+    def test_recording_flag_true_only_when_audio_arrives(self):
+        self.assertFalse(meet_bots.public({"status": "in_call", "ws_open": False, "meeting_id": None})["recording"])
+        self.assertFalse(meet_bots.public({"status": "in_call", "ws_open": True, "meeting_id": None})["recording"])
+        self.assertTrue(meet_bots.public({"status": "in_call", "ws_open": True, "meeting_id": 5})["recording"])
+
 
 class FakeWS:
     def __init__(self, token, frames):

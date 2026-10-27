@@ -1316,7 +1316,10 @@ function evStatus(ev, cal) {
   if (ev.declined) return ['Đã từ chối', ''];
   if (!ev.meet_url) return ['Không có link Meet', ''];
   if (ev.skipped) return ['Đã bỏ qua', ''];
-  if (ev.bot && BOT_STATUS[ev.bot.status]) return BOT_STATUS[ev.bot.status];
+  if (ev.bot && BOT_STATUS[ev.bot.status]) {
+    if (ev.bot.status === 'in_call' && !ev.bot.recording) return ['Bot đã vào, đang kết nối âm thanh', 'chip-warn'];
+    return BOT_STATUS[ev.bot.status];
+  }
   return cal.autojoin ? ['Bot sẽ vào', 'chip-accent'] : ['Chưa bật bot', ''];
 }
 function renderCalendar() {
@@ -1492,10 +1495,11 @@ function meetChip(R) {
   const mt = R && R.meet; if (!mt || (!mt.bot && !(mt.people || []).length && !mt.copy)) return '';
   const b = mt.bot || {};
   if (mt.copy) {                                              // cuộc họp riêng: lời thoại chép từ bot chung do người khác mời
-    const on = ['in_call', 'joining', 'waiting'].includes(b.status);
-    return `<button type="button" class="chip ${on ? 'chip-live' : ''} hidden sm:inline-flex" data-act="meet-people" title="Bot chung${b.shared_by ? ` do ${esc(b.shared_by)} mời` : ''}: lời thoại chép vào cuộc họp riêng của anh chị">${on ? 'Bot Meet chung: đang chép lời' : 'Bot Meet chung'}</button>`;
+    const txt = b.recording ? 'Bot Meet chung: đang chép lời' : ['in_call', 'joining', 'waiting'].includes(b.status) ? 'Bot Meet chung: đang kết nối' : 'Bot Meet chung';
+    return `<button type="button" class="chip ${b.recording ? 'chip-live' : ''} hidden sm:inline-flex" data-act="meet-people" title="Bot chung${b.shared_by ? ` do ${esc(b.shared_by)} mời` : ''}: lời thoại chép vào cuộc họp riêng của anh chị">${txt}</button>`;
   }
-  const map = { in_call: ['Bot Meet: đang chép lời', 'chip-live'], waiting: ['Bot Meet: chờ cho vào', 'chip-warn'], joining: ['Bot Meet: đang vào', 'chip-warn'],
+  const map = { in_call: [b.recording ? 'Bot Meet: đang chép lời' : 'Bot Meet: đang kết nối âm thanh', b.recording ? 'chip-live' : 'chip-warn'],
+    waiting: ['Bot Meet: chờ cho vào', 'chip-warn'], joining: ['Bot Meet: đang vào', 'chip-warn'],
     scheduled: ['Bot Meet: sẽ vào', ''], pending: ['Bot Meet: đang hẹn', ''], ended: ['Bot Meet: đã rời', ''], failed: ['Bot Meet: không vào được', 'chip-danger'] };
   const [txt, cls] = map[b.status] || ['Google Meet', ''];
   const n = (mt.people || []).length;

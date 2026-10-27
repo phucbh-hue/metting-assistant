@@ -4,7 +4,7 @@ description: >
   Hướng dẫn cho người dùng nội bộ UrBox: đăng nhập, tạo và chạy cuộc họp, trợ lý AI, trò chơi có thưởng,
   biên bản và mẫu biên bản, nhóm cuộc họp, lịch Google và bot Google Meet, chế độ BD, kho tri thức WikiBox,
   hồ sơ giọng nói và toàn bộ phần Cài đặt. Kèm video demo có phụ đề.
-version: 3.23.1
+version: 3.23.2
 updated: 25/10/2026
 owner: phuc.bh@urbox.vn
 video: huong-dan/video-demo.mp4
@@ -32,6 +32,8 @@ video: huong-dan/video-demo.mp4
   lọt vào mic phòng, vừa bật bot vừa bật extension...) chỉ còn hiện một lần trong biên bản.
 - Bản 3.23.1 (25/10/2026): chống trùng cả khi nhiều máy trong cùng phòng cùng vào Meet; và không bỏ nhầm câu
   đáp giống nhau của người nói sau (phải trùng cả thời gian mới coi là một).
+- Bản 3.23.2 (27/10/2026): bot Google Meet báo đúng trạng thái - khi mới vào mà chưa có âm thanh thì hiện "đang
+  kết nối âm thanh" (không còn báo "đang chép lời" lúc chưa có cuộc họp).
 
 ## Mục lục
 
@@ -815,6 +817,8 @@ WikiBox (`wiki.urbox.dev`) là kho tri thức của công ty. Kết nối rồi 
 | "Chưa lưu Drive: cần kết nối" | Cài đặt, mục Google (Drive và Lịch): kết nối bằng đúng tài khoản trùng email đăng nhập |
 | "Bot không vào được" | Xem lý do ở Lịch sắp tới: chưa ai cho vào, hoặc cuộc họp chỉ cho người trong tổ chức; bấm "Mời bot vào lại" |
 | "Tài khoản Recall.ai của công ty đã hết credit" | Báo quản trị viên nạp thêm credit trên Recall.ai, rồi bấm "Mời bot vào lại" |
+| Bot ghi "đang kết nối âm thanh" mãi (hoặc "Bot đã vào nhưng server CHƯA nhận được âm thanh") | Bot đã vào Meet nhưng server chưa nhận được tiếng. Đợi ~1 phút; vẫn vậy thì báo quản trị viên kiểm tra PUBLIC_BASE_URL và kết nối WebSocket từ Recall, rồi bấm "Mời bot vào lại" |
+| Màn hình báo bot đang nghe nhưng không thấy cuộc họp đang diễn ra | Bot mới vào, chưa có âm thanh nên chưa tạo cuộc họp (trạng thái giờ ghi "đang kết nối âm thanh"); có người nói là cuộc họp hiện ra ở Đang diễn ra |
 | "WikiBox từ chối API key này" | Tạo key mới trên WikiBox (có quyền Truy xuất), hoặc dùng nút Kết nối WikiBox |
 | Trò chơi không nhận câu trả lời bằng giọng | Nói ngắn, rõ "Đáp án B" khi đồng hồ đang chạy (sau khi trợ lý đọc xong câu hỏi); hoặc chơi bằng mã QR |
 | "Chỉ quản trị viên được đổi cài đặt chung" | Nhờ quản trị viên đổi |

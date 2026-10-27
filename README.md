@@ -17,6 +17,21 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 
 ---
 
+## Bản 3.23.2: bot Meet báo đúng trạng thái "đang kết nối âm thanh" vs "đang chép lời"
+
+Sửa lỗi gây hiểu lầm: màn hình báo **bot đang nghe/chép lời** nhưng mục **Đang diễn ra lại không có cuộc họp**.
+- Nguyên nhân: giao diện hiện "đang chép lời" ngay khi Recall báo bot đã vào (`in_call`), trong khi server chỉ thật
+  sự có lời thoại khi **nhận được âm thanh** (mở WebSocket từ Recall + tạo cuộc họp). Có một khoảng Recall báo "đang
+  ghi" nhưng server chưa nhận được gì.
+- Nay thêm cờ `recording = ws_open AND có cuộc họp` (`meet_bots.public`). Khi bot đã vào mà chưa có âm thanh, giao
+  diện hiện **"đang kết nối âm thanh"** (vàng) thay vì "đang chép lời" (xanh), và `watch()` để trạng thái đúng như
+  vậy; chờ quá `NO_AUDIO_GRACE_S` (75 giây) vẫn chưa có âm thanh thì báo cách kiểm tra (PUBLIC_BASE_URL / kết nối
+  WebSocket từ Recall). Khi âm thanh về và cuộc họp xuất hiện ở Đang diễn ra thì mới hiện "đang chép lời".
+- Chẩn đoán từ Atlas (27/10/2026): Recall đã có credit trở lại (bot chép được, ví dụ 85 câu); các ca "không nghe"
+  còn lại là bot bị kick (`bot_kicked_from_call`) hoặc chờ phòng chờ quá 10 phút không ai cho vào
+  (`timeout_exceeded_waiting_room` - Google Meet chặn ở 10 phút; bấm "Mời bot vào lại" trên thẻ lịch).
+- Test: `tests/test_calendar_meet.py` (in_call chưa có âm thanh -> "đang kết nối"; cờ recording).
+
 ## Bản 3.23.1: chống trùng cả khi nhiều máy cùng phòng vào Meet, và không bỏ nhầm trao đổi thật
 
 Mở rộng bộ chống trùng (3.23.0) cho hai tình huống còn thiếu:
