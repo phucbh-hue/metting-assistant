@@ -192,6 +192,14 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await self.wait_for(lambda: len(FakeSoniox.instances) == 2 and not self.stream.down))
         self.assertEqual(self.stream._fatal, "")
 
+    async def test_meet_stream_frees_soniox_slot_faster_than_mic(self):
+        """Trần ~10 kết nối Soniox: luồng của người trong Meet nghỉ nói thì đóng nhanh (MEET_IDLE_CLOSE_S) để nhả chỗ."""
+        meet = await self.s.start_audio(object(), "meet5", diarize=False, claim_owner=False)
+        await meet.feed(tone(0.5))
+        with mock.patch.object(live, "MEET_IDLE_CLOSE_S", 0.05), mock.patch.object(live, "IDLE_CLOSE_S", 20):
+            await meet.pause()
+            self.assertTrue(await self.wait_for(lambda: meet.ws is None))   # đóng theo 0.05s chứ không phải 20s
+
     async def test_tab_stream_runs_alongside_mic(self):
         """Extension thu tiếng tab là luồng riêng, chạy song song với mic và KHÔNG chiếm nguồn mic của cuộc họp."""
         self.assertIs(self.s.audio_owner, self.owner)

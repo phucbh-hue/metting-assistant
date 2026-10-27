@@ -55,6 +55,10 @@ MAX_SEGMENT_S = 20.0            # Câu dài hơn: cắt tại dấu câu để t
 AUDIO_KEEP_S = 180              # Giữ tối đa ngần này giây audio để cắt clip / phát lại
 REPLAY_MAX_S = 15.0             # Tối đa số giây audio phát lại sau khi nối lại Soniox
 IDLE_CLOSE_S = float(os.getenv("SONIOX_IDLE_CLOSE_S", "30"))
+# Soniox giới hạn ~10 kết nối nhận dạng ĐỒNG THỜI cho cả tổ chức. MỖI người trong Google Meet là một kết nối riêng, nên
+# một cuộc họp đông + có người bật mic dễ chạm trần -> luồng mở sau (thường là mic) không xin được chỗ, mất transcript.
+# Luồng của người trong Meet nghỉ nói thì NHẢ chỗ nhanh hơn (đóng sớm) để dành chỗ cho người đang nói và cho mic.
+MEET_IDLE_CLOSE_S = float(os.getenv("MEET_IDLE_CLOSE_S", "8"))
 # Soniox giới hạn MỖI phiên realtime 300 phút và mỗi tổ chức ~10 kết nối đồng thời (phiên để không cũng tính). Bật mic
 # liên tục quá 300 phút sẽ bị cắt (max_duration_reached); nhiều luồng (mic + từng người trong Meet + tab) chạy song song
 # dễ chạm trần đồng thời (max_concurrent_connections_reached, mã 429). Ta tự đổi phiên trước giới hạn thời gian, và khi
@@ -386,11 +390,15 @@ class MeetingStream:
                 pass
         self._set_state("paused")
 
+        # Người trong Meet nghỉ nói thì nhả chỗ Soniox nhanh hơn mic (trần ~10 kết nối đồng thời cho cả tổ chức).
+        idle_s = MEET_IDLE_CLOSE_S if self.name.startswith("meet") else IDLE_CLOSE_S
+
         async def _idle():
             try:
-                await asyncio.sleep(IDLE_CLOSE_S)
+                await asyncio.sleep(idle_s)
                 if self.paused and not self.closed:
-                    log.info("meeting.live: mic nghỉ %.0fs -> đóng Soniox session %d", IDLE_CLOSE_S, self.session.id)
+                    log.info("meeting.live: luồng %s nghỉ %.0fs -> đóng Soniox (nhả chỗ) session %d",
+                             self.name, idle_s, self.session.id)
                     await self._close_ws()
                     self._set_state("idle")
             except asyncio.CancelledError:

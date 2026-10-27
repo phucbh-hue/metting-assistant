@@ -4,40 +4,14 @@ description: >
   Hướng dẫn cho người dùng nội bộ UrBox: đăng nhập, tạo và chạy cuộc họp, trợ lý AI, trò chơi có thưởng,
   biên bản và mẫu biên bản, nhóm cuộc họp, lịch Google và bot Google Meet, chế độ BD, kho tri thức WikiBox,
   hồ sơ giọng nói và toàn bộ phần Cài đặt. Kèm video demo có phụ đề.
-version: 3.23.2
+version: 3.23.3
 updated: 25/10/2026
 owner: phuc.bh@urbox.vn
-video: huong-dan/video-demo.mp4
 ---
 
-# Hướng dẫn sử dụng UrBox Meeting Copilot
+## 1. Mục lục
 
-- Phiên bản: 3.23.1. Cập nhật: 25/10/2026. Phụ trách: phuc.bh@urbox.vn.
-- Ảnh và video trong tài liệu dùng dữ liệu mẫu và tài khoản giả (`*.demo@urbox.vn`), không có dữ liệu thật.
-- Dữ liệu tra cứu nội bộ của trợ lý (ticket Jira, danh bạ, kiến trúc hệ thống) hiện là dữ liệu mẫu. Kho tri
-  thức thật của công ty dùng WikiBox khi người tạo cuộc họp đã kết nối (mục 13.4).
-- Bản 3.20.0 (14/10/2026) chưa có ảnh chụp cho các phần mới: trò chơi, mẫu biên bản, WikiBox, mời bot bằng
-  link.
-- Bản 3.21.0 (19/10/2026): nhiều người cùng dùng Copilot trong một cuộc họp Google Meet chỉ cần một bot, mỗi
-  người có cuộc họp riêng (mục 10.6). Phần này chưa có ảnh chụp.
-- Bản 3.21.1 (19/10/2026): PowerPoint mở để trình bày hiện đúng thiết kế từng slide, vẫn giữ ghi chú người
-  trình bày (mục 7.4).
-- Bản 3.21.2 (23/10/2026): kết nối kho tri thức WikiBox bằng đăng nhập Google, không cần API key (mục 13.4).
-- Bản 3.21.3 (23/10/2026): bật mic/thu liên tục không còn bị Soniox "giới hạn" ngắt giữa chừng; phòng mở quá
-  30 phút mà không ai nói thì tự kết thúc kèm recap.
-- Bản 3.22.0 (23/10/2026): thêm **extension Chrome** cho họp online - thu cả tiếng người trong Google
-  Meet/Teams/Zoom (qua tab) lẫn tiếng mình nói (mic), chép lời như mic, không cần bot vào phòng (cài theo
-  `extension/README.md`).
-- Bản 3.23.0 (25/10/2026): **chống trùng lặp lời thoại** - cùng một câu thu được qua nhiều nguồn (tiếng online
-  lọt vào mic phòng, vừa bật bot vừa bật extension...) chỉ còn hiện một lần trong biên bản.
-- Bản 3.23.1 (25/10/2026): chống trùng cả khi nhiều máy trong cùng phòng cùng vào Meet; và không bỏ nhầm câu
-  đáp giống nhau của người nói sau (phải trùng cả thời gian mới coi là một).
-- Bản 3.23.2 (27/10/2026): bot Google Meet báo đúng trạng thái - khi mới vào mà chưa có âm thanh thì hiện "đang
-  kết nối âm thanh" (không còn báo "đang chép lời" lúc chưa có cuộc họp).
-
-## Mục lục
-
-1. [Video demo](#1-video-demo)
+1. [Muc luc](#1-muc-luc)
 2. [Ứng dụng làm được gì](#2-ứng-dụng-làm-được-gì)
 3. [Đăng nhập và khởi động](#3-đăng-nhập-và-khởi-động)
 4. [Trang chủ](#4-trang-chủ)
@@ -53,29 +27,6 @@ video: huong-dan/video-demo.mp4
 14. [Quyền riêng tư và dữ liệu](#14-quyền-riêng-tư-và-dữ-liệu)
 15. [Xử lý sự cố thường gặp](#15-xử-lý-sự-cố-thường-gặp)
 16. [Giới hạn cần biết](#16-giới-hạn-cần-biết)
-
-## 1. Video demo
-
-Video: [huong-dan/video-demo.mp4](huong-dan/video-demo.mp4) (4 phút 38 giây, có phụ đề, không có tiếng).
-
-| Thời điểm | Nội dung |
-|---|---|
-| 0:05 | Đăng nhập bản web |
-| 0:13 | Trang chủ, lịch sắp tới |
-| 0:28 | Nhóm cuộc họp |
-| 0:40 | Tạo cuộc họp |
-| 0:49 | Bật mic, chép lời, tách người nói |
-| 1:08 | Đặt tên người nói |
-| 1:16 | Gọi trợ lý bằng giọng nói |
-| 1:25 | Slide, sơ đồ tư duy, dashboard |
-| 2:16 | Màn hình trình bày |
-| 2:29 | Ghi âm và kết thúc cuộc họp |
-| 2:56 | Biên bản, thay đổi so với các buổi trước |
-| 3:09 | Cuộc họp Google Meet có bot |
-| 3:21 | Chế độ BD: Bảng BD |
-| 3:44 | Chế độ BD: hỏi về các cuộc họp |
-| 3:57 | Cài đặt |
-| 4:25 | Hồ sơ giọng nói |
 
 ## 2. Ứng dụng làm được gì
 
@@ -819,6 +770,7 @@ WikiBox (`wiki.urbox.dev`) là kho tri thức của công ty. Kết nối rồi 
 | "Tài khoản Recall.ai của công ty đã hết credit" | Báo quản trị viên nạp thêm credit trên Recall.ai, rồi bấm "Mời bot vào lại" |
 | Bot ghi "đang kết nối âm thanh" mãi (hoặc "Bot đã vào nhưng server CHƯA nhận được âm thanh") | Bot đã vào Meet nhưng server chưa nhận được tiếng. Đợi ~1 phút; vẫn vậy thì báo quản trị viên kiểm tra PUBLIC_BASE_URL và kết nối WebSocket từ Recall, rồi bấm "Mời bot vào lại" |
 | Màn hình báo bot đang nghe nhưng không thấy cuộc họp đang diễn ra | Bot mới vào, chưa có âm thanh nên chưa tạo cuộc họp (trạng thái giờ ghi "đang kết nối âm thanh"); có người nói là cuộc họp hiện ra ở Đang diễn ra |
+| Nhiều cuộc họp đông chạy cùng lúc, có buổi mở mic mà không ra transcript | Dịch vụ nhận dạng (Soniox) giới hạn số cuộc đồng thời cho cả công ty; mỗi người trong Meet tính một kết nối. Ứng dụng tự nhả chỗ khi ai đó nghỉ nói, nhưng nếu vẫn thiếu thì báo quản trị viên **nâng hạn mức Soniox** (transcribe_concurrent) |
 | "WikiBox từ chối API key này" | Tạo key mới trên WikiBox (có quyền Truy xuất), hoặc dùng nút Kết nối WikiBox |
 | Trò chơi không nhận câu trả lời bằng giọng | Nói ngắn, rõ "Đáp án B" khi đồng hồ đang chạy (sau khi trợ lý đọc xong câu hỏi); hoặc chơi bằng mã QR |
 | "Chỉ quản trị viên được đổi cài đặt chung" | Nhờ quản trị viên đổi |

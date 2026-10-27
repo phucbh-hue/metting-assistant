@@ -17,6 +17,20 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 
 ---
 
+## Bản 3.23.3: đỡ chạm trần kết nối Soniox (mic mất transcript khi có bot)
+
+Hiện tượng: máy chủ chạy mượt cho người test một mình, nhưng nhiều tài khoản khác "bot vào rồi mà mở mic lại không
+có transcript". Nguyên nhân (đo trực tiếp bằng API Soniox): **cả tổ chức chỉ có 10 kết nối nhận dạng ĐỒNG THỜI**
+(`transcribe_concurrent: 10`). MỖI người trong Google Meet là một kết nối riêng, nên một cuộc họp đông + có người bật
+mic dễ vượt 10; luồng mở sau (thường là mic) không xin được chỗ -> mất transcript, trong khi bot (mở trước) vẫn chạy.
+- **Giảm áp lực (code):** luồng của người trong Meet khi NGHỉ nói sẽ đóng kết nối Soniox sau `MEET_IDLE_CLOSE_S` (8
+  giây) thay vì 30 giây, nhả chỗ nhanh cho người đang nói và cho mic. Mic/tab vẫn giữ 30 giây cho mượt.
+- **Giới hạn Soniox 429** đã được xử lý từ 3.21.3 (nối lại chậm rãi, báo "Soniox đang giới hạn"); nay thêm việc nhả
+  chỗ sớm nên ít chạm trần hơn.
+- **Việc cần làm (quản trị, mới là cách gốc):** nâng hạn mức `transcribe_concurrent` của tổ chức trên Soniox Console
+  (10 là quá thấp cho nhiều cuộc họp đông chạy song song). Kiểm tra bằng `GET https://api.soniox.com/v1/concurrency-limits`.
+- Test: `tests/test_live_stream.py` (luồng meet nhả chỗ nhanh hơn mic).
+
 ## Bản 3.23.2: bot Meet báo đúng trạng thái "đang kết nối âm thanh" vs "đang chép lời"
 
 Sửa lỗi gây hiểu lầm: màn hình báo **bot đang nghe/chép lời** nhưng mục **Đang diễn ra lại không có cuộc họp**.
