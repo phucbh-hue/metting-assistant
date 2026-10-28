@@ -24,7 +24,6 @@ log = logging.getLogger("meeting.recall")
 
 REGIONS = ("us-west-2", "us-east-1", "eu-central-1", "ap-northeast-1")
 SCHEDULE_LEAD_S = 10 * 60
-CHAT_MAX = 500                   # Google Meet: tin nhắn tối đa 500 ký tự
 _transport: Optional[httpx.AsyncBaseTransport] = None        # test thay bằng httpx.MockTransport
 _region: Dict[str, str] = {}
 
@@ -127,17 +126,12 @@ def _iso(t: float) -> str:
     return datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
-def join_message(owner_name: str) -> str:
-    who = f" do {owner_name} mời" if owner_name else ""
-    msg = (f"Xin chào, tôi là {bot_name()}{who}. Cuộc họp này được chép lời và tóm tắt thành biên bản cho người tổ chức. "
-           "Không lưu ghi âm trừ khi chủ phòng bật ghi âm. Ai không đồng ý, xin báo người tổ chức để mời tôi ra.")
-    return msg[:CHAT_MAX]
-
-
 async def create_bot(meeting_url: str, ws_url: str, join_at: Optional[float] = None, owner_name: str = "",
                      metadata: Optional[Dict[str, Any]] = None, now: Optional[float] = None) -> Dict[str, Any]:
     """Tạo bot: hẹn giờ vào nếu còn ít nhất 10 phút, không thì vào ngay. Trả về bot (có id, status_changes)."""
     now = now or time.time()
+    # KHÔNG gửi tin chào vào chat Meet: người dùng thấy ngại khi bot tự nhắn (đồng ý ghi âm đã lấy từ trước). owner_name
+    # vẫn nhận để hiện "bot do X mời" trên giao diện.
     body: Dict[str, Any] = {
         "meeting_url": meeting_url,
         "bot_name": bot_name(),
@@ -148,7 +142,6 @@ async def create_bot(meeting_url: str, ws_url: str, join_at: Optional[float] = N
         },
         # mọi người rời đi 60 giây (không phải 2 giây mặc định) mới rời: chủ phòng rớt mạng một lúc không làm hỏng buổi họp
         "automatic_leave": {"everyone_left_timeout": {"timeout": 60}},
-        "chat": {"on_bot_join": {"send_to": "everyone", "message": join_message(owner_name)}},
         "metadata": {k: str(v)[:500] for k, v in (metadata or {}).items()},
     }
     if join_at and join_at - now >= SCHEDULE_LEAD_S:

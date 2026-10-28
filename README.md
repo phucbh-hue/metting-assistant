@@ -17,6 +17,13 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 
 ---
 
+## Bản 3.23.4: bot Meet không còn tự nhắn tin chào vào chat
+
+Bỏ tin bot tự gửi vào khung chat Google Meet khi vào ("Xin chào, tôi là Trợ lý Urbox do ... mời. Cuộc họp này được
+chép lời..."). Người dùng thấy ngại khi bot tự nhắn; việc xin phép ghi âm/chép lời đã lấy từ trước. Gỡ `chat.on_bot_join`
+khỏi cấu hình tạo bot (`meeting/recall.py`), bỏ `join_message`/`CHAT_MAX`. Vẫn giữ `owner_name` để hiện "bot do X mời"
+trên giao diện. Test cập nhật: cấu hình bot không còn khoá `chat`.
+
 ## Bản 3.23.3: đỡ chạm trần kết nối Soniox (mic mất transcript khi có bot)
 
 Hiện tượng: máy chủ chạy mượt cho người test một mình, nhưng nhiều tài khoản khác "bot vào rồi mà mở mic lại không

@@ -140,10 +140,7 @@ class SchedulingTests(MeetBase):
         self.assertEqual((ep["type"], ep["events"]), ("websocket", ["audio_separate_raw.data"]))
         self.assertEqual(ep["url"], f"wss://meet-api.example.com/ws/recall/{rec['rid']}/?token={rec['token']}")
         self.assertEqual(cfg["retention"], {"type": "timed", "hours": 1})    # Recall không giữ bản ghi lâu
-        msg = bot["chat"]["on_bot_join"]
-        self.assertEqual(msg["send_to"], "everyone")
-        self.assertLessEqual(len(msg["message"]), 500)
-        self.assertIn("chép lời", msg["message"])
+        self.assertNotIn("chat", bot)                                        # không tự gửi tin chào vào chat Meet (người dùng ngại)
         self.assertEqual(rec["status"], "scheduled")
         # vùng Recall tự dò: us-west-2, us-east-1, eu-central-1 báo key sai, ap-northeast-1 đúng; lần sau không dò lại
         self.assertEqual([c[1] for c in self.recall.calls if c[0] == "GET"],

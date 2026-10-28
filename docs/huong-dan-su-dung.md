@@ -4,7 +4,7 @@ description: >
   Hướng dẫn cho người dùng nội bộ UrBox: đăng nhập, tạo và chạy cuộc họp, trợ lý AI, trò chơi có thưởng,
   biên bản và mẫu biên bản, nhóm cuộc họp, lịch Google và bot Google Meet, chế độ BD, kho tri thức WikiBox,
   hồ sơ giọng nói và toàn bộ phần Cài đặt. Kèm video demo có phụ đề.
-version: 3.23.3
+version: 3.23.4
 updated: 25/10/2026
 owner: phuc.bh@urbox.vn
 ---
@@ -493,8 +493,8 @@ Mỗi buổi trong 7 ngày tới hiện:
 ### 10.3. Khi bot vào họp
 
 - Bot vào Meet với tư cách **khách**: người trong cuộc họp phải bấm **Cho vào** (Meet chỉ chờ 10 phút).
-- Bot nhắn trong khung chat của Meet rằng cuộc họp được chép lời. Với khách ngoài công ty, nên báo trước khi
-  họp.
+- Bot **không tự nhắn gì** vào khung chat của Meet. Việc xin phép ghi âm/chép lời lấy từ trước; với khách ngoài
+  công ty, nên báo trước khi họp.
 - Cuộc họp đặt chế độ chỉ cho người trong tổ chức vào thì bot bị chặn. Lịch sắp tới báo rõ lý do.
 - Cuộc họp trong ứng dụng được tạo tự động:
   - tiêu đề, người tham dự, chương trình lấy từ lịch;
