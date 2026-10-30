@@ -695,6 +695,13 @@ async def _claude_search(query: str, context_text: str = "", max_uses: int = 5,
     billed = int(getattr(stu, "web_search_requests", 0) or 0) or searches
     _record("claude", model, u["input"], u["output"], t0, ok=True, estimated=u["estimated"],
             cache_read=u["cache_read"], cache_write=u["cache_write"], extra_usd=billed * WEB_SEARCH_USD)
+    if not "".join(texts).strip() and sources:       # hết token cho phần suy nghĩ trước khi kịp viết (stop=max_tokens):
+        log.warning("meeting.artifacts: web_search không có phần chữ (stop=%s), dựng báo cáo từ %d nguồn tìm được",
+                    getattr(resp, "stop_reason", None), len(sources))
+        lines = "\n".join(f"- [{s['title'][:90]}]({s['url']})"
+                          + (f"\n  {s['excerpt'][:300]}" if s.get("excerpt") else "") for s in sources[:8])
+        body = f"# Tra cứu: {query}\n\nEm đã tìm thấy các nguồn sau trên mạng (chưa kịp tổng hợp):\n\n{lines}"
+        return body, sources, searches
     return _clean_report("".join(texts), query), sources, searches
 
 

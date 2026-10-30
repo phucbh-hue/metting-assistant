@@ -37,7 +37,8 @@ LOCAL = "local"                       # bản trên máy (không đăng nhập):
 PENDING_TTL_S = 600
 TOOLS_TTL_S = 3600
 CALL_TIMEOUT_S = 30.0
-SEARCH_TIMEOUT_S = 8.0                # Bảng BD: tìm trong wiki không được làm chậm câu trả lời quá lâu
+SEARCH_TIMEOUT_S = 12.0               # Bảng BD: tìm trong wiki không được làm chậm câu trả lời quá lâu (lần đầu sau khi
+                                      # token hết hạn còn phải làm mới token + mở phiên MCP nên cần rộng hơn 8 giây)
 _transport: Optional[httpx.AsyncBaseTransport] = None      # test thay bằng httpx.MockTransport (OAuth)
 _META: Dict[str, Any] = {}
 _ACCESS: Dict[str, Tuple[str, float]] = {}                # email -> (access token, hết hạn lúc)
@@ -562,7 +563,14 @@ async def search_for_meeting(meeting: Optional[Dict[str, Any]], query: str, k: i
     try:
         return await asyncio.wait_for(search(owner, query, k), SEARCH_TIMEOUT_S)
     except (WikiboxError, asyncio.TimeoutError) as e:
-        log.info("meeting.wikibox: tìm '%s' lỗi/chậm: %s", query[:60], e)
+        # Trước đây nuốt lỗi âm thầm nên kết nối hết hạn mà không ai biết: ghi lỗi lên kết nối để Cài đặt hiện đúng lý do
+        # ("cần kết nối lại WikiBox" / "WikiBox chậm") thay vì cứ báo "không tìm được tài liệu".
+        msg = "WikiBox phản hồi chậm quá 12 giây" if isinstance(e, asyncio.TimeoutError) else str(e)[:200]
+        log.warning("meeting.wikibox: tìm '%s' cho %s lỗi/chậm: %s", query[:60], owner, msg)
+        try:
+            _col().update_one({"owner": owner}, {"$set": {"error": msg}})
+        except Exception:
+            pass
         return []
 
 
