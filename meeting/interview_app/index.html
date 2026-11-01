@@ -353,6 +353,7 @@ let teardown=null,H={};
    thấy NAV đã khác. Không có nó thì server chậm (Render free, Neon vừa thức) mà người dùng bấm sang trang
    khác, trang cũ tải xong muộn sẽ đè lên trang mới, chiếm luôn teardown và để lại polling không ai dừng. */
 let NAV=0;
+let ME={};        // vai trò người dùng (admin/owner/user) từ /api/me - để ẩn/hiện và chặn phía UI
 /* Giọng mẫu người phỏng vấn: PCM16 16kHz, CHỈ nằm trong bộ nhớ trang - không ghi ổ đĩa,
    không localStorage, vì đó là dữ liệu sinh trắc học. Dùng lại cho các buổi liền nhau
    tới khi tải lại trang hoặc bấm xoá. Server dùng nó một lần lúc mở luồng rồi bỏ. */
@@ -365,11 +366,13 @@ const pref={get:k=>{try{return JSON.parse(localStorage.getItem('ia.'+k))}catch{r
 
 function chrome_(active){
   $('logo').innerHTML=I('wave');
-  $('nav').innerHTML=[['home','#/','briefcase','Vị trí'],['voices','#/voices','users','Giọng nói'],['settings','#/settings','gear','Cài đặt']]
+  $('nav').innerHTML=[['home','#/','briefcase','Vị trí'],['voices','#/voices','users','Giọng nói'],['settings','#/settings','gear','Cài đặt'],
+      ...(ME.admin?[['roles','#/roles','shield','Phân quyền']]:[]),['meeting','/','arrow','← Meeting']]
     .map(([k,h,ic,t])=>`<a href="${h}" class="${k===active?'on':''}">${I(ic,'sm')}<span>${t}</span></a>`).join('');
-  $('status').innerHTML=H.soniox===undefined?'':
+  const roleT={admin:'Admin',owner:'Owner',user:'Người phỏng vấn'}[ME.role];
+  $('status').innerHTML=(roleT?`<span class="pill" title="Quyền của bạn trong phần Phỏng vấn">${roleT}</span>`:'')+(H.soniox===undefined?'':
     `<span class="pill ${H.soniox?'ok':'err'}"><i></i>Soniox</span><span class="pill ${H.gemini||H.provider==='claude'?'ok':'err'}"><i></i>${esc(H.model||'model')}</span>`+
-    `<span class="pill ${H.voice?'ok':'warn'}" title="${H.voice?'Có model so giọng từng câu':'Chưa có model nhận diện giọng'}"><i></i>So giọng</span>`;
+    `<span class="pill ${H.voice?'ok':'warn'}" title="${H.voice?'Có model so giọng từng câu':'Chưa có model nhận diện giọng'}"><i></i>So giọng</span>`);
 }
 async function route(){
   if(teardown){try{teardown()}catch{} teardown=null}
@@ -379,9 +382,11 @@ async function route(){
   const active=!h[0]||h[0]==='p'||h[0]==='c'||h[0]==='s'?'home':h[0];
   chrome_(active);
   if(H.soniox===undefined)api('/health').then(x=>{H=x;chrome_(active)}).catch(()=>{});
+  if(ME.role===undefined)api('/me').then(x=>{ME=x;chrome_(active)}).catch(()=>{});
   app.innerHTML='<div class="skel" style="width:40%;height:26px"></div><div class="skel" style="margin-top:18px;height:120px"></div>';
   try{
     if(!h[0]) return await home(app);
+    if(h[0]==='roles') return await rolesPage(app);
     if(h[0]==='settings') return await settings(app);
     if(h[0]==='voices') return await voices(app);
     if(h[0]==='p'&&h[2]==='compare') return await compare(app,+h[1]);
@@ -392,6 +397,22 @@ async function route(){
 }
 addEventListener('hashchange',route);addEventListener('load',route);
 const crumb=parts=>`<div class="crumb">${parts.map(([t,h])=>h?`<a href="${h}">${esc(t)}</a>`:`<span>${esc(t)}</span>`).join(I('chev','sm'))}</div>`;
+
+/* -------------------------------------------------------------- phân quyền (admin) */
+async function rolesPage(app){
+  if(!ME.admin){app.innerHTML=`<div class="card">${empty('shield','Chỉ admin xem được trang này.','<p><a href="#/">← Về trang chủ</a></p>')}</div>`;return}
+  chrome_('roles');
+  let d; try{d=await api('/roles')}catch(e){app.innerHTML=`<div class="card">${empty('alert',esc(e.message))}</div>`;return}
+  const row=p=>`<div class="item"><div class="av" style="--h:${hue(p.name)}">${esc(ini(p.name))}</div>
+    <div style="flex:1"><div class="t">${esc(p.name)}</div><div class="m">${esc(p.email)}</div></div>
+    <span class="go">${p.role==='admin'?'<span class="tag">Admin</span>'
+      :p.role==='owner'?`<span class="tag ok">Owner</span> <button class="ghost sm" data-r="user" data-e="${esc(p.email)}">Gỡ owner</button>`
+      :`<span class="tag">Người phỏng vấn</span> <button class="sm" data-r="owner" data-e="${esc(p.email)}">Cấp owner</button>`}</span></div>`;
+  app.innerHTML=`<div class="ph"><div><h1>Phân quyền</h1><div class="sub">Owner: tạo vị trí, đặt tiêu chí, tải/chấm CV. Người phỏng vấn (mặc định): xem vị trí được giao + chạy buổi phỏng vấn. Admin cố định theo cấu hình hệ thống.</div></div></div>
+    <div class="card"><div class="list" id="rlist">${(d.people||[]).map(row).join('')||empty('users','Chưa có người dùng nào đăng nhập.')}</div></div>`;
+  app.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>busy(b,'đang lưu…',async()=>{
+    await api('/roles',{method:'POST',body:{email:b.dataset.e,role:b.dataset.r}});toast('Đã cập nhật quyền');route()}));
+}
 
 /* -------------------------------------------------------------- home */
 /* Buổi đang chạy ở đầu trang chủ: vào thẳng hoặc kết thúc, khỏi lần qua vị trí -> ứng
@@ -750,6 +771,7 @@ async function candidate(app,cid){
      <h3 style="margin-top:0">Trực tiếp tại phòng - mic máy này</h3>
      <label>Chủ phòng <span class="mut">- người cầm máy, người gọi trợ lý</span></label>
      <select id="host" ${vs.length?'':'disabled'}><option value="">${vs.length?'Chưa chọn':'Chưa lưu giọng ai'}</option>${vs.map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join('')}</select>
+     ${vs.length>8?`<input id="voxSearch" placeholder="🔍 Tìm theo tên (lọc chủ phòng &amp; người phỏng vấn cùng)" style="width:100%;margin:6px 0 2px;padding:6px 9px">`:''}
      <label>Người phỏng vấn cùng <span class="mut">- chỉ tích người CÓ MẶT ở buổi này; ai không có trong danh sách là ứng viên</span></label>
      <div id="peers" class="row" style="gap:6px"></div>
      <p class="xs mut" style="margin:8px 0 0"><a href="#/voices">${I('users','sm')} Quản lý giọng nói</a>${h.voice===false?' · <span class="err">server chưa có model so giọng</span>':''}</p>
@@ -810,11 +832,17 @@ async function candidate(app,cid){
   // KHÔNG nhớ: tích một lần là buổi sau vẫn tích sẵn dù họ vắng, và so giọng đi tìm một người không có mặt -
   // vị trí #23 (14/10) bị gọi tên "anh Trí" cho cả chủ phòng lẫn ứng viên như vậy.
   if(vs.some(v=>v.id===lastHost))$('host').value=lastHost;
-  const peersUI=()=>{const host=+$('host').value||null,keep=new Set([...$('peers').querySelectorAll('input:checked')].map(x=>+x.value));
-    $('peers').innerHTML=vs.filter(v=>v.id!==host).map(v=>`<label class="tag" style="cursor:pointer;margin:0;padding:5px 10px"><input type="checkbox" value="${v.id}" ${keep.has(v.id)?'checked':''} style="width:14px;height:14px">${esc(v.name)}</label>`).join('')
-      ||'<span class="xs mut">Không có ai khác.</span>'};
+  const _vq=()=>($('voxSearch')?.value||'').trim().toLowerCase();
+  const _hit=(v,q)=>!q||(v.name||'').toLowerCase().includes(q);
+  const renderHostOpts=()=>{const q=_vq(),cur=+$('host').value||null;
+    $('host').innerHTML=`<option value="">${vs.length?'Chưa chọn':'Chưa lưu giọng ai'}</option>`
+      +vs.filter(v=>_hit(v,q)).map(v=>`<option value="${v.id}" ${v.id===cur?'selected':''}>${esc(v.name)}</option>`).join('')};
+  const peersUI=()=>{const host=+$('host').value||null,q=_vq(),keep=new Set([...$('peers').querySelectorAll('input:checked')].map(x=>+x.value));
+    $('peers').innerHTML=vs.filter(v=>v.id!==host&&_hit(v,q)).map(v=>`<label class="tag" style="cursor:pointer;margin:0;padding:5px 10px"><input type="checkbox" value="${v.id}" ${keep.has(v.id)?'checked':''} style="width:14px;height:14px">${esc(v.name)}</label>`).join('')
+      ||`<span class="xs mut">${q?'Không có tên khớp.':'Không có ai khác.'}</span>`};
   peersUI();
   $('host').onchange=()=>{pref.set('host',+$('host').value||null);peersUI()};
+  if($('voxSearch'))$('voxSearch').oninput=()=>{renderHostOpts();peersUI()};
   const primeUI=()=>{$('primeSt').innerHTML=PRIME?`${I('check','sm')} Đã có mẫu ${PRIME.sec.toFixed(0)}s · <a href="#" id="primeDel">xoá</a>`:'Chưa có';
     if(PRIME)$('primeDel').onclick=e=>{e.preventDefault();PRIME=null;primeUI();toast('Đã xoá giọng mẫu')}};
   primeUI();if(PRIME)$('primeWrap').open=true;
