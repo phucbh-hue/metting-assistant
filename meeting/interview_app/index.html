@@ -555,7 +555,8 @@ async function position(app,pid){
   app.innerHTML=`${crumb([['Trang chủ','#/'],[p.title]])}
   <div class="ph"><div><h1>${esc(p.title)}</h1><div class="sub" id="psub"></div></div>
     <div class="row">${nEval>=2?`<a href="#/p/${pid}/compare"><button class="ok">${I('scale','sm')} So sánh ${nEval} ứng viên</button></a>`:`<span class="small mut">Cần ≥ 2 ứng viên đã chấm để so sánh (${nEval})</span>`}
-    <button class="ghost" id="del" title="Xoá vị trí">${I('trash','sm')}</button></div></div>
+    ${p.can_config?`<button class="sec" id="share" title="Chia sẻ vị trí này cho người khác xem">${I('users','sm')} Chia sẻ${(p.members&&p.members.length)?` · ${p.members.length}`:''}</button>`:''}
+    ${p.can_config?`<button class="ghost" id="del" title="Xoá vị trí">${I('trash','sm')}</button>`:''}</div></div>
   <div class="grid-side">
    <div class="card"><div class="card-h">${I('file')}<h2>Thông tin vị trí</h2></div>
     <label>Tên</label><input id="title" value="${esc(p.title)}">
@@ -744,7 +745,36 @@ async function position(app,pid){
       await api(`/positions/${pid}`,{method:'PUT',body:{rubric,criteria:{...cr,source:'hr',must_have:lines($('emust').value),nice_to_have:lines($('enice').value)}}});
       editing=false;toast('Đã lưu tiêu chí');await refresh()})};
   renderCands();renderCrit();watch();
-  $('del').onclick=async()=>{if(!confirm(`Xoá vị trí "${p.title}" và toàn bộ ứng viên, buổi phỏng vấn?`))return;await api(`/positions/${pid}`,{method:'DELETE'});location.hash='#/'};
+  if($('del'))$('del').onclick=async()=>{if(!confirm(`Xoá vị trí "${p.title}" và toàn bộ ứng viên, buổi phỏng vấn?`))return;await api(`/positions/${pid}`,{method:'DELETE'});location.hash='#/'};
+  if($('share'))$('share').onclick=()=>shareDialog(pid,p.members||[]);
+}
+
+/* Chia sẻ vị trí: chọn ai được XEM vị trí này (cùng ứng viên + buổi phỏng vấn). Chỉ chủ vị trí/admin. */
+async function shareDialog(pid,members){
+  let people;try{people=(await api('/people')).people||[]}catch(e){return toast(e.message,true)}
+  const sel=new Set((members||[]).map(x=>String(x).toLowerCase()));
+  const roleT={admin:'Admin',owner:'Owner',user:'Người PV'};
+  const row=p=>`<label class="check" data-row="${esc(p.email)}" style="align-items:center;margin:2px 0;padding:6px 8px;border-radius:9px">
+    <input type="checkbox" value="${esc(p.email)}" ${sel.has(p.email.toLowerCase())?'checked':''}>
+    ${av(p.name)}<span style="flex:1;min-width:0"><div class="t">${esc(p.name)}</div><div class="m">${esc(p.email)}</div></span>
+    <span class="tag ${p.role==='owner'?'ok':''}">${roleT[p.role]||esc(p.role)}</span></label>`;
+  const ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:60;padding:16px';
+  ov.innerHTML=`<div class="card" style="max-width:520px;width:100%;max-height:85vh;display:flex;flex-direction:column;margin:0">
+    <div class="card-h">${I('users')}<h2>Chia sẻ vị trí</h2><span class="spacer"></span><button class="ghost sm icon" id="shX" title="Đóng">${I('x','sm')}</button></div>
+    <div class="sub" style="margin:-2px 0 10px">Người được chọn sẽ <b>xem</b> được vị trí này cùng ứng viên và các buổi phỏng vấn. Chỉ bạn (chủ vị trí) và admin mới sửa được.</div>
+    <input id="shq" placeholder="🔍 Tìm theo tên hoặc email" style="width:100%;padding:7px 10px;margin-bottom:8px">
+    <div id="shList" style="overflow:auto;flex:1;min-height:60px">${people.map(row).join('')||'<div class="xs mut">Chưa có người dùng nào đăng nhập hệ thống.</div>'}</div>
+    <div class="row" style="margin-top:12px;justify-content:flex-end"><button class="ghost" id="shC">Huỷ</button><button id="shS">${I('check','sm')} Lưu chia sẻ</button></div></div>`;
+  document.body.appendChild(ov);
+  const close=()=>ov.remove();
+  ov.onclick=e=>{if(e.target===ov)close()};$('shX').onclick=close;$('shC').onclick=close;
+  $('shq').oninput=()=>{const q=$('shq').value.trim().toLowerCase();
+    ov.querySelectorAll('[data-row]').forEach(l=>{l.style.display=(!q||l.textContent.toLowerCase().includes(q))?'':'none'})};
+  $('shS').onclick=()=>busy('shS','đang lưu…',async()=>{
+    const emails=[...ov.querySelectorAll('#shList input:checked')].map(x=>x.value);
+    const r=await api(`/positions/${pid}/members`,{method:'PUT',body:{members:emails}});
+    toast(r.members.length?`Đã chia sẻ cho ${r.members.length} người`:'Đã bỏ chia sẻ với mọi người');close();route()})};
 }
 
 /* --------------------------------------------------------- candidate */

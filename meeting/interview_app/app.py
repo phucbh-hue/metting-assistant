@@ -179,23 +179,42 @@ def _position(pid: int) -> dict:
 
 
 @app.get("/api/positions")
-def positions():
-    return db.list_positions()
+def positions(request: Request):
+    return db.list_positions(auth.user_of(request))      # chỉ vị trí người này được xem
 
 
 @app.post("/api/positions")
-def create_position(body: PositionIn):
+def create_position(body: PositionIn, request: Request):
     f = {k: v for k, v in body.model_dump().items() if v is not None}
     if not f.get("title"):
         raise HTTPException(400, "Thiếu title")
     f.pop("criteria", None)
+    me = auth.user_of(request)
+    if me and me.get("email"):
+        f["owner"] = me["email"]              # người tạo = chủ vị trí
     pid = db.create_position(**f)
     return _position(pid)
 
 
+class MembersIn(BaseModel):
+    members: list[str] | None = None
+
+
+@app.put("/api/positions/{pid}/members")
+def set_position_members(pid: int, body: MembersIn):
+    """Chia sẻ vị trí (và các buổi của nó) cho người khác XEM. Chỉ chủ vị trí/admin
+    (middleware đã chặn theo chủ vị trí). members = danh sách email."""
+    _position(pid)                            # 404 nếu không có vị trí
+    return {"id": pid, "members": db.set_members(pid, body.members or [])}
+
+
 @app.get("/api/positions/{pid}")
-def get_position(pid: int):
+def get_position(pid: int, request: Request):
     p = _position(pid)
+    me = auth.user_of(request)
+    if not db.can_view(me, p):
+        raise HTTPException(404)              # không được chia sẻ -> coi như không tồn tại
+    p["can_config"] = db.can_config(me, p)    # UI dựa vào đây để hiện nút sửa/chia sẻ
     cands = db.list_candidates(pid)
     for c in cands:
         c["screening"] = _screen_view(c, p, full=False)
@@ -833,8 +852,10 @@ def _hash(x) -> str:
 
 
 @app.get("/api/positions/{pid}/compare")
-async def compare_position(pid: int, refresh: bool = False):
+async def compare_position(pid: int, request: Request, refresh: bool = False):
     p = _position(pid)
+    if not db.can_view(auth.user_of(request), p):
+        raise HTTPException(404)
     sessions = db.evaluated_sessions(pid)
     if len(sessions) < 2:
         raise HTTPException(400, f"Cần ít nhất 2 ứng viên đã có đánh giá (hiện có {len(sessions)})")
@@ -922,12 +943,14 @@ def create_candidate(pid: int, body: CandidateIn):
 
 
 @app.get("/api/candidates/{cid}")
-def get_candidate(cid: int):
+def get_candidate(cid: int, request: Request):
     c = db.get_candidate(cid)
     if not c:
         raise HTTPException(404)
-    c["sessions"] = db.list_sessions(cid)
     p = _position(c["position_id"])
+    if not db.can_view(auth.user_of(request), p):
+        raise HTTPException(404)
+    c["sessions"] = db.list_sessions(cid)
     c["position"] = p
     le = db.latest_evaluation(cid)
     if le and le.get("evaluation"):
@@ -1332,16 +1355,18 @@ async def _replay(ls: live.InterviewSession, path: Path, speed: float):
 
 
 @app.get("/api/live-sessions")
-def live_sessions():
+def live_sessions(request: Request):
     """Buổi đang chạy, cho trang chủ: vào thẳng hoặc kết thúc mà khỏi lần theo
     vị trí -> ứng viên. Kèm các buổi còn "live" trong DB nhưng không còn trong RAM
     (server khởi động lại giữa buổi - Render free tự tắt khi rảnh): chúng không
-    nghe được nữa, chỉ còn kết thúc để chấm phần transcript đã lưu, hoặc xoá."""
+    nghe được nữa, chỉ còn kết thúc để chấm phần transcript đã lưu, hoặc xoá.
+    Chỉ hiện buổi thuộc vị trí người này được xem."""
+    me = auth.user_of(request)
     out = []
     for s in db.live_sessions():
         c = db.get_candidate(s["candidate_id"])
         p = db.get_position(c["position_id"]) if c else None
-        if not c or not p:
+        if not c or not p or not db.can_view(me, p):
             continue
         ls = LIVE.get(s["id"])
         # Bao lâu rồi không có âm thanh: extension đã tắt thu (hoặc đóng tab Meet) mà
@@ -1360,8 +1385,10 @@ def live_sessions():
 
 
 @app.get("/api/sessions/{sid}")
-def get_session(sid: int):
+def get_session(sid: int, request: Request):
     s, c, p = _ctx(sid)
+    if not db.can_view(auth.user_of(request), p):
+        raise HTTPException(404)
     ls = LIVE.get(sid)
     if ls:
         s["transcript"] = ls.segments

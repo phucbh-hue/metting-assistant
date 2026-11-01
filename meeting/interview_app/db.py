@@ -51,11 +51,72 @@ def ping():
     mdb._get_db()["interview_positions"].find_one({}, {"_id": 1})
 
 
+# --- quyền xem / chia sẻ -----------------------------------------------------
+# Mỗi vị trí có `owner` (email người tạo) và `members` (danh sách email được CHIA SẺ để XEM).
+# - Xem vị trí (và ứng viên/buổi của nó): admin / chủ vị trí / người trong members.
+# - Cấu hình (sửa/xoá/tiêu chí/ứng viên/chia sẻ): admin hoặc CHÍNH chủ vị trí. Member chỉ xem.
+# Bản chạy trên máy (auth tắt) -> is_admin()=True nên không lọc gì.
+def _email(u):
+    if isinstance(u, dict):
+        return str(u.get("email") or "").strip().lower()
+    return str(u or "").strip().lower()
+
+
+def _members(p):
+    return {_email(m) for m in (p.get("members") or [])} if p else set()
+
+
+def can_view(user, p) -> bool:
+    from meeting import interview_roles as ir
+    if ir.is_admin(user):                 # admin + bản chạy máy: xem hết
+        return True
+    if not p:
+        return False
+    em = _email(user)
+    return bool(em) and (_email(p.get("owner")) == em or em in _members(p))
+
+
+def can_config(user, p) -> bool:
+    from meeting import interview_roles as ir
+    if ir.is_admin(user):
+        return True
+    em = _email(user)
+    return bool(em) and bool(p) and _email(p.get("owner")) == em
+
+
+def _pos_raw(pid):
+    if pid is None:
+        return None
+    return _strip(_c("interview_positions").find_one({"id": int(pid)}))
+
+
+def owns_position(pid, user) -> bool:
+    """Dùng ở middleware: được cấu hình vị trí này không (admin hoặc chủ vị trí)."""
+    return can_config(user, _pos_raw(pid))
+
+
+def candidate_pid(cid):
+    c = _strip(_c("interview_candidates").find_one({"id": int(cid)}, {"position_id": 1}))
+    return (c or {}).get("position_id")
+
+
+def set_members(pid, members) -> list:
+    mem = sorted({_email(m) for m in (members or []) if _email(m)})
+    _c("interview_positions").update_one({"id": int(pid)}, {"$set": {"members": mem}})
+    return mem
+
+
 # --- positions ---------------------------------------------------------------
-def list_positions():
+def list_positions(viewer=None):
+    """viewer=None (gọi nội bộ) -> không lọc. Có viewer -> chỉ vị trí người đó được xem."""
+    from meeting import interview_roles as ir
+    allow_all = viewer is None or ir.is_admin(viewer)
+    em = _email(viewer)
     out = []
     for p in _c("interview_positions").find({}).sort("created_at", -1):
         p = _strip(p)
+        if not allow_all and _email(p.get("owner")) != em and em not in _members(p):
+            continue
         p["n_candidates"] = _c("interview_candidates").count_documents({"position_id": p["id"]})
         out.append(p)
     return out
@@ -67,6 +128,9 @@ def get_position(pid):
 
 def create_position(**f):
     f.setdefault("created_at", time.time())
+    f.setdefault("members", [])           # danh sách email được chia sẻ (view-only)
+    if f.get("owner"):
+        f["owner"] = _email(f["owner"])
     pid = mdb._next_id("interview_position")
     f["id"] = pid
     _c("interview_positions").insert_one(dict(f))

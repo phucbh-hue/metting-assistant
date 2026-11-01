@@ -22,7 +22,23 @@ PUBLIC_PATHS = {"/", "/api/health", "/auth/login", "/auth/logout"}
 # quản lý giọng. KHÔNG gồm /sessions... (bắt đầu buổi, gợi ý, chấm buổi, sửa vai) - người phỏng vấn (user) vẫn làm được.
 _WRITE = {"POST", "PUT", "DELETE", "PATCH"}
 _CONFIGURE = re.compile(
-    r"/api/(positions(/\d+(/(build|criteria|screen|candidates))?)?|candidates/\d+(/screen)?|extract|settings|voices(/\d+(/samples)?)?)$")
+    r"/api/(positions(/\d+(/(build|criteria|screen|candidates|members))?)?|candidates/\d+(/screen)?|extract|settings|voices(/\d+(/samples)?)?)$")
+# Vị trí/ứng viên nào trong URL -> để kiểm "có phải CHỦ vị trí này không" (member chỉ xem, không sửa).
+_PID_POS = re.compile(r"/positions/(\d+)(?:/|$)")
+_PID_CAND = re.compile(r"/candidates/(\d+)(?:/|$)")
+
+
+def _cfg_pid(path):
+    """ID vị trí mà một request cấu hình nhắm tới (từ /positions/{id}... hoặc /candidates/{id}...).
+    None = cấu hình chung (tạo vị trí, extract, settings, voices) -> owner/admin nào cũng được."""
+    from meeting.interview_app import db as ivdb
+    m = _PID_POS.search(path)
+    if m:
+        return int(m.group(1))
+    m = _PID_CAND.search(path)
+    if m:
+        return ivdb.candidate_pid(int(m.group(1)))
+    return None
 
 
 def enabled() -> bool:
@@ -79,6 +95,14 @@ def list_roles(request: Request):
     return {"people": interview_roles.people()}
 
 
+@router.get("/api/people")
+def list_people(request: Request):
+    """Danh sách người dùng để owner/admin chọn khi chia sẻ vị trí."""
+    if not interview_roles.is_owner(user_of(request)):
+        return JSONResponse({"detail": "Chỉ owner/admin"}, status_code=403)
+    return {"people": interview_roles.people()}
+
+
 @router.post("/api/roles")
 async def set_role(request: Request):
     if not interview_roles.is_admin(user_of(request)):
@@ -99,9 +123,16 @@ async def middleware(request: Request, call_next):
         return await call_next(request)
     u = user_of(request)
     if u:
-        if request.method in _WRITE and _CONFIGURE.search(p) and not interview_roles.is_owner(u):
-            return JSONResponse({"detail": "Chỉ owner/admin mới cấu hình được phần Phỏng vấn (liên hệ admin để được cấp quyền owner)."},
-                                status_code=403)
+        if request.method in _WRITE and _CONFIGURE.search(p):
+            if not interview_roles.is_owner(u):
+                return JSONResponse({"detail": "Chỉ owner/admin mới cấu hình được phần Phỏng vấn (liên hệ admin để được cấp quyền owner)."},
+                                    status_code=403)
+            pid = _cfg_pid(p)            # owner chỉ sửa/chia sẻ vị trí CỦA MÌNH; admin sửa tất cả
+            if pid is not None:
+                from meeting.interview_app import db as ivdb
+                if not ivdb.owns_position(pid, u):
+                    return JSONResponse({"detail": "Chỉ chủ vị trí hoặc admin mới chỉnh sửa / chia sẻ vị trí này."},
+                                        status_code=403)
         return await call_next(request)
     if request.method == "GET" and "text/html" in request.headers.get("accept", ""):
         return RedirectResponse("/")
