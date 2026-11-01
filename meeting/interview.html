@@ -391,7 +391,8 @@
         <div class="flex gap-2">
           ${canEdit?`<button class="btn btn-sm" data-act="rescreen">Chấm lại CV</button>`:''}
           ${canEdit?`<button class="btn btn-sm" data-act="edit-cv">Sửa CV</button>`:''}
-          <button class="btn btn-accent btn-sm" data-act="start">▶ Bắt đầu phỏng vấn</button>
+          <button class="btn btn-sm" data-act="from-meeting" title="Phỏng vấn trực tiếp / hội đồng: lấy lời thoại từ cuộc họp đã thu">Chấm từ cuộc họp</button>
+          <button class="btn btn-accent btn-sm" data-act="start">▶ Phỏng vấn online</button>
         </div>
       </div>
       <div class="grid md:grid-cols-2 gap-4">
@@ -424,6 +425,27 @@
     on('rescreen', async()=>{ try{ await api('/api/interview/candidates/'+c.id+'/screen',{method:'POST'}); toast('Đang chấm lại…'); refresh(); }catch(e){ toast(e.message,1);} });
     on('edit-cv', ()=>editCv(c, refresh));
     on('start', async()=>{ try{ const sess=await api('/api/interview/sessions',{method:'POST',body:{candidate_id:c.id}}); go('/s/'+sess.id); }catch(e){ toast(e.message,1);} });
+    on('from-meeting', ()=>fromMeeting(c));
+  }
+  async function fromMeeting(c){
+    let meetings=[]; try{ meetings=(await api('/api/interview/meetings')).meetings||[]; }catch(e){ toast(e.message,1); return; }
+    if(!meetings.length){ toast('Chưa có cuộc họp nào đã thu. Hãy thu buổi trực tiếp bằng Meeting trước.',1); return; }
+    const opts=meetings.map(m=>`<option value="${m.id}">${esc(m.title||('Cuộc họp #'+m.id))} · ${m.speaker_count||0} người · ${m.segment_count} câu${m.ended?'':' · đang họp'}</option>`).join('');
+    const f=openForm(`<h3 class="text-lg font-semibold mb-3">Chấm từ cuộc họp đã thu (trực tiếp / hội đồng)</h3>
+      <p class="muted text-[12.5px] mb-2">Phòng trực tiếp nhiều người: thu bằng Meeting (đã tách người nói + đoán tên), rồi đánh dấu ai là ứng viên để chấm theo tiêu chí.</p>
+      <label class="muted text-[12px]">Cuộc họp nguồn</label>
+      <select id="fm-meet" class="input mt-1 mb-2">${opts}</select>
+      <label class="muted text-[12px]">Ai là ỨNG VIÊN trong cuộc họp này?</label>
+      <select id="fm-spk" class="input mt-1"><option value="">Đang tải người nói…</option></select>
+      <div class="flex justify-end gap-2 mt-4"><button class="btn" data-x>Huỷ</button><button class="btn btn-accent" data-ok>Tạo buổi & chấm</button></div>`);
+    const meet=f.el.querySelector('#fm-meet'), spk=f.el.querySelector('#fm-spk');
+    async function loadSpk(){ spk.innerHTML='<option value="">Đang tải…</option>';
+      try{ const d=await api('/api/interview/meetings/'+meet.value+'/speakers');
+        spk.innerHTML=(d.speakers||[]).map(s=>`<option value="${esc(s.label)}">${esc(s.label)} (${s.segments} câu)</option>`).join('')||'<option value="">(cuộc họp chưa có người nói)</option>'; }
+      catch(e){ spk.innerHTML='<option value="">(lỗi tải người nói)</option>'; } }
+    meet.onchange=loadSpk; await loadSpk();
+    f.on(async()=>{ const label=spk.value; if(!label){ toast('Chọn ai là ứng viên',1); return; }
+      try{ const s=await api('/api/interview/candidates/'+c.id+'/from-meeting',{method:'POST',body:{meeting_id:Number(meet.value),candidate_label:label}}); f.close(); go('/s/'+s.id); }catch(e){ toast(e.message,1); } });
   }
   function editCv(c, refresh){
     const f=openForm(`<h3 class="text-lg font-semibold mb-3">Sửa ứng viên</h3>
@@ -471,9 +493,13 @@
         <div class="panel p-4"><div class="font-semibold mb-2">Gợi ý của trợ lý</div><div id="assist">${lastAssist?assistHtml(lastAssist):'<div class="muted text-[13px]">Bấm “Gợi ý câu hỏi” để trợ lý đọc câu trả lời gần nhất và đề xuất câu hỏi tiếp theo.</div>'}</div></div>
       </div>
       ${ev?evalHtml(ev):''}
-      <div class="panel p-4 mt-4"><div class="flex items-center justify-between gap-2 flex-wrap">
-        <div class="muted text-[12px]">Để lời thoại tự chảy vào buổi: cài extension “UrBox Interview”, mở popup trên tab cuộc gọi, dán mã kết nối rồi bấm Bắt đầu thu.</div>
-        <button class="btn btn-sm" data-act="copycode">Copy mã kết nối</button></div></div>`;
+      ${s.source==='meeting'
+        ? `<div class="panel p-4 mt-4"><div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="muted text-[12px]">Buổi trực tiếp: lời thoại lấy từ cuộc họp #${(s.meta||{}).meeting_id} (ứng viên = “${esc((s.meta||{}).candidate_label||'')}”). Cuộc họp còn đang thu thì bấm Đồng bộ lại.</div>
+            <button class="btn btn-sm" data-act="resync">Đồng bộ lại lời thoại</button></div></div>`
+        : `<div class="panel p-4 mt-4"><div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="muted text-[12px]">Phỏng vấn online: cài extension “UrBox Interview”, mở popup trên tab cuộc gọi, dán mã kết nối rồi Bắt đầu thu.</div>
+            <button class="btn btn-sm" data-act="copycode">Copy mã kết nối</button></div></div>`}`;
     const on=(a,fn)=>{ const b=$(`[data-act=${a}]`,app); if(b) b.onclick=fn; };
     on('assist', async(e)=>{ const btn=e.target.closest('button'); btn.disabled=true; btn.innerHTML='<span class="spin"></span> Đang nghĩ…';
       try{ const a=await api('/api/interview/sessions/'+sid+'/assist',{method:'POST',body:{}}); window._setAssist(a); $('#assist',app).innerHTML=assistHtml(a); }
@@ -485,6 +511,9 @@
     on('copycode', async()=>{ const base=(API_BASE||location.origin).replace(/\/+$/,''); const code=`${base}|${sid}|${s.token||''}`;
       try{ await navigator.clipboard.writeText(code); toast('Đã copy mã kết nối — dán vào extension UrBox Interview'); }
       catch(e){ prompt('Copy mã kết nối này dán vào extension:', code); } });
+    on('resync', async(e)=>{ const btn=e.target.closest('button'); btn.disabled=true; btn.innerHTML='<span class="spin"></span> Đang đồng bộ…';
+      try{ const r=await api('/api/interview/sessions/'+sid+'/resync',{method:'POST'}); toast('Đã lấy '+r.segments+' câu từ cuộc họp'); refresh(); }
+      catch(err){ toast(err.message,1); btn.disabled=false; btn.innerHTML='Đồng bộ lại lời thoại'; } });
   }
   function assistHtml(a){
     const fu=(a.follow_ups||[]).map(f=>`<div class="raise p-2.5 mb-2"><div class="font-medium text-[13.5px]">${esc(f.question)}</div>

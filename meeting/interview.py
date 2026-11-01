@@ -619,3 +619,63 @@ def screen_brief(c: dict, p: dict) -> Optional[dict]:
     return {"match": m["match"], "coverage": m["coverage"], "questions": r.get("questions") or [],
             "requirements": [x for x in r.get("must_have") or [] if x.get("status") != "met"],
             "gaps": r.get("gaps") or [], "red_flags": r.get("red_flags") or []}
+
+
+# ------------------------------------------- phỏng vấn TRỰC TIẾP qua cuộc họp Meeting ---
+# Phòng trực tiếp / hội đồng nhiều người: thu như một cuộc họp (Meeting đã tách người nói + đoán tên), rồi gắn vào buổi
+# phỏng vấn - đánh dấu MỘT người nói là ứng viên, còn lại là người phỏng vấn - để chấm theo tiêu chí của vị trí.
+def meeting_speakers(meeting_id: int) -> List[dict]:
+    """Danh sách người nói (theo nhãn) của một cuộc họp + số câu, để đánh dấu ai là ứng viên."""
+    order, counts = [], {}
+    for s in db.get_segments(int(meeting_id)):
+        lab = (s.get("speaker_label") or "").strip()
+        if not lab:
+            continue
+        if lab not in counts:
+            order.append(lab)
+        counts[lab] = counts.get(lab, 0) + 1
+    return [{"label": l, "segments": counts[l]} for l in order]
+
+
+def meeting_transcript(meeting_id: int, candidate_label: str) -> List[dict]:
+    """Lời thoại cuộc họp -> transcript phỏng vấn: người nói trùng candidate_label = candidate, còn lại = interviewer."""
+    segs = db.get_segments(int(meeting_id))
+    if not segs:
+        return []
+    t0 = min((float(s.get("t_start") or 0) for s in segs), default=0.0)
+    cand = L.norm_name(candidate_label)
+    out = []
+    for s in segs:
+        txt = (s.get("text") or "").strip()
+        if not txt:
+            continue
+        label = (s.get("speaker_label") or "").strip()
+        role = "candidate" if cand and L.norm_name(label) == cand else "interviewer"
+        seg = {"t": round(float(s.get("t_start") or 0) - t0, 1), "role": role, "text": txt}
+        if role == "interviewer" and label:
+            seg["who"] = label                       # giữ tên người phỏng vấn để hiển thị / chấm
+        out.append(seg)
+    return out
+
+
+def session_from_meeting(cid: int, meeting_id: int, candidate_label: str) -> int:
+    """Tạo buổi phỏng vấn từ một cuộc họp đã thu, chép sẵn lời thoại đã gán vai theo người nói đánh dấu là ứng viên."""
+    c = get_candidate(cid)
+    if not c:
+        raise RuntimeError("Không tìm thấy ứng viên")
+    sid = create_session(cid, c["position_id"], source="meeting",
+                         meta={"meeting_id": int(meeting_id), "candidate_label": candidate_label})
+    update_session(sid, transcript=meeting_transcript(meeting_id, candidate_label))
+    return sid
+
+
+def resync_from_meeting(sid: int) -> int:
+    """Chép lại lời thoại từ cuộc họp gắn với buổi (cuộc họp còn đang thu thì cập nhật phần mới). Trả về số câu."""
+    s = get_session(sid)
+    meta = (s or {}).get("meta") or {}
+    mid, lab = meta.get("meeting_id"), meta.get("candidate_label")
+    if not s or s.get("source") != "meeting" or not mid:
+        raise RuntimeError("Buổi này không gắn với cuộc họp nào")
+    tr = meeting_transcript(mid, lab)
+    update_session(sid, transcript=tr)
+    return len(tr)

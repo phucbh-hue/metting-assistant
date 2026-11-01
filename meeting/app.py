@@ -89,7 +89,7 @@ async def lifespan(_app: FastAPI):
     db.flush()                  # lưu trên máy: ghi nốt phần còn chờ trước khi tắt
 
 
-APP_VERSION = "3.24.1"              # dấu hiệu phiên bản ở /healthz để kiểm tra bản mới đã lên server chưa (giữ khớp package.json)
+APP_VERSION = "3.24.2"              # dấu hiệu phiên bản ở /healthz để kiểm tra bản mới đã lên server chưa (giữ khớp package.json)
 app = FastAPI(title="Meeting Assistant AI", version=APP_VERSION, lifespan=lifespan)
 _MEETING_PATH = re.compile(r"^/(?:api/meetings|ws/meeting)/(\d+)(?:/|$)")
 _ARTIFACT_PATH = re.compile(r"^/api/artifacts/(\d+)(?:/|$)")
@@ -743,6 +743,62 @@ async def iv_evaluate_session(sid: int, request: Request):
         return {"evaluation": await interview.evaluate_session(sid)}
     except Exception as e:
         raise HTTPException(502, f"Chấm buổi lỗi: {type(e).__name__}: {str(e)[:200]}")
+
+
+# ----- Phỏng vấn TRỰC TIẾP / hội đồng: dùng lại diarization của Meeting rồi gắn sang buổi phỏng vấn -----
+class IvFromMeetingReq(BaseModel):
+    meeting_id: int
+    candidate_label: str = Field(..., min_length=1, max_length=120)
+
+
+def _iv_meeting_access(request: Request, mid: int) -> dict:
+    m = db.get_meeting(mid)
+    if not m:
+        raise HTTPException(404, "Không tìm thấy cuộc họp")
+    g = groups.get_group(m["group_id"]) if m.get("group_id") else None
+    if not (interview_roles.is_admin(_user(request)) or auth.can_access(_user(request), m, g)):
+        raise HTTPException(403, "Bạn không có quyền xem cuộc họp này")
+    return m
+
+
+@app.get("/api/interview/meetings")
+def iv_meetings(request: Request):
+    """Cuộc họp người này xem được, để chọn làm nguồn cho buổi phỏng vấn trực tiếp (đã thu bằng Meeting)."""
+    rows = db.list_meetings_with_stats(limit=60, where=_visible_filter(_user(request)))
+    return {"meetings": [{"id": m["id"], "title": m.get("title"), "started_at": m.get("started_at"),
+                          "ended": m.get("status") == "ended", "segment_count": m.get("segment_count", 0),
+                          "speaker_count": m.get("speaker_count", 0)} for m in rows if m.get("segment_count")]}
+
+
+@app.get("/api/interview/meetings/{mid}/speakers")
+def iv_meeting_speakers(mid: int, request: Request):
+    _iv_meeting_access(request, mid)
+    return {"speakers": interview.meeting_speakers(mid)}
+
+
+@app.post("/api/interview/candidates/{cid}/from-meeting")
+async def iv_from_meeting(cid: int, req: IvFromMeetingReq, request: Request):
+    c = interview.get_candidate(cid)
+    if not c:
+        raise HTTPException(404, "Không tìm thấy ứng viên")
+    _iv_pos_view(request, c["position_id"])
+    _iv_meeting_access(request, req.meeting_id)
+    sid = await asyncio.to_thread(interview.session_from_meeting, cid, req.meeting_id, req.candidate_label)
+    return interview.get_session(sid)
+
+
+@app.post("/api/interview/sessions/{sid}/resync")
+async def iv_resync(sid: int, request: Request):
+    s = interview.get_session(sid)
+    if not s:
+        raise HTTPException(404, "Không tìm thấy buổi phỏng vấn")
+    if not interview.can_view_position(_user(request), interview.get_position(s["position_id"])):
+        raise HTTPException(403, "Bạn không có quyền với buổi này")
+    try:
+        n = await asyncio.to_thread(interview.resync_from_meeting, sid)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "segments": n}
 
 
 def _db_status_text(st: Dict[str, Any]) -> str:
