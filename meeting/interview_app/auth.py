@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from meeting import auth as mauth
 from meeting import interview_roles
+from meeting import user_prefs
 
 log = logging.getLogger("interview.auth")
 router = APIRouter()
@@ -83,6 +84,8 @@ def me(request: Request):
     u = user_of(request)
     if not u:
         return JSONResponse({"detail": "chưa đăng nhập"}, status_code=401)
+    if enabled():
+        user_prefs.record(u["email"], u.get("name") or "")   # để admin thấy người này ở Phân quyền
     role = interview_roles.role_of(u)
     return {"email": u["email"], "name": u["name"], "auth": enabled(),
             "role": role, "can_configure": role in ("admin", "owner"), "admin": role == "admin"}

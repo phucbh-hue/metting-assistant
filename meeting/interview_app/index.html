@@ -409,7 +409,15 @@ async function rolesPage(app){
       :p.role==='owner'?`<span class="tag ok">Owner</span> <button class="ghost sm" data-r="user" data-e="${esc(p.email)}">Gỡ owner</button>`
       :`<span class="tag">Người phỏng vấn</span> <button class="sm" data-r="owner" data-e="${esc(p.email)}">Cấp owner</button>`}</span></div>`;
   app.innerHTML=`<div class="ph"><div><h1>Phân quyền</h1><div class="sub">Owner: tạo vị trí, đặt tiêu chí, tải/chấm CV. Người phỏng vấn (mặc định): xem vị trí được giao + chạy buổi phỏng vấn. Admin cố định theo cấu hình hệ thống.</div></div></div>
-    <div class="card"><div class="list" id="rlist">${(d.people||[]).map(row).join('')||empty('users','Chưa có người dùng nào đăng nhập.')}</div></div>`;
+    <div class="card"><div class="card-h">${I('plus')}<h2>Cấp owner theo email</h2></div>
+      <div class="sub" style="margin:-2px 0 8px">Gõ email @urbox.vn để cấp quyền owner ngay — kể cả khi người đó chưa hiện trong danh sách bên dưới (người mới đăng nhập chỉ hiện sau khi họ mở lại app).</div>
+      <div class="row"><input id="newOwner" type="email" placeholder="vd: hoang@urbox.vn" style="flex:1;min-width:200px"><button id="addOwner">${I('check','sm')} Cấp owner</button></div></div>
+    <div class="card"><div class="card-h">${I('users')}<h2>Người dùng</h2><span class="count">${(d.people||[]).length}</span></div>
+      <div class="list" id="rlist">${(d.people||[]).map(row).join('')||empty('users','Chưa có người dùng nào đăng nhập.')}</div></div>`;
+  $('addOwner').onclick=()=>busy('addOwner','đang cấp…',async()=>{
+    const email=($('newOwner').value||'').trim().toLowerCase();
+    if(!email||!email.includes('@'))return toast('Nhập email hợp lệ',true);
+    await api('/roles',{method:'POST',body:{email,role:'owner'}});toast('Đã cấp owner cho '+email);route()});
   app.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>busy(b,'đang lưu…',async()=>{
     await api('/roles',{method:'POST',body:{email:b.dataset.e,role:b.dataset.r}});toast('Đã cập nhật quyền');route()}));
 }

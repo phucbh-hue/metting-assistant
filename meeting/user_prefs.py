@@ -5,6 +5,7 @@
 - skip_events: các buổi trên lịch người đó bấm "Bỏ qua buổi này".
 - series_groups: chuỗi cuộc họp lặp lại -> nhóm (buổi sau tự vào đúng nhóm).
 """
+import time
 from typing import Any, Dict
 
 from meeting import db
@@ -30,6 +31,22 @@ def update(email: str, **fields: Any) -> Dict[str, Any]:
     if fields:
         _col().update_one({"email": _key(email)}, {"$set": fields}, upsert=True)
     return get(email)
+
+
+def record(email: str, name: str = "") -> None:
+    """Ghi dấu một người ĐÃ ĐĂNG NHẬP (gọi lúc login / mở app). Để trang Phân quyền thấy được cả những người
+    chỉ mới đăng nhập mà chưa đổi cài đặt nào (trước đây không có bản ghi -> không hiện). Upsert nhẹ, idempotent."""
+    e = _key(email)
+    if not e:
+        return
+    now = time.time()
+    doc: Dict[str, Any] = {"email": e, "last_seen": now}
+    if (name or "").strip():
+        doc["name"] = name.strip()
+    try:
+        _col().update_one({"email": e}, {"$set": doc, "$setOnInsert": {"first_seen": now}}, upsert=True)
+    except Exception:
+        pass            # đừng để lỗi ghi dấu chặn đăng nhập / tải trang
 
 
 def users_with(**match: Any) -> list:
