@@ -37,9 +37,12 @@ MODEL_URL = os.getenv(
     "VOICE_MODEL_URL",
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/"
     "3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx")
-# Tên file theo model: đổi model là tải file mới, không dùng nhầm file cũ còn nằm trên máy.
-MODEL_PATH = Path(os.getenv("VOICE_MODEL_PATH", str(HERE / "models" / MODEL_URL.rsplit("/", 1)[-1])))
-MODEL_ID = MODEL_PATH.stem
+# PHÂN VAI DÙNG MODEL CỦA MEETING: trỏ sang đúng file CAM++ (campplus) mà Meeting đã dùng để enroll voiceprint
+# (models/speaker.onnx), để vector của buổi phỏng vấn so khớp được với registry `voices` chung. Thiếu file đó mới
+# tải bản campplus dự phòng. KHÔNG dùng env VOICE_MODEL_PATH ở đây (biến đó dùng chung với Meeting cho model của nó).
+_MEETING_MODEL = HERE.parent.parent / "models" / "speaker.onnx"
+MODEL_PATH = _MEETING_MODEL if _MEETING_MODEL.exists() else Path(HERE / "models" / MODEL_URL.rsplit("/", 1)[-1])
+MODEL_ID = "campplus"            # khớp emb_model của voiceprint Meeting (không lấy theo tên file)
 RATE = 16000
 MIN_SEG_S = 1.0          # câu có ít tiếng nói hơn ("dạ", "vâng"): vector không đáng tin, để nhãn quyết
 MIN_ANCHOR_S = 3.0       # giọng mẫu phải có ít nhất ngần này giây tiếng nói thật
