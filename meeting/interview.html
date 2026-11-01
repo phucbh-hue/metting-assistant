@@ -407,8 +407,9 @@
         <div class="flex gap-2">
           ${canEdit?`<button class="btn btn-sm" data-act="rescreen">Chấm lại CV</button>`:''}
           ${canEdit?`<button class="btn btn-sm" data-act="edit-cv">Sửa CV</button>`:''}
-          <button class="btn btn-accent btn-sm" data-act="from-meeting" title="Phỏng vấn trực tiếp / hội đồng nhiều người: lấy lời thoại từ cuộc họp đã thu bằng Meeting">▶ Phỏng vấn trực tiếp</button>
+          <button class="btn btn-accent btn-sm" data-act="live-room" title="Thu trực tiếp bằng mic phòng ngay trong buổi; máy tự tách người nói, chọn ai là ứng viên rồi chấm">▶ Phỏng vấn trực tiếp</button>
           <button class="btn btn-accent btn-sm" data-act="start" title="Phỏng vấn online 1-1: ứng viên qua Meet/Zoom/Teams, dùng extension UrBox Interview">▶ Phỏng vấn online</button>
+          <button class="btn btn-sm" data-act="from-meeting" title="Nếu buổi đã thu sẵn bằng cuộc họp Meeting">Chấm từ cuộc họp đã thu</button>
           ${canEdit?`<button class="btn btn-sm" data-act="del-cand" style="color:rgb(var(--danger));border-color:rgba(255,107,107,.4)">Xoá</button>`:''}
         </div>
       </div>
@@ -441,7 +442,8 @@
     const on=(a,fn)=>{ const b=$(`[data-act=${a}]`,app); if(b) b.onclick=fn; };
     on('rescreen', async()=>{ try{ await api('/api/interview/candidates/'+c.id+'/screen',{method:'POST'}); toast('Đang chấm lại…'); refresh(); }catch(e){ toast(e.message,1);} });
     on('edit-cv', ()=>editCv(c, refresh));
-    on('start', async()=>{ try{ const sess=await api('/api/interview/sessions',{method:'POST',body:{candidate_id:c.id}}); go('/s/'+sess.id); }catch(e){ toast(e.message,1);} });
+    on('start', async()=>{ try{ const sess=await api('/api/interview/sessions',{method:'POST',body:{candidate_id:c.id,source:'ext'}}); go('/s/'+sess.id); }catch(e){ toast(e.message,1);} });
+    on('live-room', async()=>{ try{ const sess=await api('/api/interview/sessions',{method:'POST',body:{candidate_id:c.id,source:'room'}}); go('/s/'+sess.id); }catch(e){ toast(e.message,1);} });
     on('from-meeting', ()=>fromMeeting(c));
     on('del-cand', async()=>{ if(!confirm(`Xoá ứng viên “${c.name||'(chưa rõ tên)'}” cùng bản chấm và các buổi phỏng vấn? Không khôi phục được.`)) return;
       try{ await api('/api/interview/candidates/'+c.id,{method:'DELETE'}); toast('Đã xoá ứng viên'); go('/p/'+c.position_id); }catch(e){ toast(e.message,1);} });
@@ -489,20 +491,55 @@
   }
   function transcriptHtml(s){
     const segs=s.transcript||[];
-    if(!segs.length) return `<div class="muted text-[13px]">Chưa có lời thoại. Bật extension “UrBox Interview” trong tab cuộc gọi để thu (mic = người phỏng vấn, tiếng tab = ứng viên).</div>`;
-    return segs.map(x=>{ const role=x.role==='interviewer'?'NPV':x.role==='candidate'?'Ứng viên':'?';
-      const col=x.role==='candidate'?'var(--accent)':'var(--muted)';
-      return `<div class="mb-1.5"><span class="text-[11px] font-semibold" style="color:${col}">${role}</span> <span class="text-[13px]">${esc(x.text)}</span></div>`; }).join('');
+    if(!segs.length) return `<div class="muted text-[13px]">${s.source==='room'?'Chưa có lời thoại. Bấm “● Thu trực tiếp” để thu bằng mic phòng — máy sẽ tự tách người nói.':'Chưa có lời thoại. Bật extension “UrBox Interview” trong tab cuộc gọi để thu (mic = người phỏng vấn, tiếng tab = ứng viên).'}</div>`;
+    const cand=(s.meta||{}).candidate_speaker||'';
+    return segs.map(x=>{ let who, col;
+      if(x.role){ who=x.role==='interviewer'?'NPV':x.role==='candidate'?'Ứng viên':'?'; col=x.role==='candidate'?'var(--accent)':'var(--muted)'; }
+      else { const spk=x.speaker||'?'; const isC=cand&&spk===cand; who=esc(spk)+(isC?' · Ứng viên':''); col=isC?'var(--accent)':'var(--muted)'; }
+      return `<div class="mb-1.5"><span class="text-[11px] font-semibold" style="color:${col}">${who}</span> <span class="text-[13px]">${esc(x.text)}</span></div>`; }).join('');
   }
   function renderSessionTranscript(app, s){ const el=$('#transcript',app); if(el) el.innerHTML=transcriptHtml(s); }
+  // ----- thu trực tiếp mic phòng ngay trong buổi (diarization ở server) -----
+  window.roomRec = window.roomRec || null;
+  const WORKLET_SRC = `class P extends AudioWorkletProcessor{constructor(o){super();this.size=(o.processorOptions&&o.processorOptions.size)||1600;this.b=new Int16Array(this.size);this.n=0;}process(ins){const ch=ins[0]&&ins[0][0];if(!ch)return true;for(let i=0;i<ch.length;i++){let s=Math.max(-1,Math.min(1,ch[i]));this.b[this.n++]=s<0?s*0x8000:s*0x7fff;if(this.n===this.size){const o=this.b.slice();this.port.postMessage(o.buffer,[o.buffer]);this.n=0;}}return true;}}registerProcessor('pcm',P);`;
+  async function startRoomRecording(sid, token){
+    const base=(API_BASE||location.origin).replace(/^http/,'ws').replace(/\/+$/,'');
+    const ws=new WebSocket(`${base}/ws/interview/${sid}/room?token=${encodeURIComponent(token||'')}`);
+    ws.binaryType='arraybuffer'; let ready=false;
+    ws.onmessage=e=>{ try{const m=JSON.parse(e.data); if(m.type==='ready')ready=true; else if(m.type==='error')toast(m.text,1);}catch(_){} };
+    const stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:false}});
+    const ctx=new AudioContext({sampleRate:16000});
+    await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET_SRC],{type:'application/javascript'})));
+    const src=ctx.createMediaStreamSource(stream);
+    const node=new AudioWorkletNode(ctx,'pcm',{processorOptions:{size:1600}});
+    node.port.onmessage=ev=>{ if(ws.readyState===1&&ready) ws.send(ev.data); };
+    src.connect(node);
+    return { sid, stop(){ try{ws.send(JSON.stringify({type:'bye'}));}catch(_){} try{ws.close();}catch(_){} try{stream.getTracks().forEach(t=>t.stop());}catch(_){} try{ctx.close();}catch(_){} } };
+  }
+  function sessionSpeakers(s){ const order=[],seen={}; for(const x of (s.transcript||[])){ const spk=(x.speaker||'').trim(); if(!spk) continue; if(!(spk in seen)){seen[spk]=0;order.push(spk);} seen[spk]++; } return order.map(l=>({label:l,segments:seen[l]})); }
+  function speakerPickerHtml(s){
+    const sp=sessionSpeakers(s); const cand=(s.meta||{}).candidate_speaker||'';
+    if(!sp.length) return `<div class="panel p-4 mt-4"><div class="muted text-[12.5px]">Thu xong sẽ hiện danh sách người nói ở đây để anh/chị đánh dấu ai là ứng viên (dùng để chấm).</div></div>`;
+    return `<div class="panel p-4 mt-4"><div class="flex items-center justify-between gap-2 flex-wrap">
+      <div class="flex items-center gap-2"><span class="text-[13px] font-semibold">Ai là ứng viên?</span>
+        <select id="cand-spk" class="input" style="width:auto">${sp.map(x=>`<option value="${esc(x.label)}" ${x.label===cand?'selected':''}>${esc(x.label)} (${x.segments} câu)</option>`).join('')}</select></div>
+      <button class="btn btn-sm" data-act="save-spk">Lưu người là ứng viên</button></div>
+      <div class="muted text-[11.5px] mt-1">Người được chọn là ứng viên; những người còn lại tính là người phỏng vấn khi chấm.</div></div>`;
+  }
   function renderSession(app, s, sid, refresh, lastAssist){
     const c=s.candidate||{}; const ev=s.evaluation;
+    const recording = !!(window.roomRec && window.roomRec.sid===sid);
+    const recBtn = (s.source==='room' && s.status==='live')
+      ? (recording ? `<button class="btn btn-sm" data-act="rec-stop" style="color:rgb(var(--danger));border-color:rgba(255,107,107,.5)">■ Dừng thu</button>`
+                   : `<button class="btn btn-accent btn-sm" data-act="rec-start">● Thu trực tiếp</button>`) : '';
     $('#s',app).innerHTML=`
       <div class="flex items-center justify-between gap-2 mb-3 flex-wrap">
         <div><div class="text-lg font-semibold">${esc(c.name||'Ứng viên')}</div>
           <a class="text-[12.5px]" href="#/c/${s.candidate_id}">← hồ sơ ứng viên</a>
-          <span class="chip ml-2" style="color:${s.status==='live'?'var(--gold)':'var(--muted)'}">${s.status==='live'?'● đang diễn ra':'đã kết thúc'}</span></div>
+          <span class="chip ml-2" style="color:${s.status==='live'?'var(--gold)':'var(--muted)'}">${s.status==='live'?'● đang diễn ra':'đã kết thúc'}</span>
+          ${recording?'<span class="chip ml-1" style="color:rgb(var(--danger))">● đang thu</span>':''}</div>
         <div class="flex gap-2">
+          ${recBtn}
           <button class="btn btn-sm" data-act="assist">💡 Gợi ý câu hỏi</button>
           ${s.status==='live'?`<button class="btn btn-accent btn-sm" data-act="end">■ Kết thúc & chấm</button>`:`<button class="btn btn-sm" data-act="reeval">Chấm lại</button>`}
         </div>
@@ -511,10 +548,13 @@
         <div class="panel p-4"><div class="font-semibold mb-2">Lời thoại</div><div id="transcript" style="max-height:60vh;overflow:auto">${transcriptHtml(s)}</div></div>
         <div class="panel p-4"><div class="font-semibold mb-2">Gợi ý của trợ lý</div><div id="assist">${lastAssist?assistHtml(lastAssist):'<div class="muted text-[13px]">Bấm “Gợi ý câu hỏi” để trợ lý đọc câu trả lời gần nhất và đề xuất câu hỏi tiếp theo.</div>'}</div></div>
       </div>
+      ${s.source==='room'?speakerPickerHtml(s):''}
       ${ev?evalHtml(ev):''}
-      ${s.source==='meeting'
+      ${s.source==='room'
+        ? `<div class="panel p-4 mt-4"><div class="muted text-[12px]">Phỏng vấn trực tiếp: mở buổi này ngay trong phòng rồi bấm “● Thu trực tiếp” để thu bằng mic máy. Máy tự tách người nói; thu xong chọn ai là ứng viên ở trên rồi “Kết thúc & chấm”. Nên để máy giữa phòng, hạn chế nói chồng tiếng.</div></div>`
+        : s.source==='meeting'
         ? `<div class="panel p-4 mt-4"><div class="flex items-center justify-between gap-2 flex-wrap">
-            <div class="muted text-[12px]">Buổi trực tiếp: lời thoại lấy từ cuộc họp #${(s.meta||{}).meeting_id} (ứng viên = “${esc((s.meta||{}).candidate_label||'')}”). Cuộc họp còn đang thu thì bấm Đồng bộ lại.</div>
+            <div class="muted text-[12px]">Lấy lời thoại từ cuộc họp #${(s.meta||{}).meeting_id} (ứng viên = “${esc((s.meta||{}).candidate_label||'')}”). Cuộc họp còn đang thu thì bấm Đồng bộ lại.</div>
             <button class="btn btn-sm" data-act="resync">Đồng bộ lại lời thoại</button></div></div>`
         : `<div class="panel p-4 mt-4"><div class="flex items-center justify-between gap-2 flex-wrap">
             <div class="muted text-[12px]">Phỏng vấn online: cài extension “UrBox Interview”, mở popup trên tab cuộc gọi, dán mã kết nối rồi Bắt đầu thu.</div>
@@ -533,6 +573,14 @@
     on('resync', async(e)=>{ const btn=e.target.closest('button'); btn.disabled=true; btn.innerHTML='<span class="spin"></span> Đang đồng bộ…';
       try{ const r=await api('/api/interview/sessions/'+sid+'/resync',{method:'POST'}); toast('Đã lấy '+r.segments+' câu từ cuộc họp'); refresh(); }
       catch(err){ toast(err.message,1); btn.disabled=false; btn.innerHTML='Đồng bộ lại lời thoại'; } });
+    on('rec-start', async(e)=>{ const btn=e.target.closest('button'); btn.disabled=true; btn.innerHTML='<span class="spin"></span> Đang mở mic…';
+      try{ if(window.roomRec){ try{window.roomRec.stop();}catch(_){} } window.roomRec=await startRoomRecording(sid, s.token); toast('Đang thu — nói thử vài câu, lời thoại sẽ hiện dần'); refresh(); }
+      catch(err){ toast('Không mở được mic: '+(err.message||err),1); btn.disabled=false; btn.innerHTML='● Thu trực tiếp'; } });
+    on('rec-stop', ()=>{ try{ if(window.roomRec) window.roomRec.stop(); }catch(_){} window.roomRec=null; toast('Đã dừng thu'); setTimeout(refresh, 800); });
+    on('save-spk', async(e)=>{ const sel=$('#cand-spk',app); if(!sel||!sel.value){ toast('Chọn người là ứng viên',1); return; }
+      const btn=e.target.closest('button'); btn.disabled=true;
+      try{ await api('/api/interview/sessions/'+sid+'/candidate-speaker',{method:'POST',body:{candidate_speaker:sel.value}}); toast('Đã đánh dấu ứng viên'); refresh(); }
+      catch(err){ toast(err.message,1); btn.disabled=false; } });
   }
   function assistHtml(a){
     const fu=(a.follow_ups||[]).map(f=>`<div class="raise p-2.5 mb-2"><div class="font-medium text-[13.5px]">${esc(f.question)}</div>

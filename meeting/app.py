@@ -442,6 +442,7 @@ class IvCandidateIn(BaseModel):
 class IvSessionIn(BaseModel):
     candidate_id: int
     interviewers: Optional[list] = None
+    source: str = Field("ext", pattern="^(ext|room)$")      # ext = online qua extension; room = thu trực tiếp mic phòng
 
 
 class IvAssistReq(BaseModel):
@@ -677,7 +678,7 @@ def iv_create_session(req: IvSessionIn, request: Request):
         raise HTTPException(404, "Không tìm thấy ứng viên")
     p = _iv_pos_view(request, c["position_id"])    # người phỏng vấn (member) được mở buổi
     import secrets as _secrets
-    sid = interview.create_session(req.candidate_id, c["position_id"], source="ext",
+    sid = interview.create_session(req.candidate_id, c["position_id"], source=req.source,
                                    interviewers=req.interviewers or ([_user(request)["email"]] if _user(request) else []),
                                    token=_secrets.token_urlsafe(24))
     return interview.get_session(sid)
@@ -707,10 +708,28 @@ async def iv_assist(sid: int, req: IvAssistReq, request: Request):
         raise HTTPException(403, "Bạn không có quyền với buổi này")
     c = interview.get_candidate(s["candidate_id"])
     try:
-        out = await interview.L.assist(p, c, s.get("transcript") or [], req.trigger_text)
+        out = await interview.L.assist(p, c, interview.role_mapped(s), req.trigger_text)
     except Exception as e:
         raise HTTPException(502, f"Gợi ý câu hỏi lỗi: {type(e).__name__}: {str(e)[:200]}")
     return out.model_dump()
+
+
+class IvCandSpeakerReq(BaseModel):
+    candidate_speaker: str = Field("", max_length=120)
+
+
+@app.post("/api/interview/sessions/{sid}/candidate-speaker")
+def iv_candidate_speaker(sid: int, req: IvCandSpeakerReq, request: Request):
+    """Buổi thu trực tiếp: đánh dấu người nói nào (đã tách) là ứng viên; còn lại là người phỏng vấn khi chấm."""
+    s = interview.get_session(sid)
+    if not s:
+        raise HTTPException(404, "Không tìm thấy buổi phỏng vấn")
+    if not interview.can_view_position(_user(request), interview.get_position(s["position_id"])):
+        raise HTTPException(403, "Bạn không có quyền với buổi này")
+    meta = dict(s.get("meta") or {})
+    meta["candidate_speaker"] = (req.candidate_speaker or "").strip()
+    interview.update_session(sid, meta=meta)
+    return {"ok": True, "candidate_speaker": meta["candidate_speaker"]}
 
 
 @app.post("/api/interview/sessions/{sid}/end")
@@ -2961,6 +2980,31 @@ async def ws_interview(ws: WebSocket, sid: int, stream: str = "tab", token: str 
         return
     log.info("meeting.app: extension phỏng vấn nối buổi %d luồng %s", sid, stream)
     await interview_live.serve_ws(ws, sid, stream)
+
+
+@app.websocket("/ws/interview/{sid}/room")
+async def ws_interview_room(ws: WebSocket, sid: int, token: str = ""):
+    """Phỏng vấn TRỰC TIẾP: trình duyệt gửi PCM16 16kHz từ mic phòng; server tách người nói và ghi lời thoại vào buổi.
+    Xác thực bằng token riêng của buổi (?token=)."""
+    from meeting import interview_live
+    await ws.accept()
+    s = await asyncio.to_thread(interview.get_session, sid)
+    if not s or not token or token != s.get("token"):
+        await ws.close(code=4401)
+        return
+    if s.get("status") != "live":
+        try:
+            await ws.send_json({"type": "error", "text": "Buổi phỏng vấn đã kết thúc."})
+        except Exception:
+            pass
+        await ws.close(code=4003)
+        return
+    try:
+        await ws.send_json({"type": "ready", "session_id": sid})
+    except Exception:
+        return
+    log.info("meeting.app: thu trực tiếp buổi phỏng vấn %d", sid)
+    await interview_live.serve_room_ws(ws, sid)
 
 
 @app.websocket("/ws/meeting/{mid}/bd")

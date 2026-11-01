@@ -554,7 +554,7 @@ async def evaluate_session(sid: int) -> dict:
     c = await asyncio.to_thread(get_candidate, s["candidate_id"])
     if not p or not c:
         raise RuntimeError("Buổi thiếu vị trí hoặc ứng viên")
-    ev = await asyncio.wait_for(L.evaluate(p, c, s.get("transcript") or []), EVAL_TIMEOUT_S)
+    ev = await asyncio.wait_for(L.evaluate(p, c, role_mapped(s)), EVAL_TIMEOUT_S)
     data = finalize_eval(ev.model_dump(), p, c)
     await asyncio.to_thread(update_session, sid, evaluation=data)
     return decorate_eval(data, p)
@@ -679,3 +679,35 @@ def resync_from_meeting(sid: int) -> int:
     tr = meeting_transcript(mid, lab)
     update_session(sid, transcript=tr)
     return len(tr)
+
+
+# ---------- phỏng vấn TRỰC TIẾP thu thẳng trong buổi (diarization), gán vai lúc chấm ----------
+def session_speakers(session: dict) -> List[dict]:
+    """Người nói đã tách trong buổi thu trực tiếp (segment có 'speaker'), + số câu, để đánh dấu ai là ứng viên."""
+    order, counts = [], {}
+    for s in session.get("transcript") or []:
+        spk = (s.get("speaker") or "").strip()
+        if not spk:
+            continue
+        if spk not in counts:
+            order.append(spk)
+        counts[spk] = counts.get(spk, 0) + 1
+    return [{"label": l, "segments": counts[l]} for l in order]
+
+
+def role_mapped(session: dict) -> List[dict]:
+    """Transcript đã gán vai interviewer/candidate. Segment đã có 'role' (online/từ cuộc họp) giữ nguyên; segment thu
+    trực tiếp chỉ có 'speaker' thì người trùng meta.candidate_speaker = candidate, còn lại = interviewer."""
+    cand = L.norm_name((session.get("meta") or {}).get("candidate_speaker") or "")
+    out = []
+    for s in session.get("transcript") or []:
+        if s.get("role"):
+            out.append(s)
+            continue
+        spk = (s.get("speaker") or "").strip()
+        role = "candidate" if cand and L.norm_name(spk) == cand else "interviewer"
+        seg = {"t": s.get("t"), "role": role, "text": s.get("text")}
+        if role == "interviewer" and spk:
+            seg["who"] = spk
+        out.append(seg)
+    return out
