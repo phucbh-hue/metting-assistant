@@ -185,11 +185,13 @@
   }
   window.addEventListener('hashchange', route);
 
-  function header(crumbs){
+  function header(crumbs, back){
     const roleChip = `<span class="chip">${ME.admin?'Admin':ME.role==='owner'?'Owner':'Người phỏng vấn'}</span>`;
     const adminLink = ME.admin ? `<a class="btn btn-sm" href="#/admin">Quản trị</a>` : '';
+    const backBtn = back ? `<a class="btn btn-sm" href="${back}">← Quay lại</a>` : '';
     return `<div class="flex items-center justify-between gap-3 flex-wrap mb-4">
       <div class="flex items-center gap-2">
+        ${backBtn}
         <a href="#/" class="text-lg font-semibold" style="color:rgb(var(--ink))">UrBox Interview</a>
         ${crumbs?`<span class="muted">›</span> <span class="muted text-[13px]">${crumbs}</span>`:''}
       </div>
@@ -211,12 +213,23 @@
         <div class="muted text-[12.5px] mt-1">${(p.rubric||[]).length} tiêu chí · ${(p.members||[]).length} người phỏng vấn</div>
       </a>`).join('');
     $('#list', app).innerHTML = `
-      <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center justify-between gap-2 mb-3 flex-wrap">
         <div class="font-semibold">Vị trí tuyển dụng</div>
-        ${canCfg?`<button class="btn btn-accent btn-sm" data-act="new-pos">＋ Vị trí mới</button>`:''}
+        ${canCfg?`<div class="flex gap-2"><button class="btn btn-sm" data-act="new-jd">⬆ Thêm từ file JD</button><button class="btn btn-accent btn-sm" data-act="new-pos">＋ Vị trí mới</button></div>`:''}
       </div>
-      <div class="grid sm:grid-cols-2 gap-3">${items || `<div class="muted">${canCfg?'Chưa có vị trí nào. Bấm “Vị trí mới” để bắt đầu.':'Bạn chưa được giao vị trí phỏng vấn nào. Liên hệ owner/admin để được thêm.'}</div>`}</div>`;
+      <div class="grid sm:grid-cols-2 gap-3">${items || `<div class="muted">${canCfg?'Chưa có vị trí nào. Bấm “Thêm từ file JD” hoặc “Vị trí mới” để bắt đầu.':'Bạn chưa được giao vị trí phỏng vấn nào. Liên hệ owner/admin để được thêm.'}</div>`}</div>`;
     const nb=$('[data-act=new-pos]',app); if(nb) nb.onclick=newPosition;
+    const jb=$('[data-act=new-jd]',app); if(jb) jb.onclick=newPositionFromJD;
+  }
+  async function newPositionFromJD(){
+    const f=await pickFile('.pdf,.docx,.xlsx,.txt,.md,image/*'); if(!f) return;
+    toast('Đang đọc JD…');
+    try{ const data=await readFileB64(await shrinkImageIfBig(f));
+      const out=await api('/api/interview/extract',{method:'POST',body:{kind:'jd',filename:f.name,data}});
+      const title=(out.title||'').trim() || f.name.replace(/\.[^.]+$/,'');
+      const p=await api('/api/interview/positions',{method:'POST',body:{title, jd:out.jd||'', requirements:out.requirements||''}});
+      toast('Đã tạo vị trí từ JD'); go('/p/'+p.id);
+    }catch(e){ toast(e.message,1); }
   }
   function newPosition(){
     const f = openForm(`<h3 class="text-lg font-semibold mb-3">Vị trí mới</h3>
@@ -229,7 +242,7 @@
 
   /* ---------------- chi tiết vị trí ---------------- */
   async function viewPosition(app, pid){
-    app.innerHTML = header('Vị trí') + `<div id="pos"><div class="muted flex items-center gap-2"><span class="spin"></span> Đang tải…</div></div>`;
+    app.innerHTML = header('Vị trí', '#/') + `<div id="pos"><div class="muted flex items-center gap-2"><span class="spin"></span> Đang tải…</div></div>`;
     async function refresh(){
       const p = await api('/api/interview/positions/'+pid);
       const canEdit = ME.admin || (AUTH.user && (p.owner||'')===(AUTH.user.email||'').toLowerCase()) || !AUTH.required;
@@ -366,7 +379,7 @@
 
   /* ---------------- chi tiết ứng viên ---------------- */
   async function viewCandidate(app, cid){
-    app.innerHTML = header('Ứng viên') + `<div id="c"><div class="muted flex items-center gap-2"><span class="spin"></span> Đang tải…</div></div>`;
+    app.innerHTML = header('Ứng viên', '#/') + `<div id="c"><div class="muted flex items-center gap-2"><span class="spin"></span> Đang tải…</div></div>`;
     async function refresh(){
       const c = await api('/api/interview/candidates/'+cid);
       renderCand(app, c, refresh);
@@ -458,7 +471,7 @@
 
   /* ---------------- buổi phỏng vấn ---------------- */
   async function viewSession(app, sid){
-    app.innerHTML = header('Buổi phỏng vấn') + `<div id="s"><div class="muted flex items-center gap-2"><span class="spin"></span> Đang tải…</div></div>`;
+    app.innerHTML = header('Buổi phỏng vấn', '#/') + `<div id="s"><div class="muted flex items-center gap-2"><span class="spin"></span> Đang tải…</div></div>`;
     let lastAssist=null;
     async function refresh(){
       const s = await api('/api/interview/sessions/'+sid);
@@ -544,7 +557,7 @@
 
   /* ---------------- so sánh ---------------- */
   async function viewCompare(app, pid){
-    app.innerHTML = header('So sánh') + `<div id="cmp"><div class="muted flex items-center gap-2"><span class="spin"></span> Đang so sánh…</div></div>`;
+    app.innerHTML = header('So sánh', '#/p/'+pid) + `<div id="cmp"><div class="muted flex items-center gap-2"><span class="spin"></span> Đang so sánh…</div></div>`;
     let d; try{ d=await api('/api/interview/positions/'+pid+'/compare'); }catch(e){ $('#cmp',app).innerHTML=`<div class="panel p-4" style="color:rgb(var(--danger))">${esc(e.message)}</div>`; return; }
     const n=d.candidates;
     const head=`<tr><th>Tiêu chí</th>${n.map(x=>`<th>${esc(x)}</th>`).join('')}</tr>`;
@@ -572,7 +585,7 @@
   /* ---------------- quản trị vai trò ---------------- */
   async function viewAdmin(app){
     if(!ME.admin){ go('/'); return; }
-    app.innerHTML = header('Quản trị') + `<div id="adm"><div class="muted flex items-center gap-2"><span class="spin"></span> Đang tải…</div></div>`;
+    app.innerHTML = header('Quản trị', '#/') + `<div id="adm"><div class="muted flex items-center gap-2"><span class="spin"></span> Đang tải…</div></div>`;
     async function refresh(){
       const d=await api('/api/interview/people');
       const rows=(d.people||[]).map(p=>`<tr><td>${esc(p.name)}<div class="muted text-[11.5px]">${esc(p.email)}</div></td>
