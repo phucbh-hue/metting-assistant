@@ -89,7 +89,7 @@ async def lifespan(_app: FastAPI):
     db.flush()                  # lưu trên máy: ghi nốt phần còn chờ trước khi tắt
 
 
-APP_VERSION = "3.24.2"              # dấu hiệu phiên bản ở /healthz để kiểm tra bản mới đã lên server chưa (giữ khớp package.json)
+APP_VERSION = "3.25.0"              # dấu hiệu phiên bản ở /healthz để kiểm tra bản mới đã lên server chưa (giữ khớp package.json)
 app = FastAPI(title="Meeting Assistant AI", version=APP_VERSION, lifespan=lifespan)
 _MEETING_PATH = re.compile(r"^/(?:api/meetings|ws/meeting)/(\d+)(?:/|$)")
 _ARTIFACT_PATH = re.compile(r"^/api/artifacts/(\d+)(?:/|$)")
@@ -337,10 +337,14 @@ def index():
     return FileResponse(HERE / "index.html", headers={"Cache-Control": "no-cache"})
 
 
-@app.get("/interview")
-def interview_page():
-    # Trang riêng cho chế độ Phỏng vấn (SPA tách khỏi index.html), dùng chung đăng nhập (localStorage ma_token)
-    return FileResponse(HERE / "interview.html", headers={"Cache-Control": "no-cache"})
+# Chế độ Phỏng vấn = app riêng (interview_app, giao diện gốc của repo) mount dưới /interview, dùng CHUNG MongoDB +
+# đăng nhập + voiceprint của Meeting. Mount có bảo vệ: lỗi import app phỏng vấn KHÔNG làm sập server Meeting.
+try:
+    from meeting.interview_app.app import app as _interview_app  # noqa: E402
+    app.mount("/interview", _interview_app)
+    log.info("meeting.app: đã mount app Phỏng vấn tại /interview")
+except Exception:
+    log.exception("meeting.app: mount app Phỏng vấn lỗi - /interview tạm thời không có")
 
 
 @app.get("/vesper")

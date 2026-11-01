@@ -70,3 +70,6 @@ web-dist/
 # Cấu hình server trên máy ảo (deploy/oracle/setup.sh tạo, chứa khóa)
 deploy/oracle/prod.env
 deploy/oracle/caddy.env
+
+# Model giọng của app phỏng vấn (tự tải lúc chạy, 28MB)
+meeting/interview_app/models/

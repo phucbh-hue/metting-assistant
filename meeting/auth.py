@@ -61,7 +61,8 @@ PUBLIC_PATHS = {"/", "/vesper", "/interview", "/config.js", "/favicon.ico", "/he
                 "/api/google/callback", "/api/wikibox/callback"}   # Google / WikiBox chuyển hướng về (kiểm bằng state)
 # /ws/recall/: bot Recall gửi âm thanh Google Meet, xác thực bằng mã ngẫu nhiên của từng buổi (meet_bots.check_token)
 # /play/: trang chơi trò chơi trên điện thoại (meeting/game.py), xác thực bằng mã ngẫu nhiên của từng lượt chơi
-PUBLIC_PREFIXES = ("/static/", "/ws/recall/", "/play/", "/ws/interview/")   # ws phỏng vấn xác thực bằng token của buổi
+PUBLIC_PREFIXES = ("/static/", "/ws/recall/", "/play/", "/ws/interview/",   # ws phỏng vấn xác thực bằng token của buổi
+                   "/interview/")   # app Phỏng vấn mount tại /interview tự lo đăng nhập (shim đọc bearer của Meeting)
 # Chỉ quản trị viên được ĐỔI (mọi method trừ GET/HEAD) các mục cài đặt dùng chung của server
 # (Kết nối gói đăng ký /api/llm/connect là của từng người trên bản web, không cần quyền quản trị.)
 ADMIN_PREFIXES = ("/api/settings/", "/api/llm/provider", "/api/storage/sync")
