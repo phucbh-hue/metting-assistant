@@ -361,11 +361,11 @@
     const f=openForm(`<h3 class="text-lg font-semibold mb-3">Thêm ứng viên</h3>
       <div class="flex gap-2 mb-2"><button class="btn btn-sm" data-cv-file>⬆ Tải CV (PDF/ảnh/docx)</button><span id="cvname" class="muted text-[12px] self-center"></span></div>
       <label class="muted text-[12px]">Tên ứng viên</label><input id="c-name" class="input mt-1 mb-2">
-      <label class="muted text-[12px]">CV (dán hoặc tải file ở trên)</label><textarea id="c-cv" class="input mt-1 mb-2" rows="7" placeholder="Nội dung CV…"></textarea>
+      <label class="muted text-[12px]">CV (tuỳ chọn — bỏ trống nếu phỏng vấn trực tiếp chưa có CV)</label><textarea id="c-cv" class="input mt-1 mb-2" rows="7" placeholder="Nội dung CV… (có thể để trống)"></textarea>
       <label class="muted text-[12px]">Ghi chú của HR (không bắt buộc)</label><textarea id="c-notes" class="input mt-1" rows="2"></textarea>
-      <div class="flex justify-end gap-2 mt-4"><button class="btn" data-x>Huỷ</button><button class="btn btn-accent" data-ok>Thêm & chấm CV</button></div>`);
+      <div class="flex justify-end gap-2 mt-4"><button class="btn" data-x>Huỷ</button><button class="btn btn-accent" data-ok>Thêm ứng viên</button></div>`);
     f.on(async()=>{ const body={ name:f.val('#c-name').trim(), cv:f.val('#c-cv'), notes:f.val('#c-notes') };
-      if(!body.cv.trim()){ toast('Dán hoặc tải CV',1); return; }
+      if(!body.name.trim() && !body.cv.trim()){ toast('Nhập tên hoặc dán CV',1); return; }
       try{ const c=await api('/api/interview/positions/'+pid+'/candidates',{method:'POST',body}); f.close(); go('/c/'+c.id); }catch(e){ toast(e.message,1); } });
   }
   // gắn nút tải CV trong modal "Thêm ứng viên" (modalForm mở xong mới có DOM)
@@ -407,8 +407,8 @@
         <div class="flex gap-2">
           ${canEdit?`<button class="btn btn-sm" data-act="rescreen">Chấm lại CV</button>`:''}
           ${canEdit?`<button class="btn btn-sm" data-act="edit-cv">Sửa CV</button>`:''}
-          <button class="btn btn-sm" data-act="from-meeting" title="Phỏng vấn trực tiếp / hội đồng: lấy lời thoại từ cuộc họp đã thu">Chấm từ cuộc họp</button>
-          <button class="btn btn-accent btn-sm" data-act="start">▶ Phỏng vấn online</button>
+          <button class="btn btn-accent btn-sm" data-act="from-meeting" title="Phỏng vấn trực tiếp / hội đồng nhiều người: lấy lời thoại từ cuộc họp đã thu bằng Meeting">▶ Phỏng vấn trực tiếp</button>
+          <button class="btn btn-accent btn-sm" data-act="start" title="Phỏng vấn online 1-1: ứng viên qua Meet/Zoom/Teams, dùng extension UrBox Interview">▶ Phỏng vấn online</button>
           ${canEdit?`<button class="btn btn-sm" data-act="del-cand" style="color:rgb(var(--danger));border-color:rgba(255,107,107,.4)">Xoá</button>`:''}
         </div>
       </div>
