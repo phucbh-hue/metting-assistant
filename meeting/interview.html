@@ -296,6 +296,7 @@
           ${canEdit?`<div class="flex flex-wrap gap-2 mb-3">
             <button class="btn btn-sm" data-act="build">✨ AI đề xuất từ JD</button>
             <button class="btn btn-sm" data-act="import">⬆ Nhập tiêu chí HR</button>
+            <button class="btn btn-sm" data-act="edit-crit">✎ Sửa tiêu chí</button>
             <button class="btn btn-sm" data-act="upload-jd">⬆ Tải JD</button>
           </div>`:''}
           <div id="critjob"></div>
@@ -320,6 +321,7 @@
     on('edit-pos', ()=>editPosition(p, refresh));
     on('build', ()=>doBuild(pid, refresh));
     on('import', ()=>doImportCriteria(pid, refresh));
+    on('edit-crit', ()=>editCriteria(p, refresh));
     on('upload-jd', ()=>doUploadJD(pid, refresh));
     on('add-cand', ()=>addCandidate(pid, refresh));
     on('screen-all', async()=>{ try{ const r=await api('/api/interview/positions/'+pid+'/screen?scope=stale',{method:'POST'}); toast('Đang chấm '+r.started+' CV'); refresh(); }catch(e){ toast(e.message,1);} });
@@ -356,6 +358,50 @@
       const out=await api('/api/interview/extract',{method:'POST',body:{kind:'jd',filename:f.name,data}});
       await api('/api/interview/positions/'+pid,{method:'PUT',body:{title:out.title||undefined,jd:out.jd,requirements:out.requirements}});
       toast('Đã điền JD từ file'); refresh(); }catch(e){ toast(e.message,1); }
+  }
+  function editCriteria(p, refresh){
+    const cr=p.criteria||{};
+    const rowHtml=(c={})=>`<div class="raise p-2.5 mb-2" data-crow>
+      <div class="flex gap-2 items-center mb-1">
+        <input class="input" data-f="name" placeholder="Tên tiêu chí" value="${esc(c.name||'')}" style="flex:1">
+        <input class="input" data-f="weight" type="number" min="0" placeholder="%" value="${c.weight!=null?c.weight:''}" style="width:72px" title="Tỷ trọng %">
+        <button class="btn btn-sm" data-rm style="color:rgb(var(--danger));border-color:rgba(255,107,107,.4)" title="Xoá tiêu chí">✕</button>
+      </div>
+      <textarea class="input mb-1" data-f="description" rows="2" placeholder="Mô tả: tiêu chí này đo gì, ngưỡng đạt">${esc(c.description||'')}</textarea>
+      <textarea class="input mb-1" data-f="signals" rows="2" placeholder="Dấu hiệu tốt (mỗi dòng một ý)">${esc((c.signals||[]).join('\n'))}</textarea>
+      <textarea class="input" data-f="sample_questions" rows="2" placeholder="Câu hỏi gợi ý (mỗi dòng một câu)">${esc((c.sample_questions||[]).join('\n'))}</textarea>
+    </div>`;
+    const f=openForm(`<h3 class="text-lg font-semibold mb-1">Sửa tiêu chí</h3>
+      <p class="muted text-[12px] mb-2">Tỷ trọng nên cộng lại 100% (không đủ 100 vẫn chạy, hệ thống quy về tỷ lệ). Lưu tay → khung được đánh dấu do HR quản lý, AI không tự đè.</p>
+      <div id="rows">${(p.rubric||[]).map(rowHtml).join('')||rowHtml()}</div>
+      <div class="flex items-center justify-between mb-3"><button class="btn btn-sm" data-add>＋ Thêm tiêu chí</button><span class="muted text-[12px]">Tổng tỷ trọng: <b id="wsum">0</b>%</span></div>
+      <label class="muted text-[12px]">Yêu cầu bắt buộc (mỗi dòng một ý)</label>
+      <textarea id="must" class="input mt-1 mb-2" rows="3" placeholder="VD: Tối thiểu 2 năm kinh nghiệm sales B2B">${esc((cr.must_have||[]).join('\n'))}</textarea>
+      <label class="muted text-[12px]">Yêu cầu cộng điểm (mỗi dòng một ý)</label>
+      <textarea id="nice" class="input mt-1" rows="2">${esc((cr.nice_to_have||[]).join('\n'))}</textarea>
+      <div class="flex justify-end gap-2 mt-4"><button class="btn" data-x>Huỷ</button><button class="btn btn-accent" data-ok>Lưu tiêu chí</button></div>`);
+    const rows=f.el.querySelector('#rows');
+    const sumEl=f.el.querySelector('#wsum');
+    const recalc=()=>{ let s=0; rows.querySelectorAll('[data-f=weight]').forEach(i=>s+=parseFloat(i.value)||0); sumEl.textContent=Math.round(s); };
+    f.el.querySelector('[data-add]').onclick=()=>{ const d=document.createElement('div'); d.innerHTML=rowHtml(); rows.appendChild(d.firstElementChild); recalc(); };
+    rows.addEventListener('input',e=>{ if(e.target.matches('[data-f=weight]')) recalc(); });
+    rows.addEventListener('click',e=>{ const b=e.target.closest('[data-rm]'); if(!b) return;
+      if(rows.querySelectorAll('[data-crow]').length>1){ b.closest('[data-crow]').remove(); recalc(); } else toast('Cần ít nhất 1 tiêu chí',1); });
+    recalc();
+    f.on(async()=>{
+      const rubric=[...rows.querySelectorAll('[data-crow]')].map(r=>({
+        name:r.querySelector('[data-f=name]').value.trim(),
+        weight:parseFloat(r.querySelector('[data-f=weight]').value)||0,
+        description:r.querySelector('[data-f=description]').value.trim(),
+        signals:r.querySelector('[data-f=signals]').value.split('\n').map(s=>s.trim()).filter(Boolean),
+        sample_questions:r.querySelector('[data-f=sample_questions]').value.split('\n').map(s=>s.trim()).filter(Boolean),
+      })).filter(c=>c.name);
+      if(!rubric.length){ toast('Thêm ít nhất một tiêu chí có tên',1); return; }
+      const must=f.val('#must').split('\n').map(s=>s.trim()).filter(Boolean);
+      const nice=f.val('#nice').split('\n').map(s=>s.trim()).filter(Boolean);
+      try{ await api('/api/interview/positions/'+p.id,{method:'PUT',body:{rubric,criteria:{source:'hr',must_have:must,nice_to_have:nice}}});
+        f.close(); toast('Đã lưu tiêu chí'); refresh(); }catch(e){ toast(e.message,1); }
+    });
   }
   function addCandidate(pid, refresh){
     const f=openForm(`<h3 class="text-lg font-semibold mb-3">Thêm ứng viên</h3>
