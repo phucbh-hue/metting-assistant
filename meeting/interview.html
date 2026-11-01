@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>UrBox Interview - Trợ lý phỏng vấn</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23A426ED' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M16 21v-2a4 4 0 0 0-8 0v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <script src="/config.js"></script>
+  <script>
+    tailwind.config = { theme: { extend: {
+      fontFamily: { sans: ['"Be Vietnam Pro"', 'system-ui', 'sans-serif'] },
+      colors: { ink:'rgb(var(--ink)/<alpha-value>)', muted:'rgb(var(--muted)/<alpha-value>)',
+        accent:'rgb(var(--accent)/<alpha-value>)', danger:'rgb(var(--danger)/<alpha-value>)',
+        panel:'rgb(var(--panel)/<alpha-value>)', base:'rgb(var(--base)/<alpha-value>)',
+        gold:'rgb(var(--gold)/<alpha-value>)', ok:'rgb(var(--ok)/<alpha-value>)' } } } };
+  </script>
+  <style>
+    :root { --base:15 11 26; --panel:27 20 46; --raise:37 28 63; --ink:241 237 250; --muted:166 155 191;
+      --accent:185 138 255; --brand:130 53 228; --gold:255 183 0; --pink:239 101 197; --danger:255 107 107;
+      --ok:74 222 128; --line:rgba(214,196,255,.09); --line-strong:rgba(214,196,255,.18); }
+    * { box-sizing:border-box; }
+    html,body { height:100%; }
+    body { margin:0; background:rgb(var(--base)); color:rgb(var(--ink));
+      font-family:"Be Vietnam Pro",system-ui,sans-serif; font-size:14px; line-height:1.5; }
+    .panel { background:rgb(var(--panel)/.82); border:1px solid var(--line); border-radius:16px; }
+    .raise { background:rgb(var(--raise)); border:1px solid var(--line-strong); border-radius:14px; }
+    .btn { display:inline-flex; align-items:center; gap:6px; padding:8px 14px; border-radius:10px;
+      border:1px solid var(--line-strong); background:transparent; color:rgb(var(--ink)); cursor:pointer;
+      font-weight:500; font-size:13.5px; transition:.15s; white-space:nowrap; }
+    .btn:hover { background:rgb(var(--raise)); }
+    .btn-accent { background:rgb(var(--brand)); border-color:transparent; color:#fff; }
+    .btn-accent:hover { filter:brightness(1.1); background:rgb(var(--brand)); }
+    .btn-sm { padding:5px 10px; font-size:12.5px; border-radius:8px; }
+    .btn:disabled { opacity:.5; cursor:not-allowed; }
+    .chip { display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:999px;
+      font-size:12px; font-weight:600; background:rgb(var(--raise)); border:1px solid var(--line); }
+    .input, textarea.input { width:100%; padding:9px 11px; border-radius:10px; background:rgb(var(--base)/.6);
+      border:1px solid var(--line-strong); color:rgb(var(--ink)); font:inherit; }
+    .input:focus { outline:none; border-color:rgb(var(--accent)); }
+    .muted { color:rgb(var(--muted)); }
+    .md h1,.md h2,.md h3 { font-weight:600; margin:.5em 0 .3em; }
+    .md ul { padding-left:1.2em; list-style:disc; } .md li { margin:.1em 0; }
+    .md p { margin:.4em 0; }
+    .bar { height:7px; border-radius:999px; background:rgb(var(--raise)); overflow:hidden; }
+    .bar > i { display:block; height:100%; background:linear-gradient(90deg,rgb(var(--brand)),rgb(var(--pink))); }
+    .spin { width:16px; height:16px; border:2px solid var(--line-strong); border-top-color:rgb(var(--accent));
+      border-radius:50%; animation:sp .7s linear infinite; display:inline-block; }
+    @keyframes sp { to { transform:rotate(360deg); } }
+    a { color:rgb(var(--accent)); text-decoration:none; }
+    .modal-bg { position:fixed; inset:0; background:rgba(5,3,12,.66); display:grid; place-items:center; z-index:50; padding:16px; }
+    table.grid { border-collapse:collapse; width:100%; }
+    table.grid th,table.grid td { border:1px solid var(--line); padding:7px 10px; text-align:left; font-size:13px; }
+    table.grid th { background:rgb(var(--raise)); font-weight:600; }
+    .scoredot { display:inline-block; width:22px; height:22px; line-height:22px; text-align:center; border-radius:6px; font-weight:700; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div id="app" class="max-w-5xl mx-auto px-4 py-5"></div>
+
+  <script>
+  const MA_CFG = window.MA_CONFIG || {};
+  const API_BASE = String(MA_CFG.apiBase || '').replace(/\/+$/, '');
+  const AUTH = { token:'', user:null, required:false, clientId:'', domains:[] };
+  try { AUTH.token = localStorage.getItem('ma_token') || ''; } catch(e){}
+  let ME = { role:'user', can_configure:false, admin:false };
+
+  function apiUrl(p, withToken){ if(typeof p!=='string'||!/^\/(api|ws)\//.test(p)) return p;
+    let u=API_BASE+p; if(withToken&&AUTH.token) u+=(u.includes('?')?'&':'?')+'token='+encodeURIComponent(AUTH.token); return u; }
+  function authHeaders(h={}){ if(AUTH.token) h.Authorization='Bearer '+AUTH.token; return h; }
+  async function api(path, opt={}){
+    const o = { ...opt, headers: authHeaders({ ...(opt.headers||{}) }) };
+    if (o.body && typeof o.body !== 'string') { o.body = JSON.stringify(o.body); o.headers['Content-Type']='application/json'; }
+    const r = await fetch(apiUrl(path), o);
+    if (r.status===401){ requireLogin(); throw new Error('Cần đăng nhập'); }
+    let d = null; try { d = await r.json(); } catch(e){}
+    if (!r.ok) throw new Error((d && (typeof d.detail==='string'?d.detail:JSON.stringify(d.detail))) || ('Lỗi '+r.status));
+    return d;
+  }
+  const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const mdHtml = s => DOMPurify.sanitize(marked.parse(String(s||''), {breaks:true}));
+  const $ = (sel, root=document) => root.querySelector(sel);
+  function toast(msg, bad){ const t=document.createElement('div'); t.textContent=msg;
+    t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:80;padding:10px 16px;border-radius:10px;font-size:13.5px;max-width:90vw;'
+      +(bad?'background:rgb(80,20,30);color:#ffd9d9;border:1px solid rgba(255,107,107,.5)':'background:rgb(var(--raise));border:1px solid var(--line-strong)');
+    document.body.appendChild(t); setTimeout(()=>t.remove(), bad?5200:2600); }
+
+  /* ---------------- đăng nhập (dùng chung ma_token với Meeting) ---------------- */
+  let loginShown=null;
+  async function bootAuth(){
+    let cfg=null; try { const r=await fetch(apiUrl('/api/auth/config')); if(r.ok) cfg=await r.json(); } catch(e){}
+    if (!cfg || !cfg.required) return true;          // bản chạy trên máy: không cần đăng nhập
+    Object.assign(AUTH, { required:true, clientId:cfg.google_client_id||'', domains:cfg.domains||[] });
+    if (AUTH.token) {
+      try { const r=await fetch(apiUrl('/api/auth/me'), {headers:authHeaders()});
+        if (r.ok){ const d=await r.json(); AUTH.user=d.user;
+          if (d.token){ AUTH.token=d.token; try{localStorage.setItem('ma_token',d.token);}catch(e){} }
+          if (AUTH.user) return true; } } catch(e){}
+    }
+    await showLogin(); return true;
+  }
+  function showLogin(message){
+    if (loginShown) return loginShown;
+    loginShown = new Promise(resolve=>{
+      const dom = AUTH.domains.length ? AUTH.domains.map(d=>'@'+d).join(', ') : 'của công ty';
+      const root=document.createElement('div'); root.className='modal-bg';
+      root.innerHTML = `<div class="panel" style="max-width:380px;width:100%;padding:28px 24px;text-align:center">
+        <h1 class="text-xl font-semibold mb-1">UrBox Interview</h1>
+        <p class="muted text-[13.5px] mb-5">Đăng nhập Google ${esc(dom)} để tiếp tục.</p>
+        <div id="gbtn" class="flex justify-center" style="min-height:44px"><span class="spin"></span></div>
+        <p id="gmsg" class="text-[13px] mt-4" style="color:rgb(var(--danger));min-height:1em">${esc(message||'')}</p></div>`;
+      document.body.appendChild(root);
+      const msg=t=>{ $('#gmsg',root).textContent=t; };
+      if (!AUTH.clientId){ $('#gbtn',root).innerHTML=''; msg('Server chưa cấu hình GOOGLE_OAUTH_CLIENT_ID.'); return; }
+      const s=document.createElement('script'); s.src='https://accounts.google.com/gsi/client';
+      s.onload=()=>{ google.accounts.id.initialize({ client_id:AUTH.clientId, ux_mode:'popup', auto_select:false,
+        callback: async ({credential})=>{ msg('');
+          try { const r=await fetch(apiUrl('/api/auth/google'), {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({credential})});
+            const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(typeof d.detail==='string'?d.detail:('Lỗi '+r.status));
+            AUTH.token=d.token; AUTH.user=d.user; try{localStorage.setItem('ma_token',d.token);}catch(e){}
+            root.remove(); loginShown=null; resolve(); } catch(e){ msg(e.message||'Không đăng nhập được'); } } });
+        $('#gbtn',root).innerHTML=''; google.accounts.id.renderButton($('#gbtn',root), {theme:'filled_blue',size:'large',text:'signin_with',shape:'pill',locale:'vi'}); };
+      s.onerror=()=>{ $('#gbtn',root).innerHTML=''; msg('Không tải được Google đăng nhập'); };
+      document.head.appendChild(s);
+    });
+    return loginShown;
+  }
+  function requireLogin(){ AUTH.token=''; try{localStorage.removeItem('ma_token');}catch(e){}
+    showLogin('Phiên đăng nhập đã hết hạn, hãy đăng nhập lại.').then(()=>location.reload()); }
+
+  /* ---------------- tiện ích file ---------------- */
+  function readFileB64(file){ return new Promise((res,rej)=>{ const r=new FileReader();
+    r.onload=()=>res(String(r.result).split(',')[1]||''); r.onerror=rej; r.readAsDataURL(file); }); }
+  async function shrinkImageIfBig(file){
+    if (!/^image\//.test(file.type) || file.size < 3_400_000) return file;
+    try { const img=await createImageBitmap(file); const sc=Math.min(1, 1600/Math.max(img.width,img.height));
+      const cv=document.createElement('canvas'); cv.width=Math.round(img.width*sc); cv.height=Math.round(img.height*sc);
+      cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+      const blob=await new Promise(r=>cv.toBlob(r,'image/jpeg',0.85)); return blob||file; } catch(e){ return file; }
+  }
+  async function pickFile(accept){ return new Promise(res=>{ const i=document.createElement('input'); i.type='file';
+    if(accept) i.accept=accept; i.onchange=()=>res(i.files[0]||null); i.click(); }); }
+
+  const REC_VI = { interview:'Nên phỏng vấn', consider:'Cân nhắc', reject:'Loại',
+    strong_yes:'Rất nên tuyển', yes:'Nên tuyển', maybe:'Cân nhắc', no:'Không nên', strong_no:'Chắc chắn không' };
+  const REC_COLOR = { interview:'var(--ok)', consider:'var(--gold)', reject:'var(--danger)',
+    strong_yes:'var(--ok)', yes:'var(--ok)', maybe:'var(--gold)', no:'var(--danger)', strong_no:'var(--danger)' };
+  const REQ_VI = { met:'đạt', partial:'một phần', not_met:'KHÔNG đạt', unknown:'chưa rõ' };
+  function matchColor(m){ return m==null?'var(--muted)': m>=70?'var(--ok)': m>=45?'var(--gold)':'var(--danger)'; }
+  function scoreColor(s){ return !s?'var(--muted)': s>=4?'var(--ok)': s>=3?'var(--gold)':'var(--danger)'; }
+
+  /* ---------------- modal/form nhỏ ---------------- */
+  function openForm(html){
+    const el=document.createElement('div'); el.className='modal-bg';
+    el.innerHTML=`<div class="panel" style="max-width:640px;width:100%;max-height:88vh;overflow:auto;padding:22px">${html}</div>`;
+    document.body.appendChild(el);
+    const close=()=>el.remove();
+    el.addEventListener('click',e=>{ if(e.target===el) close(); });
+    const x=el.querySelector('[data-x]'); if(x) x.onclick=close;
+    return { el, close, on:(fn)=>{ const ok=el.querySelector('[data-ok]'); if(ok) ok.onclick=fn; },
+             val:(s)=>{ const n=el.querySelector(s); return n?n.value:''; } };
+  }
+
+  /* ================================ ROUTER ================================ */
+  let poller=null;
+  function stopPoll(){ if(poller){ clearInterval(poller); poller=null; } }
+  function go(hash){ location.hash=hash; }
+  async function route(){
+    stopPoll();
+    const app=$('#app'); const h=location.hash.replace(/^#/,'')||'/';
+    const mP=h.match(/^\/p\/(\d+)$/), mC=h.match(/^\/c\/(\d+)$/), mS=h.match(/^\/s\/(\d+)$/), mCmp=h.match(/^\/p\/(\d+)\/compare$/);
+    try {
+      if (h==='/') return viewList(app);
+      if (h==='/admin') return viewAdmin(app);
+      if (mCmp) return viewCompare(app, +mCmp[1]);
+      if (mP) return viewPosition(app, +mP[1]);
+      if (mC) return viewCandidate(app, +mC[1]);
+      if (mS) return viewSession(app, +mS[1]);
+      go('/');
+    } catch(e){ app.innerHTML = header() + `<div class="panel p-5 mt-4" style="color:rgb(var(--danger))">${esc(e.message)}</div>`; }
+  }
+  window.addEventListener('hashchange', route);
+
+  function header(crumbs){
+    const roleChip = `<span class="chip">${ME.admin?'Admin':ME.role==='owner'?'Owner':'Người phỏng vấn'}</span>`;
+    const adminLink = ME.admin ? `<a class="btn btn-sm" href="#/admin">Quản trị</a>` : '';
+    return `<div class="flex items-center justify-between gap-3 flex-wrap mb-4">
+      <div class="flex items-center gap-2">
+        <a href="#/" class="text-lg font-semibold" style="color:rgb(var(--ink))">UrBox Interview</a>
+        ${crumbs?`<span class="muted">›</span> <span class="muted text-[13px]">${crumbs}</span>`:''}
+      </div>
+      <div class="flex items-center gap-2">${roleChip}${adminLink}
+        <a class="btn btn-sm" href="/">← Về Meeting</a></div></div>`;
+  }
+
+  /* ---------------- danh sách vị trí ---------------- */
+  async function viewList(app){
+    app.innerHTML = header() + `<div id="list"><div class="muted flex items-center gap-2"><span class="spin"></span> Đang tải…</div></div>`;
+    const d = await api('/api/interview/positions');
+    const canCfg = d.can_configure;
+    const items = (d.positions||[]).map(p=>`
+      <a href="#/p/${p.id}" class="panel p-4 block hover:brightness-110 transition">
+        <div class="flex items-center justify-between gap-2">
+          <div class="font-semibold text-[15px]">${esc(p.title||'(chưa đặt tên)')}</div>
+          ${p.criteria&&p.criteria.source?`<span class="chip">${p.criteria.source==='hr'?'Tiêu chí HR':'Tiêu chí AI'}</span>`:'<span class="chip" style="color:rgb(var(--gold))">chưa có tiêu chí</span>'}
+        </div>
+        <div class="muted text-[12.5px] mt-1">${(p.rubric||[]).length} tiêu chí · ${(p.members||[]).length} người phỏng vấn</div>
+      </a>`).join('');
+    $('#list', app).innerHTML = `
+      <div class="flex items-center justify-between mb-3">
+        <div class="font-semibold">Vị trí tuyển dụng</div>
+        ${canCfg?`<button class="btn btn-accent btn-sm" data-act="new-pos">＋ Vị trí mới</button>`:''}
+      </div>
+      <div class="grid sm:grid-cols-2 gap-3">${items || `<div class="muted">${canCfg?'Chưa có vị trí nào. Bấm “Vị trí mới” để bắt đầu.':'Bạn chưa được giao vị trí phỏng vấn nào. Liên hệ owner/admin để được thêm.'}</div>`}</div>`;
+    const nb=$('[data-act=new-pos]',app); if(nb) nb.onclick=newPosition;
+  }
+  function newPosition(){
+    const f = openForm(`<h3 class="text-lg font-semibold mb-3">Vị trí mới</h3>
+      <label class="muted text-[12.5px]">Tên vị trí</label>
+      <input id="f-title" class="input mt-1" placeholder="VD: Nhân viên kinh doanh B2B" autofocus>
+      <div class="flex justify-end gap-2 mt-4"><button class="btn" data-x>Huỷ</button><button class="btn btn-accent" data-ok>Tạo</button></div>`);
+    f.on(async()=>{ const title=f.val('#f-title').trim(); if(!title){ toast('Nhập tên vị trí',1); return; }
+      try { const p=await api('/api/interview/positions',{method:'POST',body:{title}}); f.close(); go('/p/'+p.id); } catch(e){ toast(e.message,1); } });
+  }
+
+  /* ---------------- chi tiết vị trí ---------------- */
+  async function viewPosition(app, pid){
+    app.innerHTML = header('Vị trí') + `<div id="pos"><div class="muted flex items-center gap-2"><span class="spin"></span> Đang tải…</div></div>`;
+    async function refresh(){
+      const p = await api('/api/interview/positions/'+pid);
+      const canEdit = ME.admin || (AUTH.user && (p.owner||'')===(AUTH.user.email||'').toLowerCase()) || !AUTH.required;
+      renderPos(app, p, canEdit, refresh, pid);
+      const job = p.criteria_job;
+      if (job && job.status==='running'){ stopPoll(); poller=setInterval(()=>api('/api/interview/positions/'+pid).then(np=>{
+        if(!(np.criteria_job&&np.criteria_job.status==='running')){ stopPoll(); refresh(); } }).catch(()=>{}), 3000); }
+      if ((p.candidates||[]).some(c=>c.screening&&c.screening.status==='running')){ stopPoll();
+        poller=setInterval(()=>api('/api/interview/positions/'+pid).then(np=>renderPos(app,np,canEdit,refresh,pid)).catch(()=>{}),3000); }
+    }
+    await refresh();
+  }
+  function renderPos(app, p, canEdit, refresh, pid){
+    const cr = p.criteria||{};
+    const rubric = (p.rubric||[]).map(c=>{
+      const pct = c.weight||0;
+      return `<div class="raise p-3"><div class="flex items-center justify-between gap-2">
+        <div class="font-semibold text-[13.5px]">${esc(c.name)}</div><span class="chip">${pct}%</span></div>
+        ${c.description?`<div class="muted text-[12.5px] mt-1">${esc(c.description)}</div>`:''}
+        ${(c.signals||[]).length?`<div class="text-[12px] mt-1">Dấu hiệu: ${c.signals.map(esc).join('; ')}</div>`:''}</div>`;
+    }).join('');
+    const reqs = (key,label,color)=> (cr[key]||[]).length?`<div class="mt-2"><div class="muted text-[12px] mb-1">${label}</div>
+      ${cr[key].map(x=>`<div class="text-[13px]" style="color:${color}">• ${esc(x)}</div>`).join('')}</div>`:'';
+    const cands = (p.candidates||[]).map(c=>{
+      const s=c.screening||{}; const m = s.match;
+      const badge = s.status==='running'?`<span class="chip"><span class="spin" style="width:12px;height:12px"></span> đang chấm</span>`
+        : s.status==='error'?`<span class="chip" style="color:rgb(var(--danger))">lỗi</span>`
+        : (m!=null?`<span class="chip" style="color:${matchColor(m)}">${m}% phù hợp</span>`
+        : c.has_cv?`<span class="chip muted">chưa chấm</span>`:`<span class="chip muted">chưa có CV</span>`);
+      const ev = c.evaluation?`<span class="chip" style="color:${REC_COLOR[c.evaluation.recommendation]||'var(--muted)'}">PV: ${esc(REC_VI[c.evaluation.recommendation]||'')}</span>`:'';
+      return `<a href="#/c/${c.id}" class="raise p-3 flex items-center justify-between gap-2 hover:brightness-110">
+        <div><div class="font-medium">${esc(c.name||'(chưa rõ tên)')}</div>${s.stale?'<div class="text-[11px]" style="color:rgb(var(--gold))">bản chấm đã cũ</div>':''}</div>
+        <div class="flex items-center gap-1.5">${ev}${badge}</div></a>`;
+    }).join('');
+    $('#pos',app).innerHTML = `
+      <div class="flex items-center justify-between gap-2 mb-3 flex-wrap">
+        <div class="text-lg font-semibold">${esc(p.title)}</div>
+        <div class="flex gap-2">${(p.candidates||[]).filter(c=>c.evaluation).length>=2?`<a class="btn btn-sm" href="#/p/${pid}/compare">So sánh ứng viên</a>`:''}
+          ${canEdit?`<button class="btn btn-sm" data-act="edit-pos">Sửa mô tả</button>`:''}</div>
+      </div>
+      <div class="grid md:grid-cols-2 gap-4">
+        <div class="panel p-4">
+          <div class="font-semibold mb-2">Mô tả & Yêu cầu</div>
+          <div class="muted text-[12px]">Job description</div><div class="md text-[13px] mb-2">${mdHtml(p.jd||'(trống)')}</div>
+          <div class="muted text-[12px]">Yêu cầu</div><div class="md text-[13px] mb-2">${mdHtml(p.requirements||'(trống)')}</div>
+          ${p.background?`<div class="muted text-[12px]">Bối cảnh</div><div class="md text-[13px]">${mdHtml(p.background)}</div>`:''}
+        </div>
+        <div class="panel p-4">
+          <div class="flex items-center justify-between mb-2"><div class="font-semibold">Tiêu chí đánh giá ${cr.source?`<span class="chip">${cr.source==='hr'?'HR':'AI'}</span>`:''}</div></div>
+          ${canEdit?`<div class="flex flex-wrap gap-2 mb-3">
+            <button class="btn btn-sm" data-act="build">✨ AI đề xuất từ JD</button>
+            <button class="btn btn-sm" data-act="import">⬆ Nhập tiêu chí HR</button>
+            <button class="btn btn-sm" data-act="upload-jd">⬆ Tải JD</button>
+          </div>`:''}
+          <div id="critjob"></div>
+          <div class="grid gap-2">${rubric || '<div class="muted text-[13px]">Chưa có tiêu chí. '+(canEdit?'Bấm “AI đề xuất” hoặc “Nhập tiêu chí HR”.':'')+'</div>'}</div>
+          ${reqs('must_have','Yêu cầu bắt buộc','rgb(var(--ink))')}
+          ${reqs('nice_to_have','Cộng điểm','rgb(var(--muted))')}
+        </div>
+      </div>
+      <div class="panel p-4 mt-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="font-semibold">Ứng viên <span class="muted text-[13px]">(${(p.candidates||[]).length})</span></div>
+          <div class="flex gap-2">${canEdit&&(p.rubric||[]).length?`<button class="btn btn-sm" data-act="screen-all">Chấm CV còn thiếu</button>`:''}
+            ${canEdit?`<button class="btn btn-accent btn-sm" data-act="add-cand">＋ Thêm ứng viên</button>`:''}</div>
+        </div>
+        <div class="grid sm:grid-cols-2 gap-2">${cands || '<div class="muted text-[13px]">Chưa có ứng viên.</div>'}</div>
+      </div>`;
+    const job=p.criteria_job;
+    if(job) $('#critjob',app).innerHTML = job.status==='running'
+      ? `<div class="raise p-2 mb-2 text-[13px] flex items-center gap-2"><span class="spin"></span> AI đang ${job.kind==='import'?'đọc tiêu chí HR':'dựng khung tiêu chí'}…</div>`
+      : job.status==='error'?`<div class="raise p-2 mb-2 text-[13px]" style="color:rgb(var(--danger))">Lỗi: ${esc(job.error||'')}</div>`:'';
+    const on=(a,fn)=>{ const b=$(`[data-act=${a}]`,app); if(b) b.onclick=fn; };
+    on('edit-pos', ()=>editPosition(p, refresh));
+    on('build', ()=>doBuild(pid, refresh));
+    on('import', ()=>doImportCriteria(pid, refresh));
+    on('upload-jd', ()=>doUploadJD(pid, refresh));
+    on('add-cand', ()=>addCandidate(pid, refresh));
+    on('screen-all', async()=>{ try{ const r=await api('/api/interview/positions/'+pid+'/screen?scope=stale',{method:'POST'}); toast('Đang chấm '+r.started+' CV'); refresh(); }catch(e){ toast(e.message,1);} });
+  }
+  function editPosition(p, refresh){
+    const f=openForm(`<h3 class="text-lg font-semibold mb-3">Sửa mô tả vị trí</h3>
+      <label class="muted text-[12px]">Tên</label><input id="e-title" class="input mt-1 mb-2" value="${esc(p.title)}">
+      <label class="muted text-[12px]">Job description</label><textarea id="e-jd" class="input mt-1 mb-2" rows="5">${esc(p.jd||'')}</textarea>
+      <label class="muted text-[12px]">Yêu cầu</label><textarea id="e-req" class="input mt-1 mb-2" rows="4">${esc(p.requirements||'')}</textarea>
+      <label class="muted text-[12px]">Bối cảnh / lý do tuyển</label><textarea id="e-bg" class="input mt-1 mb-2" rows="2">${esc(p.background||'')}</textarea>
+      <label class="muted text-[12px]">Người phỏng vấn (email, cách nhau bằng dấu phẩy)</label>
+      <input id="e-mem" class="input mt-1" value="${esc((p.members||[]).join(', '))}">
+      <div class="flex justify-end gap-2 mt-4"><button class="btn" data-x>Huỷ</button><button class="btn btn-accent" data-ok>Lưu</button></div>`);
+    f.on(async()=>{ const body={ title:f.val('#e-title').trim(), jd:f.val('#e-jd'), requirements:f.val('#e-req'),
+        background:f.val('#e-bg'), members:f.val('#e-mem').split(',').map(s=>s.trim()).filter(Boolean) };
+      try{ await api('/api/interview/positions/'+p.id,{method:'PUT',body}); f.close(); refresh(); }catch(e){ toast(e.message,1);} });
+  }
+  async function doBuild(pid, refresh){
+    try{ await api('/api/interview/positions/'+pid+'/build',{method:'POST'}); toast('AI đang dựng khung tiêu chí…'); refresh(); }
+    catch(e){ toast(e.message,1); }
+  }
+  async function doImportCriteria(pid, refresh){
+    const f=await pickFile('.pdf,.docx,.xlsx,.txt,.md,.csv,image/*'); if(!f) return;
+    try{ const data=await readFileB64(await shrinkImageIfBig(f));
+      await api('/api/interview/positions/'+pid+'/criteria',{method:'POST',body:{filename:f.name,data}});
+      toast('AI đang đọc tiêu chí HR…'); refresh(); }catch(e){ toast(e.message,1); }
+  }
+  async function doUploadJD(pid, refresh){
+    const f=await pickFile('.pdf,.docx,.xlsx,.txt,.md,image/*'); if(!f) return;
+    toast('Đang đọc JD…');
+    try{ const data=await readFileB64(await shrinkImageIfBig(f));
+      const out=await api('/api/interview/extract',{method:'POST',body:{kind:'jd',filename:f.name,data}});
+      await api('/api/interview/positions/'+pid,{method:'PUT',body:{title:out.title||undefined,jd:out.jd,requirements:out.requirements}});
+      toast('Đã điền JD từ file'); refresh(); }catch(e){ toast(e.message,1); }
+  }
+  function addCandidate(pid, refresh){
+    const f=openForm(`<h3 class="text-lg font-semibold mb-3">Thêm ứng viên</h3>
+      <div class="flex gap-2 mb-2"><button class="btn btn-sm" data-cv-file>⬆ Tải CV (PDF/ảnh/docx)</button><span id="cvname" class="muted text-[12px] self-center"></span></div>
+      <label class="muted text-[12px]">Tên ứng viên</label><input id="c-name" class="input mt-1 mb-2">
+      <label class="muted text-[12px]">CV (dán hoặc tải file ở trên)</label><textarea id="c-cv" class="input mt-1 mb-2" rows="7" placeholder="Nội dung CV…"></textarea>
+      <label class="muted text-[12px]">Ghi chú của HR (không bắt buộc)</label><textarea id="c-notes" class="input mt-1" rows="2"></textarea>
+      <div class="flex justify-end gap-2 mt-4"><button class="btn" data-x>Huỷ</button><button class="btn btn-accent" data-ok>Thêm & chấm CV</button></div>`);
+    f.on(async()=>{ const body={ name:f.val('#c-name').trim(), cv:f.val('#c-cv'), notes:f.val('#c-notes') };
+      if(!body.cv.trim()){ toast('Dán hoặc tải CV',1); return; }
+      try{ const c=await api('/api/interview/positions/'+pid+'/candidates',{method:'POST',body}); f.close(); go('/c/'+c.id); }catch(e){ toast(e.message,1); } });
+  }
+  // gắn nút tải CV trong modal "Thêm ứng viên" (modalForm mở xong mới có DOM)
+  document.addEventListener('click', async e=>{
+    const t=e.target.closest&&e.target.closest('[data-cv-file]'); if(!t) return;
+    const root=t.closest('.modal-bg'); const f=await pickFile('.pdf,.docx,image/*,.txt'); if(!f) return;
+    $('#cvname',root).textContent='Đang đọc '+f.name+'…';
+    try{ const data=await readFileB64(await shrinkImageIfBig(f));
+      const out=await api('/api/interview/extract',{method:'POST',body:{kind:'cv',filename:f.name,data}});
+      if(out.name && !$('#c-name',root).value) $('#c-name',root).value=out.name;
+      $('#c-cv',root).value=out.cv||''; $('#cvname',root).textContent='Đã đọc '+f.name;
+    }catch(err){ $('#cvname',root).textContent=''; toast(err.message,1); }
+  });
+
+  /* ---------------- chi tiết ứng viên ---------------- */
+  async function viewCandidate(app, cid){
+    app.innerHTML = header('Ứng viên') + `<div id="c"><div class="muted flex items-center gap-2"><span class="spin"></span> Đang tải…</div></div>`;
+    async function refresh(){
+      const c = await api('/api/interview/candidates/'+cid);
+      renderCand(app, c, refresh);
+      if (c.screening && c.screening.status==='running'){ stopPoll();
+        poller=setInterval(()=>api('/api/interview/candidates/'+cid).then(nc=>{ if(!(nc.screening&&nc.screening.status==='running')){stopPoll();} renderCand(app,nc,refresh); }).catch(()=>{}),3000); }
+    }
+    await refresh();
+  }
+  function renderCand(app, c, refresh){
+    const canEdit = ME.can_configure;      // chi tiết đã qua kiểm quyền server; nút sửa chỉ cho owner/admin
+    const s=c.screening||{}; const r=s.result;
+    const crit = r? (r.criteria||[]).map(x=>`<tr><td>${esc(x.name)}</td>
+        <td><span class="scoredot" style="background:${scoreColor(x.score)};color:#1b1030">${x.score||'–'}</span></td>
+        <td>${esc(x.assessment||'')}${(x.evidence||[]).length?`<div class="muted text-[11.5px] mt-1">${x.evidence.map(e=>'“'+esc(e)+'”').join(' · ')}</div>`:''}</td></tr>`).join(''):'';
+    const reqRows = (key,label)=> (r&&(r[key]||[]).length)?`<div class="mt-2"><div class="muted text-[12px] mb-1">${label}</div>
+      ${r[key].map(x=>`<div class="text-[13px]">• ${esc(x.requirement)} — <b style="color:${x.status==='met'?'var(--ok)':x.status==='not_met'?'var(--danger)':'var(--gold)'}">${REQ_VI[x.status]||'?'}</b>${x.note?` <span class="muted">(${esc(x.note)})</span>`:''}</div>`).join('')}</div>`:'';
+    const list=(title,arr,color)=> (arr&&arr.length)?`<div class="mt-2"><div class="muted text-[12px]">${title}</div>${arr.map(x=>`<div class="text-[13px]" style="color:${color||'inherit'}">• ${esc(x)}</div>`).join('')}</div>`:'';
+    $('#c',app).innerHTML = `
+      <div class="flex items-center justify-between gap-2 mb-3 flex-wrap">
+        <div><div class="text-lg font-semibold">${esc(c.name||'(chưa rõ tên)')}</div>
+          <a class="text-[12.5px]" href="#/p/${c.position_id}">← về vị trí</a></div>
+        <div class="flex gap-2">
+          ${canEdit?`<button class="btn btn-sm" data-act="rescreen">Chấm lại CV</button>`:''}
+          ${canEdit?`<button class="btn btn-sm" data-act="edit-cv">Sửa CV</button>`:''}
+          <button class="btn btn-accent btn-sm" data-act="start">▶ Bắt đầu phỏng vấn</button>
+        </div>
+      </div>
+      <div class="grid md:grid-cols-2 gap-4">
+        <div class="panel p-4">
+          <div class="font-semibold mb-2">Kết quả sàng lọc CV</div>
+          ${s.status==='running'?`<div class="flex items-center gap-2 muted"><span class="spin"></span> Đang chấm…</div>`:''}
+          ${s.status==='error'?`<div style="color:rgb(var(--danger))">Lỗi: ${esc(s.error||'')}</div>`:''}
+          ${r?`<div class="flex items-center gap-3 mb-2">
+              <div class="text-2xl font-bold" style="color:${matchColor(s.match)}">${s.match!=null?s.match+'%':'–'}</div>
+              <div><div class="chip" style="color:${REC_COLOR[r.recommendation]||'var(--muted)'}">${REC_VI[r.recommendation]||r.recommendation}</div>
+              <div class="muted text-[11.5px] mt-1">đánh giá được ${s.coverage||0}% tỷ trọng${s.stale?' · bản cũ':''}</div></div></div>
+            <div class="bar mb-2"><i style="width:${s.match||0}%"></i></div>
+            <div class="md text-[13px]">${mdHtml(r.summary||'')}</div>
+            ${list('Điểm mạnh', r.strengths,'var(--ok)')}
+            ${list('Khoảng trống', r.gaps,'var(--gold)')}
+            ${list('Điểm đáng ngờ', r.red_flags,'var(--danger)')}`
+          : s.status!=='running'&&s.status!=='error'?`<div class="muted text-[13px]">Chưa chấm. ${canEdit?'Bấm “Chấm lại CV”.':''}</div>`:''}
+        </div>
+        <div class="panel p-4">
+          <div class="font-semibold mb-2">CV</div>
+          <div class="md text-[12.5px]" style="max-height:420px;overflow:auto;white-space:pre-wrap">${esc(c.cv||'(không có)')}</div>
+          ${c.notes?`<div class="muted text-[12px] mt-2">Ghi chú HR: ${esc(c.notes)}</div>`:''}
+        </div>
+      </div>
+      ${r?`<div class="panel p-4 mt-4"><div class="font-semibold mb-2">Chấm theo tiêu chí</div>
+        <table class="grid"><thead><tr><th>Tiêu chí</th><th>Điểm</th><th>Nhận xét</th></tr></thead><tbody>${crit}</tbody></table>
+        ${reqRows('must_have','Yêu cầu bắt buộc')}${reqRows('nice_to_have','Cộng điểm')}
+        ${list('Câu hỏi nên hỏi khi phỏng vấn', r.questions)}</div>`:''}`;
+    const on=(a,fn)=>{ const b=$(`[data-act=${a}]`,app); if(b) b.onclick=fn; };
+    on('rescreen', async()=>{ try{ await api('/api/interview/candidates/'+c.id+'/screen',{method:'POST'}); toast('Đang chấm lại…'); refresh(); }catch(e){ toast(e.message,1);} });
+    on('edit-cv', ()=>editCv(c, refresh));
+    on('start', async()=>{ try{ const sess=await api('/api/interview/sessions',{method:'POST',body:{candidate_id:c.id}}); go('/s/'+sess.id); }catch(e){ toast(e.message,1);} });
+  }
+  function editCv(c, refresh){
+    const f=openForm(`<h3 class="text-lg font-semibold mb-3">Sửa ứng viên</h3>
+      <label class="muted text-[12px]">Tên</label><input id="e-name" class="input mt-1 mb-2" value="${esc(c.name||'')}">
+      <label class="muted text-[12px]">CV</label><textarea id="e-cv" class="input mt-1 mb-2" rows="9">${esc(c.cv||'')}</textarea>
+      <label class="muted text-[12px]">Ghi chú</label><textarea id="e-notes" class="input mt-1" rows="2">${esc(c.notes||'')}</textarea>
+      <div class="flex justify-end gap-2 mt-4"><button class="btn" data-x>Huỷ</button><button class="btn btn-accent" data-ok>Lưu & chấm lại</button></div>`);
+    f.on(async()=>{ try{ await api('/api/interview/candidates/'+c.id,{method:'PUT',body:{name:f.val('#e-name').trim(),cv:f.val('#e-cv'),notes:f.val('#e-notes')}}); f.close(); refresh(); }catch(e){ toast(e.message,1); } });
+  }
+
+  /* ---------------- buổi phỏng vấn ---------------- */
+  async function viewSession(app, sid){
+    app.innerHTML = header('Buổi phỏng vấn') + `<div id="s"><div class="muted flex items-center gap-2"><span class="spin"></span> Đang tải…</div></div>`;
+    let lastAssist=null;
+    async function refresh(){
+      const s = await api('/api/interview/sessions/'+sid);
+      renderSession(app, s, sid, refresh, lastAssist);
+      if (s.status==='live'){ stopPoll(); poller=setInterval(()=>api('/api/interview/sessions/'+sid).then(ns=>{ if(ns.status!=='live') stopPoll(); renderSessionTranscript(app, ns); }).catch(()=>{}),3000); }
+    }
+    window._setAssist=(a)=>{ lastAssist=a; };
+    await refresh();
+  }
+  function transcriptHtml(s){
+    const segs=s.transcript||[];
+    if(!segs.length) return `<div class="muted text-[13px]">Chưa có lời thoại. Bật extension “UrBox Interview” trong tab cuộc gọi để thu (mic = người phỏng vấn, tiếng tab = ứng viên).</div>`;
+    return segs.map(x=>{ const role=x.role==='interviewer'?'NPV':x.role==='candidate'?'Ứng viên':'?';
+      const col=x.role==='candidate'?'var(--accent)':'var(--muted)';
+      return `<div class="mb-1.5"><span class="text-[11px] font-semibold" style="color:${col}">${role}</span> <span class="text-[13px]">${esc(x.text)}</span></div>`; }).join('');
+  }
+  function renderSessionTranscript(app, s){ const el=$('#transcript',app); if(el) el.innerHTML=transcriptHtml(s); }
+  function renderSession(app, s, sid, refresh, lastAssist){
+    const c=s.candidate||{}; const ev=s.evaluation;
+    $('#s',app).innerHTML=`
+      <div class="flex items-center justify-between gap-2 mb-3 flex-wrap">
+        <div><div class="text-lg font-semibold">${esc(c.name||'Ứng viên')}</div>
+          <a class="text-[12.5px]" href="#/c/${s.candidate_id}">← hồ sơ ứng viên</a>
+          <span class="chip ml-2" style="color:${s.status==='live'?'var(--gold)':'var(--muted)'}">${s.status==='live'?'● đang diễn ra':'đã kết thúc'}</span></div>
+        <div class="flex gap-2">
+          <button class="btn btn-sm" data-act="assist">💡 Gợi ý câu hỏi</button>
+          ${s.status==='live'?`<button class="btn btn-accent btn-sm" data-act="end">■ Kết thúc & chấm</button>`:`<button class="btn btn-sm" data-act="reeval">Chấm lại</button>`}
+        </div>
+      </div>
+      <div class="grid md:grid-cols-2 gap-4">
+        <div class="panel p-4"><div class="font-semibold mb-2">Lời thoại</div><div id="transcript" style="max-height:60vh;overflow:auto">${transcriptHtml(s)}</div></div>
+        <div class="panel p-4"><div class="font-semibold mb-2">Gợi ý của trợ lý</div><div id="assist">${lastAssist?assistHtml(lastAssist):'<div class="muted text-[13px]">Bấm “Gợi ý câu hỏi” để trợ lý đọc câu trả lời gần nhất và đề xuất câu hỏi tiếp theo.</div>'}</div></div>
+      </div>
+      ${ev?evalHtml(ev):''}
+      <div class="panel p-4 mt-4"><div class="muted text-[12px]">Mã buổi để nối extension: <code>${sid}</code> · token: <code style="word-break:break-all">${esc(s.token||'')}</code></div></div>`;
+    const on=(a,fn)=>{ const b=$(`[data-act=${a}]`,app); if(b) b.onclick=fn; };
+    on('assist', async(e)=>{ const btn=e.target.closest('button'); btn.disabled=true; btn.innerHTML='<span class="spin"></span> Đang nghĩ…';
+      try{ const a=await api('/api/interview/sessions/'+sid+'/assist',{method:'POST',body:{}}); window._setAssist(a); $('#assist',app).innerHTML=assistHtml(a); }
+      catch(err){ toast(err.message,1); } finally{ btn.disabled=false; btn.innerHTML='💡 Gợi ý câu hỏi'; } });
+    on('end', async(e)=>{ if(!confirm('Kết thúc buổi và chấm điểm?')) return; const btn=e.target.closest('button'); btn.disabled=true; btn.innerHTML='<span class="spin"></span> Đang chấm…';
+      try{ await api('/api/interview/sessions/'+sid+'/end?evaluate=true',{method:'POST'}); toast('Đã chấm xong'); refresh(); }catch(err){ toast(err.message,1); btn.disabled=false; btn.innerHTML='■ Kết thúc & chấm'; } });
+    on('reeval', async(e)=>{ const btn=e.target.closest('button'); btn.disabled=true; btn.innerHTML='<span class="spin"></span> Đang chấm…';
+      try{ await api('/api/interview/sessions/'+sid+'/evaluate',{method:'POST'}); refresh(); }catch(err){ toast(err.message,1); btn.disabled=false; btn.innerHTML='Chấm lại'; } });
+  }
+  function assistHtml(a){
+    const fu=(a.follow_ups||[]).map(f=>`<div class="raise p-2.5 mb-2"><div class="font-medium text-[13.5px]">${esc(f.question)}</div>
+      <div class="muted text-[11.5px] mt-1">${esc(f.why||'')}${f.competency?' · '+esc(f.competency):''}</div>
+      ${f.based_on&&f.based_on!=='(chưa đề cập)'?`<div class="text-[11.5px] mt-1" style="color:var(--accent)">“${esc(f.based_on)}”</div>`:''}</div>`).join('');
+    const l=(t,arr,c)=> (arr&&arr.length)?`<div class="mt-1"><span class="muted text-[12px]">${t}:</span> <span class="text-[12.5px]" style="color:${c||'inherit'}">${arr.map(esc).join('; ')}</span></div>`:'';
+    return `${a.last_answer_summary?`<div class="muted text-[12.5px] mb-2">Vừa rồi: ${esc(a.last_answer_summary)}</div>`:''}${fu||'<div class="muted text-[13px]">(không có đề xuất)</div>'}
+      ${l('Chỗ mơ hồ', a.gaps,'var(--gold)')}${l('Red flags', a.red_flags,'var(--danger)')}${l('Chưa chạm tới', a.not_yet_covered)}`;
+  }
+  function evalHtml(ev){
+    const comp=(ev.competencies||[]).map(c=>`<tr><td>${esc(c.name)}</td>
+      <td><span class="scoredot" style="background:${scoreColor(c.score)};color:#1b1030">${c.score||'–'}</span></td>
+      <td>${esc(c.assessment||'')}${c.cv_check?`<div class="muted text-[11.5px] mt-1">CV: ${esc(c.cv_check)}</div>`:''}</td></tr>`).join('');
+    const l=(t,arr,c)=> (arr&&arr.length)?`<div class="mt-2"><div class="muted text-[12px]">${t}</div>${arr.map(x=>`<div class="text-[13px]" style="color:${c||'inherit'}">• ${esc(x)}</div>`).join('')}</div>`:'';
+    const m=ev.match||{};
+    return `<div class="panel p-4 mt-4"><div class="flex items-center justify-between flex-wrap gap-2 mb-2">
+        <div class="font-semibold">Đánh giá sau phỏng vấn</div>
+        <div class="flex items-center gap-3">
+          <div class="text-right"><div class="text-2xl font-bold" style="color:${matchColor(m.final)}">${m.final!=null?m.final+'%':'–'}</div><div class="muted text-[11px]">phù hợp</div></div>
+          <div class="chip" style="color:${REC_COLOR[ev.recommendation]||'var(--muted)'}">${REC_VI[ev.recommendation]||ev.recommendation}</div>
+          <div class="chip">Điểm ${ev.overall_score!=null?ev.overall_score:'–'}/5</div></div></div>
+      <div class="md text-[13.5px] mb-2">${esc(ev.headline||'')}</div>
+      <table class="grid"><thead><tr><th>Tiêu chí</th><th>Điểm</th><th>Nhận xét</th></tr></thead><tbody>${comp}</tbody></table>
+      ${l('Điểm mạnh', ev.strengths,'var(--ok)')}${l('Lo ngại', ev.concerns,'var(--gold)')}${l('Red flags', ev.red_flags,'var(--danger)')}
+      ${l('Câu chưa được làm rõ', ev.unanswered)}
+      ${ev.interviewer_feedback?`<div class="mt-2 raise p-2.5 text-[13px]"><b>Góp ý cho người phỏng vấn:</b> ${esc(ev.interviewer_feedback)}</div>`:''}</div>`;
+  }
+
+  /* ---------------- so sánh ---------------- */
+  async function viewCompare(app, pid){
+    app.innerHTML = header('So sánh') + `<div id="cmp"><div class="muted flex items-center gap-2"><span class="spin"></span> Đang so sánh…</div></div>`;
+    let d; try{ d=await api('/api/interview/positions/'+pid+'/compare'); }catch(e){ $('#cmp',app).innerHTML=`<div class="panel p-4" style="color:rgb(var(--danger))">${esc(e.message)}</div>`; return; }
+    const n=d.candidates;
+    const head=`<tr><th>Tiêu chí</th>${n.map(x=>`<th>${esc(x)}</th>`).join('')}</tr>`;
+    const rows=d.matrix.map(r=>`<tr><td>${esc(r.competency)}</td>${n.map(x=>{ const sc=r.scores[x]; return `<td style="text-align:center"><span class="scoredot" style="background:${scoreColor(sc)};color:#1b1030">${sc||'–'}</span></td>`; }).join('')}</tr>`).join('');
+    const overall=`<tr><td class="font-semibold">Phù hợp</td>${n.map(x=>{ const o=d.overall[x]||{}; return `<td style="text-align:center;font-weight:700;color:${matchColor(o.match)}">${o.match!=null?o.match+'%':'–'}</td>`; }).join('')}</tr>`;
+    const narr=d.narrative||{};
+    const ranking=(narr.ranking||[]).map(r=>`<div class="raise p-3 mb-2"><div class="flex items-center gap-2"><span class="chip">#${r.rank}</span><b>${esc(r.candidate)}</b></div>
+      <div class="text-[13px] mt-1">${esc(r.rationale||'')}</div>
+      ${(r.best_at||[]).length?`<div class="text-[12px] mt-1" style="color:var(--ok)">Mạnh: ${r.best_at.map(esc).join('; ')}</div>`:''}
+      ${(r.weakest_at||[]).length?`<div class="text-[12px]" style="color:var(--gold)">Yếu: ${r.weakest_at.map(esc).join('; ')}</div>`:''}</div>`).join('');
+    const l=(t,arr,c)=> (arr&&arr.length)?`<div class="mt-2"><div class="muted text-[12px]">${t}</div>${arr.map(x=>`<div class="text-[13px]" style="color:${c||'inherit'}">• ${esc(x)}</div>`).join('')}</div>`:'';
+    $('#cmp',app).innerHTML=`
+      <div class="flex items-center justify-between mb-3"><div class="text-lg font-semibold">So sánh ${esc(d.position.title)}</div>
+        <div class="flex gap-2"><a class="btn btn-sm" href="#/p/${pid}">← về vị trí</a><button class="btn btn-sm" data-act="refresh">Làm mới</button></div></div>
+      <div class="panel p-4 overflow-auto"><table class="grid"><thead>${head}</thead><tbody>${rows}${overall}</tbody></table></div>
+      <div class="grid md:grid-cols-2 gap-4 mt-4">
+        <div class="panel p-4"><div class="font-semibold mb-2">Xếp hạng</div>${ranking}</div>
+        <div class="panel p-4"><div class="font-semibold mb-2">Khuyến nghị</div>
+          <div class="md text-[13.5px]">${mdHtml(narr.recommendation||'')}</div>
+          ${l('Rủi ro quyết định', narr.decision_risks,'var(--gold)')}${l('Đánh đổi', narr.tradeoffs)}</div>
+      </div>`;
+    const rb=$('[data-act=refresh]',app); if(rb) rb.onclick=async()=>{ rb.disabled=true; try{ await api('/api/interview/positions/'+pid+'/compare?refresh=true'); viewCompare(app,pid); }catch(e){ toast(e.message,1); rb.disabled=false; } };
+  }
+
+  /* ---------------- quản trị vai trò ---------------- */
+  async function viewAdmin(app){
+    if(!ME.admin){ go('/'); return; }
+    app.innerHTML = header('Quản trị') + `<div id="adm"><div class="muted flex items-center gap-2"><span class="spin"></span> Đang tải…</div></div>`;
+    async function refresh(){
+      const d=await api('/api/interview/people');
+      const rows=(d.people||[]).map(p=>`<tr><td>${esc(p.name)}<div class="muted text-[11.5px]">${esc(p.email)}</div></td>
+        <td><span class="chip" style="color:${p.role==='admin'?'var(--accent)':p.role==='owner'?'var(--ok)':'var(--muted)'}">${p.role==='admin'?'Admin':p.role==='owner'?'Owner':'Người phỏng vấn'}</span></td>
+        <td style="text-align:right">${p.role==='admin'?'<span class="muted text-[12px]">cố định</span>':
+          p.role==='owner'?`<button class="btn btn-sm" data-role="user" data-email="${esc(p.email)}">Gỡ owner</button>`
+          :`<button class="btn btn-accent btn-sm" data-role="owner" data-email="${esc(p.email)}">Cấp owner</button>`}</td></tr>`).join('');
+      $('#adm',app).innerHTML=`<div class="panel p-4">
+        <div class="font-semibold mb-1">Phân quyền phỏng vấn</div>
+        <div class="muted text-[12.5px] mb-3">Owner tạo được vị trí, đặt tiêu chí, chấm CV. Người phỏng vấn (mặc định) chỉ xem vị trí được giao và chạy buổi phỏng vấn.</div>
+        <table class="grid"><thead><tr><th>Người dùng</th><th>Vai trò</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=3 class="muted">Chưa có người dùng nào.</td></tr>'}</tbody></table></div>`;
+      app.querySelectorAll('[data-role]').forEach(b=>b.onclick=async()=>{ b.disabled=true;
+        try{ await api('/api/interview/role',{method:'POST',body:{email:b.dataset.email,role:b.dataset.role}}); refresh(); }catch(e){ toast(e.message,1); b.disabled=false; } });
+    }
+    await refresh();
+  }
+
+  /* ================================ BOOT ================================ */
+  (async()=>{
+    await bootAuth();
+    try { ME = await api('/api/interview/me'); } catch(e){ /* vẫn render, server sẽ chặn theo quyền */ }
+    if (!location.hash) location.hash='#/';
+    route();
+  })();
+  </script>
+</body>
+</html>

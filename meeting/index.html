@@ -5832,7 +5832,11 @@ function openSettings() {
   const tplSec = `<div class="mb-5 pb-4 border-b divider"><div class="flex items-center justify-between gap-2"><h4 class="font-semibold">Mẫu biên bản</h4>
       <button type="button" class="btn btn-ghost btn-sm" data-act="tpl-manage">Quản lý mẫu</button></div>
       <p class="text-[12.5px] text-muted mt-1">Biên bản là bản recap của cuộc họp. Tạo mẫu cho từng loại họp (daily, họp khách, phỏng vấn...), đặt mặc định cho nhóm hoặc cả công ty.</p></div>`;
-  openModal(`${acct}${gdrive}${wiki}${tplSec}${myllm}
+  const interviewSec = `<div class="mb-5 pb-4 border-b divider"><div class="flex items-center justify-between gap-2">
+      <div><h4 class="font-semibold">Chế độ Phỏng vấn</h4>
+      <p class="text-[12.5px] text-muted mt-0.5">Tuyển dụng: tải JD, đặt tiêu chí, chấm CV theo tiêu chí, phỏng vấn trực tiếp và chấm điểm ứng viên.</p></div>
+      <a href="/interview" class="btn btn-primary btn-sm" style="white-space:nowrap">Mở Interview →</a></div></div>`;
+  openModal(`${interviewSec}${acct}${gdrive}${wiki}${tplSec}${myllm}
     <h3 class="text-lg font-semibold mb-1">Cài đặt trợ lý</h3>
     <p class="text-muted text-[13px] mb-4">Đặt tên để gọi trợ lý trong cuộc họp thay cho "Jarvis".</p>
     <form id="as-form" class="flex flex-col gap-4">
