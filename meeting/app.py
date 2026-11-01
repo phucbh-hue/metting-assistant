@@ -89,7 +89,7 @@ async def lifespan(_app: FastAPI):
     db.flush()                  # lưu trên máy: ghi nốt phần còn chờ trước khi tắt
 
 
-APP_VERSION = "3.24.0"              # dấu hiệu phiên bản ở /healthz để kiểm tra bản mới đã lên server chưa (giữ khớp package.json)
+APP_VERSION = "3.24.1"              # dấu hiệu phiên bản ở /healthz để kiểm tra bản mới đã lên server chưa (giữ khớp package.json)
 app = FastAPI(title="Meeting Assistant AI", version=APP_VERSION, lifespan=lifespan)
 _MEETING_PATH = re.compile(r"^/(?:api/meetings|ws/meeting)/(\d+)(?:/|$)")
 _ARTIFACT_PATH = re.compile(r"^/api/artifacts/(\d+)(?:/|$)")
@@ -2878,6 +2878,33 @@ async def ws_tab(ws: WebSocket, mid: int):
             if st is not None and not st.closed:
                 await st.pause()
         log.info("meeting.app: extension ngắt thu tiếng tab cho cuộc họp %d", mid)
+
+
+@app.websocket("/ws/interview/{sid}/ext")
+async def ws_interview(ws: WebSocket, sid: int, stream: str = "tab", token: str = ""):
+    """Extension phỏng vấn gửi PCM16 16kHz: stream=mic (người phỏng vấn) hoặc tab (ứng viên qua Meet/Zoom/Teams).
+    Xác thực bằng token riêng của buổi (?token=), không dùng bearer của người dùng (ws không gắn header được)."""
+    from meeting import interview_live
+    await ws.accept()
+    s = await asyncio.to_thread(interview.get_session, sid)
+    if not s or not token or token != s.get("token"):
+        await ws.close(code=4401)
+        return
+    if s.get("status") != "live":
+        try:
+            await ws.send_json({"type": "error", "text": "Buổi phỏng vấn đã kết thúc."})
+        except Exception:
+            pass
+        await ws.close(code=4003)
+        return
+    if stream not in ("mic", "tab"):
+        stream = "tab"
+    try:
+        await ws.send_json({"type": "ready", "session_id": sid, "stream": stream})
+    except Exception:
+        return
+    log.info("meeting.app: extension phỏng vấn nối buổi %d luồng %s", sid, stream)
+    await interview_live.serve_ws(ws, sid, stream)
 
 
 @app.websocket("/ws/meeting/{mid}/bd")
