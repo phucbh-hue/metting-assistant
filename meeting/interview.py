@@ -564,12 +564,24 @@ async def compare_candidates(pid: int, refresh: bool = False) -> dict:
     p = await asyncio.to_thread(get_position, pid)
     if not p:
         raise RuntimeError("Không tìm thấy vị trí")
-    sessions = await asyncio.to_thread(evaluated_sessions, pid)
+    allsess = await asyncio.to_thread(evaluated_sessions, pid)   # ended_at desc
+    sessions, seen = [], set()                                   # mỗi ỨNG VIÊN chỉ lấy buổi chấm mới nhất
+    for s in allsess:
+        if s["candidate_id"] in seen:
+            continue
+        seen.add(s["candidate_id"])
+        sessions.append(s)
     if len(sessions) < 2:
         raise RuntimeError(f"Cần ít nhất 2 ứng viên đã có đánh giá (hiện có {len(sessions)})")
     for s in sessions:
         s["evaluation"] = decorate_eval(s["evaluation"], p)
-    names = [s["candidate_name"] for s in sessions]
+    # Cột khóa theo candidate_id (tên có thể trùng -> trước đây gộp nhầm cột). Tên trùng thì thêm hậu tố.
+    cols, used_names = [], {}
+    for s in sessions:
+        nm = s["candidate_name"]
+        used_names[nm] = used_names.get(nm, 0) + 1
+        disp = nm if used_names[nm] == 1 else f"{nm} ({used_names[nm]})"
+        cols.append({"key": str(s["candidate_id"]), "name": disp})
     comps = [c["name"] for c in (p.get("rubric") or [])] or sorted(
         {c["name"] for s in sessions for c in s["evaluation"].get("competencies", [])})
     matrix = []
@@ -578,13 +590,13 @@ async def compare_candidates(pid: int, refresh: bool = False) -> dict:
         for s in sessions:
             sc = next((c["score"] for c in s["evaluation"].get("competencies", [])
                        if L.norm_name(c["name"]) == L.norm_name(cn)), None)
-            rowd["scores"][s["candidate_name"]] = sc
+            rowd["scores"][str(s["candidate_id"])] = sc
         matrix.append(rowd)
     overall = {}
     for s in sessions:
         ev = s["evaluation"]
         m = ev.get("match") or {}
-        overall[s["candidate_name"]] = {
+        overall[str(s["candidate_id"])] = {
             "score": ev.get("overall_score"), "recommendation": ev.get("recommendation"),
             "headline": ev.get("headline"), "session_id": s["id"], "candidate_id": s["candidate_id"],
             "match": m.get("final"), "cv_match": (m.get("cv") or {}).get("match"),
@@ -597,11 +609,12 @@ async def compare_candidates(pid: int, refresh: bool = False) -> dict:
     cache = p.get("compare_cache") or {}
     narrative = cache.get("narrative") if (not refresh and cache.get("key") == key) else None
     if narrative is None:
-        cmp = await L.compare(p, [{"candidate_name": s["candidate_name"], "evaluation": s["evaluation"]} for s in sessions])
+        cmp = await L.compare(p, [{"candidate_name": col["name"], "evaluation": s["evaluation"]}
+                                  for col, s in zip(cols, sessions)])
         narrative = cmp.model_dump()
         await asyncio.to_thread(lambda: _pos().update_one(
             {"id": int(pid)}, {"$set": {"compare_cache": {"key": key, "narrative": narrative, "at": time.time()}}}))
-    return {"position": {"id": pid, "title": p["title"]}, "candidates": names, "matrix": matrix,
+    return {"position": {"id": pid, "title": p["title"]}, "candidates": cols, "matrix": matrix,
             "overall": overall, "narrative": narrative}
 
 

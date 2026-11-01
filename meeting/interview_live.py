@@ -142,6 +142,7 @@ class RoomStream:
         self.buf = ""
         self.closed = False
         self.last_audio = time.monotonic()
+        self.on_seg = None            # callback đẩy câu vừa chốt về trình duyệt (hiện lời nói ngay)
 
     async def open(self):
         api_key = os.getenv("SONIOX_API_KEY", "")

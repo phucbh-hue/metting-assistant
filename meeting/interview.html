@@ -284,6 +284,14 @@
           ${canEdit?`<button class="btn btn-sm" data-act="edit-pos">Sửa mô tả</button>`:''}
           ${canEdit?`<button class="btn btn-sm" data-act="del-pos" style="color:rgb(var(--danger));border-color:rgba(255,107,107,.4)">Xoá vị trí</button>`:''}</div>
       </div>
+      <div class="panel p-4 mb-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="font-semibold">Ứng viên <span class="muted text-[13px]">(${(p.candidates||[]).length})</span></div>
+          <div class="flex gap-2">${canEdit&&(p.rubric||[]).length?`<button class="btn btn-sm" data-act="screen-all">Chấm CV còn thiếu</button>`:''}
+            ${canEdit?`<button class="btn btn-accent btn-sm" data-act="add-cand">＋ Thêm ứng viên</button>`:''}</div>
+        </div>
+        <div class="grid sm:grid-cols-2 gap-2">${cands || '<div class="muted text-[13px]">Chưa có ứng viên. Bấm “＋ Thêm ứng viên”.</div>'}</div>
+      </div>
       <div class="grid md:grid-cols-2 gap-4">
         <div class="panel p-4">
           <div class="font-semibold mb-2">Mô tả & Yêu cầu</div>
@@ -304,14 +312,6 @@
           ${reqs('must_have','Yêu cầu bắt buộc','rgb(var(--ink))')}
           ${reqs('nice_to_have','Cộng điểm','rgb(var(--muted))')}
         </div>
-      </div>
-      <div class="panel p-4 mt-4">
-        <div class="flex items-center justify-between mb-3">
-          <div class="font-semibold">Ứng viên <span class="muted text-[13px]">(${(p.candidates||[]).length})</span></div>
-          <div class="flex gap-2">${canEdit&&(p.rubric||[]).length?`<button class="btn btn-sm" data-act="screen-all">Chấm CV còn thiếu</button>`:''}
-            ${canEdit?`<button class="btn btn-accent btn-sm" data-act="add-cand">＋ Thêm ứng viên</button>`:''}</div>
-        </div>
-        <div class="grid sm:grid-cols-2 gap-2">${cands || '<div class="muted text-[13px]">Chưa có ứng viên.</div>'}</div>
       </div>`;
     const job=p.criteria_job;
     if(job) $('#critjob',app).innerHTML = job.status==='running'
@@ -659,10 +659,10 @@
   async function viewCompare(app, pid){
     app.innerHTML = header('So sánh', '#/p/'+pid) + `<div id="cmp"><div class="muted flex items-center gap-2"><span class="spin"></span> Đang so sánh…</div></div>`;
     let d; try{ d=await api('/api/interview/positions/'+pid+'/compare'); }catch(e){ $('#cmp',app).innerHTML=`<div class="panel p-4" style="color:rgb(var(--danger))">${esc(e.message)}</div>`; return; }
-    const n=d.candidates;
-    const head=`<tr><th>Tiêu chí</th>${n.map(x=>`<th>${esc(x)}</th>`).join('')}</tr>`;
-    const rows=d.matrix.map(r=>`<tr><td>${esc(r.competency)}</td>${n.map(x=>{ const sc=r.scores[x]; return `<td style="text-align:center"><span class="scoredot" style="background:${scoreColor(sc)};color:#1b1030">${sc||'–'}</span></td>`; }).join('')}</tr>`).join('');
-    const overall=`<tr><td class="font-semibold">Phù hợp</td>${n.map(x=>{ const o=d.overall[x]||{}; return `<td style="text-align:center;font-weight:700;color:${matchColor(o.match)}">${o.match!=null?o.match+'%':'–'}</td>`; }).join('')}</tr>`;
+    const n=d.candidates;   // [{key,name}] — khóa theo id ứng viên (tên trùng không còn gộp nhầm cột)
+    const head=`<tr><th style="position:sticky;left:0;background:rgb(var(--raise))">Tiêu chí</th>${n.map(x=>`<th>${esc(x.name)}</th>`).join('')}</tr>`;
+    const rows=d.matrix.map(r=>`<tr><td style="position:sticky;left:0;background:rgb(var(--panel))">${esc(r.competency)}</td>${n.map(x=>{ const sc=r.scores[x.key]; return `<td style="text-align:center"><span class="scoredot" style="background:${scoreColor(sc)};color:#1b1030">${sc||'–'}</span></td>`; }).join('')}</tr>`).join('');
+    const overall=`<tr><td class="font-semibold" style="position:sticky;left:0;background:rgb(var(--panel))">Phù hợp</td>${n.map(x=>{ const o=d.overall[x.key]||{}; return `<td style="text-align:center;font-weight:700;color:${matchColor(o.match)}">${o.match!=null?o.match+'%':'–'}</td>`; }).join('')}</tr>`;
     const narr=d.narrative||{};
     const ranking=(narr.ranking||[]).map(r=>`<div class="raise p-3 mb-2"><div class="flex items-center gap-2"><span class="chip">#${r.rank}</span><b>${esc(r.candidate)}</b></div>
       <div class="text-[13px] mt-1">${esc(r.rationale||'')}</div>
