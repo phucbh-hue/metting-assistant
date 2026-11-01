@@ -774,7 +774,7 @@ async function shareDialog(pid,members){
   $('shS').onclick=()=>busy('shS','đang lưu…',async()=>{
     const emails=[...ov.querySelectorAll('#shList input:checked')].map(x=>x.value);
     const r=await api(`/positions/${pid}/members`,{method:'PUT',body:{members:emails}});
-    toast(r.members.length?`Đã chia sẻ cho ${r.members.length} người`:'Đã bỏ chia sẻ với mọi người');close();route()})};
+    toast(r.members.length?`Đã chia sẻ cho ${r.members.length} người`:'Đã bỏ chia sẻ với mọi người');close();route()});
 }
 
 /* --------------------------------------------------------- candidate */
