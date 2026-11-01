@@ -281,7 +281,8 @@
       <div class="flex items-center justify-between gap-2 mb-3 flex-wrap">
         <div class="text-lg font-semibold">${esc(p.title)}</div>
         <div class="flex gap-2">${(p.candidates||[]).filter(c=>c.evaluation).length>=2?`<a class="btn btn-sm" href="#/p/${pid}/compare">So sánh ứng viên</a>`:''}
-          ${canEdit?`<button class="btn btn-sm" data-act="edit-pos">Sửa mô tả</button>`:''}</div>
+          ${canEdit?`<button class="btn btn-sm" data-act="edit-pos">Sửa mô tả</button>`:''}
+          ${canEdit?`<button class="btn btn-sm" data-act="del-pos" style="color:rgb(var(--danger));border-color:rgba(255,107,107,.4)">Xoá vị trí</button>`:''}</div>
       </div>
       <div class="grid md:grid-cols-2 gap-4">
         <div class="panel p-4">
@@ -322,6 +323,8 @@
     on('upload-jd', ()=>doUploadJD(pid, refresh));
     on('add-cand', ()=>addCandidate(pid, refresh));
     on('screen-all', async()=>{ try{ const r=await api('/api/interview/positions/'+pid+'/screen?scope=stale',{method:'POST'}); toast('Đang chấm '+r.started+' CV'); refresh(); }catch(e){ toast(e.message,1);} });
+    on('del-pos', async()=>{ if(!confirm(`Xoá vị trí “${p.title}” cùng toàn bộ ứng viên, bản chấm và buổi phỏng vấn của nó? Không khôi phục được.`)) return;
+      try{ await api('/api/interview/positions/'+pid,{method:'DELETE'}); toast('Đã xoá vị trí'); go('/'); }catch(e){ toast(e.message,1);} });
   }
   function editPosition(p, refresh){
     const f=openForm(`<h3 class="text-lg font-semibold mb-3">Sửa mô tả vị trí</h3>
@@ -406,6 +409,7 @@
           ${canEdit?`<button class="btn btn-sm" data-act="edit-cv">Sửa CV</button>`:''}
           <button class="btn btn-sm" data-act="from-meeting" title="Phỏng vấn trực tiếp / hội đồng: lấy lời thoại từ cuộc họp đã thu">Chấm từ cuộc họp</button>
           <button class="btn btn-accent btn-sm" data-act="start">▶ Phỏng vấn online</button>
+          ${canEdit?`<button class="btn btn-sm" data-act="del-cand" style="color:rgb(var(--danger));border-color:rgba(255,107,107,.4)">Xoá</button>`:''}
         </div>
       </div>
       <div class="grid md:grid-cols-2 gap-4">
@@ -439,6 +443,8 @@
     on('edit-cv', ()=>editCv(c, refresh));
     on('start', async()=>{ try{ const sess=await api('/api/interview/sessions',{method:'POST',body:{candidate_id:c.id}}); go('/s/'+sess.id); }catch(e){ toast(e.message,1);} });
     on('from-meeting', ()=>fromMeeting(c));
+    on('del-cand', async()=>{ if(!confirm(`Xoá ứng viên “${c.name||'(chưa rõ tên)'}” cùng bản chấm và các buổi phỏng vấn? Không khôi phục được.`)) return;
+      try{ await api('/api/interview/candidates/'+c.id,{method:'DELETE'}); toast('Đã xoá ứng viên'); go('/p/'+c.position_id); }catch(e){ toast(e.message,1);} });
   }
   async function fromMeeting(c){
     let meetings=[]; try{ meetings=(await api('/api/interview/meetings')).meetings||[]; }catch(e){ toast(e.message,1); return; }
