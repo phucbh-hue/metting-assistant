@@ -88,7 +88,7 @@ async def lifespan(_app: FastAPI):
     db.flush()                  # lưu trên máy: ghi nốt phần còn chờ trước khi tắt
 
 
-APP_VERSION = "3.23.5"              # dấu hiệu phiên bản ở /healthz để kiểm tra bản mới đã lên server chưa (giữ khớp package.json)
+APP_VERSION = "3.23.6"              # dấu hiệu phiên bản ở /healthz để kiểm tra bản mới đã lên server chưa (giữ khớp package.json)
 app = FastAPI(title="Meeting Assistant AI", version=APP_VERSION, lifespan=lifespan)
 _MEETING_PATH = re.compile(r"^/(?:api/meetings|ws/meeting)/(\d+)(?:/|$)")
 _ARTIFACT_PATH = re.compile(r"^/api/artifacts/(\d+)(?:/|$)")
@@ -387,7 +387,11 @@ async def auth_google(req: GoogleLoginReq):
 
 @app.get("/api/auth/me")
 def auth_me(request: Request):
-    return {"required": auth.ENABLED, "user": _user(request)}
+    u = _user(request)
+    out: Dict[str, Any] = {"required": auth.ENABLED, "user": u}
+    if u and auth.should_renew(u):                 # gia hạn trượt: cấp token mới khi đã quá nửa thời hạn
+        out.update(auth.issue(u))                  # {"token", "expires_at"} -> frontend lưu lại localStorage
+    return out
 
 
 def _db_status_text(st: Dict[str, Any]) -> str:

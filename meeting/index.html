@@ -888,7 +888,12 @@ async function ensureLogin() {
   if (AUTH.token) {
     try {
       const r = await fetch(apiUrl('/api/auth/me'), { headers: authHeaders() });
-      if (r.ok) { AUTH.user = (await r.json()).user; if (AUTH.user) return; }
+      if (r.ok) {
+        const d = await r.json();
+        AUTH.user = d.user;
+        if (d.token) { AUTH.token = d.token; try { localStorage.setItem('ma_token', d.token); } catch (e) { /* bỏ qua */ } }
+        if (AUTH.user) return;
+      }
     } catch (e) { /* thử đăng nhập lại */ }
   }
   await showLogin();

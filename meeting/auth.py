@@ -44,7 +44,9 @@ ENABLED = _flag("AUTH_REQUIRED")
 CLIENT_ID = (os.getenv("GOOGLE_OAUTH_CLIENT_ID") or "").strip()
 DOMAINS = _list("ALLOWED_DOMAIN", "urbox.vn")
 ADMINS = set(_list("AUTH_ADMIN_EMAILS"))
-TTL_S = float(os.getenv("AUTH_TTL_HOURS") or 12) * 3600
+TTL_S = float(os.getenv("AUTH_TTL_HOURS") or 720) * 3600   # 30 ngày; token tự gia hạn trượt mỗi lần mở trang
+                                                           # (/api/auth/me), nên người dùng thường xuyên không phải
+                                                           # đăng nhập lại; chỉ hết hạn khi nghỉ hẳn quá nửa thời hạn
 SECRET = (os.getenv("AUTH_SECRET") or "").encode()
 if ENABLED and not SECRET:
     # Không có khóa ký cố định: token mất hiệu lực mỗi lần server khởi động lại (mọi người phải đăng nhập lại)
@@ -174,9 +176,15 @@ def check(token: Optional[str], now: Optional[float] = None) -> Optional[Dict[st
         return None
     if float(data.get("x") or 0) < (now or time.time()) or not domain_ok(data.get("e", "")):
         return None
-    user = {"email": data["e"], "name": data.get("n") or data["e"]}
+    user = {"email": data["e"], "name": data.get("n") or data["e"], "exp": float(data.get("x") or 0)}
     user["admin"] = is_admin(user)
     return user
+
+
+def should_renew(user: Optional[Dict[str, Any]], now: Optional[float] = None) -> bool:
+    """Token đã dùng quá nửa thời hạn: nên cấp token mới (gia hạn trượt) để người đang dùng không bị bắt đăng nhập lại."""
+    exp = float((user or {}).get("exp") or 0)
+    return exp > 0 and exp - (now or time.time()) < TTL_S / 2
 
 
 def token_from_scope(scope: Dict[str, Any]) -> Optional[str]:
