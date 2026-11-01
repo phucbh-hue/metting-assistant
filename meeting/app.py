@@ -34,7 +34,8 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
 from meeting import (artifacts, auth, bd, cli_llm, db, decks, drive_sync, envfile, gcalendar,  # noqa: E402
-                     google_oauth, group_chat, group_kb, groups, live, llm, mcp, meet_bots, recall, recap_export,
+                     google_oauth, group_chat, group_kb, groups, interview, interview_files, interview_roles,
+                     live, llm, mcp, meet_bots, recall, recap_export,
                      game, minutes_templates, recording, tts, user_llm, user_prefs, voice, websearch, wikibox)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -392,6 +393,350 @@ def auth_me(request: Request):
     if u and auth.should_renew(u):                 # gia hạn trượt: cấp token mới khi đã quá nửa thời hạn
         out.update(auth.issue(u))                  # {"token", "expires_at"} -> frontend lưu lại localStorage
     return out
+
+
+# ==============================================================================
+# CHẾ ĐỘ PHỎNG VẤN (interview): vị trí + JD + tiêu chí + chấm CV + so sánh + buổi phỏng vấn
+# Phân quyền: admin -> owner (cấu hình) -> user (người phỏng vấn). Xem meeting/interview_roles.py
+# ==============================================================================
+class IvRoleReq(BaseModel):
+    email: str = Field(..., min_length=3, max_length=200)
+    role: str = Field(..., pattern="^(owner|user)$")
+
+
+class IvPositionIn(BaseModel):
+    title: Optional[str] = Field(None, max_length=300)
+    jd: Optional[str] = Field(None, max_length=40000)
+    requirements: Optional[str] = Field(None, max_length=40000)
+    background: Optional[str] = Field(None, max_length=40000)
+    persona: Optional[str] = Field(None, max_length=8000)
+    rubric: Optional[list] = None
+    vocab: Optional[list] = None
+    criteria: Optional[dict] = None
+    members: Optional[list] = None
+
+
+class IvExtractReq(BaseModel):
+    kind: str = Field(..., pattern="^(cv|jd)$")
+    filename: str = Field("file", max_length=300)
+    data: str = Field(..., max_length=20_000_000)       # base64 của file
+
+
+class IvUploadReq(BaseModel):
+    filename: str = Field("file", max_length=300)
+    data: str = Field(..., max_length=20_000_000)
+
+
+class IvCandidateIn(BaseModel):
+    name: Optional[str] = Field(None, max_length=300)
+    cv: Optional[str] = Field(None, max_length=60000)
+    notes: Optional[str] = Field(None, max_length=20000)
+
+
+class IvSessionIn(BaseModel):
+    candidate_id: int
+    interviewers: Optional[list] = None
+
+
+class IvAssistReq(BaseModel):
+    trigger_text: Optional[str] = Field(None, max_length=1000)
+
+
+def _iv_configure(request: Request) -> None:
+    """Chỉ owner / admin được tạo & sửa (tạo vị trí, tiêu chí, ứng viên, chấm)."""
+    if not interview_roles.is_owner(_user(request)):
+        raise HTTPException(403, "Chỉ owner hoặc admin mới cấu hình được phần Phỏng vấn (liên hệ admin để được cấp quyền owner).")
+
+
+def _iv_admin(request: Request) -> None:
+    if not interview_roles.is_admin(_user(request)):
+        raise HTTPException(403, "Chỉ admin mới làm được việc này.")
+
+
+def _iv_pos_view(request: Request, pid: int) -> dict:
+    p = interview.get_position(pid)
+    if not p:
+        raise HTTPException(404, "Không tìm thấy vị trí")
+    if not interview.can_view_position(_user(request), p):
+        raise HTTPException(403, "Bạn không có quyền xem vị trí này")
+    return p
+
+
+def _iv_pos_edit(request: Request, pid: int) -> dict:
+    p = interview.get_position(pid)
+    if not p:
+        raise HTTPException(404, "Không tìm thấy vị trí")
+    if not interview.can_edit_position(_user(request), p):
+        raise HTTPException(403, "Chỉ owner (người tạo) hoặc admin mới sửa được vị trí này")
+    return p
+
+
+def _iv_decode(data: str) -> bytes:
+    import base64
+    try:
+        return base64.b64decode(data, validate=False)
+    except Exception:
+        raise HTTPException(400, "File tải lên không hợp lệ")
+
+
+@app.get("/api/interview/me")
+def iv_me(request: Request):
+    u = _user(request)
+    role = interview_roles.role_of(u)
+    return {"role": role, "can_configure": role in ("admin", "owner"), "admin": role == "admin",
+            "email": (u or {}).get("email"), "name": (u or {}).get("name")}
+
+
+@app.get("/api/interview/people")
+def iv_people(request: Request):
+    _iv_admin(request)
+    return {"people": interview_roles.people()}
+
+
+@app.post("/api/interview/role")
+def iv_set_role(req: IvRoleReq, request: Request):
+    _iv_admin(request)
+    try:
+        return interview_roles.set_role(req.email, req.role)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/interview/positions")
+def iv_positions(request: Request):
+    return {"positions": interview.list_positions(_user(request)),
+            "can_configure": interview_roles.is_owner(_user(request))}
+
+
+@app.post("/api/interview/positions")
+def iv_create_position(req: IvPositionIn, request: Request):
+    _iv_configure(request)
+    if not (req.title or "").strip():
+        raise HTTPException(400, "Thiếu tên vị trí")
+    pid = interview.create_position(_user(request)["email"] if _user(request) else "local",
+                                    **{k: v for k, v in req.model_dump().items() if v is not None})
+    return interview.position_detail(pid)
+
+
+@app.get("/api/interview/positions/{pid}")
+def iv_get_position(pid: int, request: Request):
+    _iv_pos_view(request, pid)
+    return interview.position_detail(pid)
+
+
+@app.put("/api/interview/positions/{pid}")
+def iv_update_position(pid: int, req: IvPositionIn, request: Request):
+    _iv_pos_edit(request, pid)
+    interview.update_position(pid, **{k: v for k, v in req.model_dump().items() if v is not None})
+    return interview.position_detail(pid)
+
+
+@app.delete("/api/interview/positions/{pid}")
+def iv_delete_position(pid: int, request: Request):
+    _iv_pos_edit(request, pid)
+    interview.delete_position(pid)
+    return {"ok": True}
+
+
+@app.post("/api/interview/positions/{pid}/build")
+async def iv_build_criteria(pid: int, request: Request):
+    _iv_pos_edit(request, pid)
+    try:
+        return {"job": await interview.build_criteria(pid)}
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.post("/api/interview/positions/{pid}/criteria")
+async def iv_import_criteria(pid: int, req: IvUploadReq, request: Request):
+    _iv_pos_edit(request, pid)
+    try:
+        doc = await asyncio.to_thread(interview_files.read, req.filename, _iv_decode(req.data))
+    except interview_files.FileError as e:
+        raise HTTPException(400, str(e))
+    try:
+        return {"job": await interview.import_criteria(pid, doc)}
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.post("/api/interview/positions/{pid}/screen")
+def iv_screen_all(pid: int, request: Request, scope: str = "stale"):
+    _iv_pos_edit(request, pid)
+    p = interview.get_position(pid)
+    started = 0
+    for c in interview.list_candidates(pid):
+        if not (c.get("cv") or "").strip():
+            continue
+        if scope == "all" or interview.fresh_screening(c, p) is None:
+            if interview.spawn_screening(c["id"], force=(scope == "all")):
+                started += 1
+    return {"started": started}
+
+
+@app.get("/api/interview/positions/{pid}/compare")
+async def iv_compare(pid: int, request: Request, refresh: bool = False):
+    _iv_pos_view(request, pid)
+    try:
+        return await interview.compare_candidates(pid, refresh=refresh)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/interview/extract")
+async def iv_extract(req: IvExtractReq, request: Request):
+    _iv_configure(request)
+    try:
+        doc = await asyncio.to_thread(interview_files.read, req.filename, _iv_decode(req.data))
+    except interview_files.FileError as e:
+        raise HTTPException(400, str(e))
+    try:
+        out = await interview.L.read_document(req.kind, doc)
+    except Exception as e:
+        raise HTTPException(502, f"Đọc tài liệu lỗi: {type(e).__name__}: {str(e)[:200]}")
+    data = out.model_dump()
+    if req.kind == "cv" and data.get("cv"):
+        data["cv"] = interview_files.scrub_contacts(data["cv"])
+    return data
+
+
+@app.post("/api/interview/positions/{pid}/candidates")
+async def iv_create_candidate(pid: int, req: IvCandidateIn, request: Request):
+    _iv_pos_edit(request, pid)
+    cv = interview_files.scrub_contacts(req.cv) if req.cv else ""
+    cid = interview.create_candidate(pid, name=req.name, cv=cv, notes=req.notes)
+    if cv.strip():
+        interview.spawn_screening(cid, force=False)
+    return _iv_candidate_view(request, cid)
+
+
+def _iv_candidate_view(request: Request, cid: int) -> dict:
+    c = interview.get_candidate(cid)
+    if not c:
+        raise HTTPException(404, "Không tìm thấy ứng viên")
+    p = interview.get_position(c["position_id"])
+    if not interview.can_view_position(_user(request), p):
+        raise HTTPException(403, "Bạn không có quyền xem ứng viên này")
+    c["screening"] = interview.screen_view(c, p, full=True)
+    c["sessions"] = interview.list_sessions(candidate_id=cid)
+    return c
+
+
+@app.get("/api/interview/candidates/{cid}")
+def iv_get_candidate(cid: int, request: Request):
+    return _iv_candidate_view(request, cid)
+
+
+@app.put("/api/interview/candidates/{cid}")
+async def iv_update_candidate(cid: int, req: IvCandidateIn, request: Request):
+    c = interview.get_candidate(cid)
+    if not c:
+        raise HTTPException(404, "Không tìm thấy ứng viên")
+    _iv_pos_edit(request, c["position_id"])
+    upd = {k: v for k, v in req.model_dump().items() if v is not None}
+    if "cv" in upd:
+        upd["cv"] = interview_files.scrub_contacts(upd["cv"])
+    interview.update_candidate(cid, **upd)
+    if "cv" in upd and upd["cv"].strip():
+        interview.spawn_screening(cid, force=True)
+    return _iv_candidate_view(request, cid)
+
+
+@app.delete("/api/interview/candidates/{cid}")
+def iv_delete_candidate(cid: int, request: Request):
+    c = interview.get_candidate(cid)
+    if not c:
+        raise HTTPException(404, "Không tìm thấy ứng viên")
+    _iv_pos_edit(request, c["position_id"])
+    interview.delete_candidate(cid)
+    return {"ok": True}
+
+
+@app.post("/api/interview/candidates/{cid}/screen")
+def iv_screen_candidate(cid: int, request: Request):
+    c = interview.get_candidate(cid)
+    if not c:
+        raise HTTPException(404, "Không tìm thấy ứng viên")
+    _iv_pos_edit(request, c["position_id"])
+    if not (c.get("cv") or "").strip():
+        raise HTTPException(400, "Ứng viên chưa có CV để chấm")
+    interview.spawn_screening(cid, force=True)
+    return {"ok": True}
+
+
+@app.post("/api/interview/sessions")
+def iv_create_session(req: IvSessionIn, request: Request):
+    c = interview.get_candidate(req.candidate_id)
+    if not c:
+        raise HTTPException(404, "Không tìm thấy ứng viên")
+    p = _iv_pos_view(request, c["position_id"])    # người phỏng vấn (member) được mở buổi
+    import secrets as _secrets
+    sid = interview.create_session(req.candidate_id, c["position_id"], source="ext",
+                                   interviewers=req.interviewers or ([_user(request)["email"]] if _user(request) else []),
+                                   token=_secrets.token_urlsafe(24))
+    return interview.get_session(sid)
+
+
+@app.get("/api/interview/sessions/{sid}")
+def iv_get_session(sid: int, request: Request):
+    s = interview.get_session(sid)
+    if not s:
+        raise HTTPException(404, "Không tìm thấy buổi phỏng vấn")
+    p = interview.get_position(s["position_id"])
+    if not interview.can_view_position(_user(request), p):
+        raise HTTPException(403, "Bạn không có quyền xem buổi này")
+    s["candidate"] = interview.get_candidate(s["candidate_id"])
+    if s.get("evaluation"):
+        s["evaluation"] = interview.decorate_eval(s["evaluation"], p)
+    return s
+
+
+@app.post("/api/interview/sessions/{sid}/assist")
+async def iv_assist(sid: int, req: IvAssistReq, request: Request):
+    s = interview.get_session(sid)
+    if not s:
+        raise HTTPException(404, "Không tìm thấy buổi phỏng vấn")
+    p = interview.get_position(s["position_id"])
+    if not interview.can_view_position(_user(request), p):
+        raise HTTPException(403, "Bạn không có quyền với buổi này")
+    c = interview.get_candidate(s["candidate_id"])
+    try:
+        out = await interview.L.assist(p, c, s.get("transcript") or [], req.trigger_text)
+    except Exception as e:
+        raise HTTPException(502, f"Gợi ý câu hỏi lỗi: {type(e).__name__}: {str(e)[:200]}")
+    return out.model_dump()
+
+
+@app.post("/api/interview/sessions/{sid}/end")
+async def iv_end_session(sid: int, request: Request, evaluate: bool = True):
+    s = interview.get_session(sid)
+    if not s:
+        raise HTTPException(404, "Không tìm thấy buổi phỏng vấn")
+    p = interview.get_position(s["position_id"])
+    if not interview.can_view_position(_user(request), p):
+        raise HTTPException(403, "Bạn không có quyền với buổi này")
+    interview.update_session(sid, status="ended", ended_at=time.time())
+    ev = None
+    if evaluate and (s.get("transcript") or []):
+        try:
+            ev = await interview.evaluate_session(sid)
+        except Exception as e:
+            raise HTTPException(502, f"Chấm buổi lỗi: {type(e).__name__}: {str(e)[:200]}")
+    return {"ok": True, "evaluation": ev}
+
+
+@app.post("/api/interview/sessions/{sid}/evaluate")
+async def iv_evaluate_session(sid: int, request: Request):
+    s = interview.get_session(sid)
+    if not s:
+        raise HTTPException(404, "Không tìm thấy buổi phỏng vấn")
+    p = interview.get_position(s["position_id"])
+    if not interview.can_view_position(_user(request), p):
+        raise HTTPException(403, "Bạn không có quyền với buổi này")
+    try:
+        return {"evaluation": await interview.evaluate_session(sid)}
+    except Exception as e:
+        raise HTTPException(502, f"Chấm buổi lỗi: {type(e).__name__}: {str(e)[:200]}")
 
 
 def _db_status_text(st: Dict[str, Any]) -> str:
