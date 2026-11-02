@@ -107,6 +107,15 @@ def set_members(pid, members) -> list:
 
 
 # --- positions ---------------------------------------------------------------
+def _pos_defaults(p):
+    """Giao diện repo (vốn chạy trên Postgres có cột default []) luôn đọc p.rubric/p.vocab là MẢNG.
+    Vị trí mới tạo trên Mongo chưa có các field này -> đặt mặc định, tránh 'Cannot read ... length/join'."""
+    if p is not None:
+        p.setdefault("rubric", [])
+        p.setdefault("vocab", [])
+    return p
+
+
 def list_positions(viewer=None):
     """viewer=None (gọi nội bộ) -> không lọc. Có viewer -> chỉ vị trí người đó được xem."""
     from meeting import interview_roles as ir
@@ -114,7 +123,7 @@ def list_positions(viewer=None):
     em = _email(viewer)
     out = []
     for p in _c("interview_positions").find({}).sort("created_at", -1):
-        p = _strip(p)
+        p = _pos_defaults(_strip(p))
         if not allow_all and _email(p.get("owner")) != em and em not in _members(p):
             continue
         p["n_candidates"] = _c("interview_candidates").count_documents({"position_id": p["id"]})
@@ -123,12 +132,14 @@ def list_positions(viewer=None):
 
 
 def get_position(pid):
-    return _strip(_c("interview_positions").find_one({"id": int(pid)}))
+    return _pos_defaults(_strip(_c("interview_positions").find_one({"id": int(pid)})))
 
 
 def create_position(**f):
     f.setdefault("created_at", time.time())
     f.setdefault("members", [])           # danh sách email được chia sẻ (view-only)
+    f.setdefault("rubric", [])            # UI repo đọc p.rubric/p.vocab là mảng
+    f.setdefault("vocab", [])
     if f.get("owner"):
         f["owner"] = _email(f["owner"])
     pid = mdb._next_id("interview_position")
