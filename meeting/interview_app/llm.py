@@ -536,7 +536,15 @@ async def _json(schema, system: str, prompt: str, temperature=0.4, fast: bool = 
             await asyncio.sleep(wait)
 
 
-def fmt_position(p: dict) -> str:
+def fmt_position(p: dict, as_context: bool = False) -> str:
+    """as_context=True: JD/yêu cầu/bối cảnh được trình bày như THAM KHẢO (không phải khung chấm) -
+    dùng khi CHẤM (screen_cv/evaluate), để model bám bộ tiêu chí chứ không neo theo JD."""
+    if as_context:
+        return ("### Bối cảnh vị trí (THAM KHẢO - KHÔNG phải khung chấm)\n"
+                "Phần dưới chỉ để hiểu vị trí; chấm điểm CHỈ theo bộ tiêu chí ở trên, không chấm theo JD.\n\n"
+                f"Job description:\n{p.get('jd') or '(trống)'}\n\n"
+                f"Yêu cầu trong JD:\n{p.get('requirements') or '(trống)'}\n\n"
+                f"Bối cảnh công ty / lý do tuyển:\n{p.get('background') or '(trống)'}\n")
     return (f"## Vị trí: {p['title']}\n\n### Job description\n{p.get('jd') or '(trống)'}\n\n"
             f"### Yêu cầu\n{p.get('requirements') or '(trống)'}\n\n"
             f"### Bối cảnh công ty / lý do tuyển\n{p.get('background') or '(trống)'}\n")
@@ -841,6 +849,9 @@ async def screen_cv(p: dict, cand: dict) -> Screening:
     system = (
         "Bạn là chuyên viên tuyển dụng dày dặn ở Việt Nam, sàng lọc hồ sơ cho vị trí dưới đây theo ĐÚNG bộ tiêu "
         f"chí của vị trí - không thêm tiêu chí riêng. Hôm nay là {_today()}. {SCALE}\n"
+        "- KHUNG CHẤM DUY NHẤT là bộ tiêu chí (rubric) + yêu cầu bắt buộc. JD / mô tả công việc chỉ là BỐI CẢNH "
+        "tham khảo để hiểu vị trí: KHÔNG chấm theo JD, KHÔNG tự thêm tiêu chí từ JD, không cộng/trừ điểm cho điều "
+        "JD nêu mà không nằm trong tiêu chí nào. Mỗi điểm chấm theo đúng mô tả và 'dấu hiệu' của tiêu chí tương ứng.\n"
         "- Chỉ dựa vào CV và ghi chú của HR. CV không nói tới = chưa rõ (score 0, status unknown), KHÔNG phải "
         "không đạt.\n"
         "- Điểm từ CV là mức CV THỂ HIỆN, chưa được kiểm chứng. Kỹ năng tự khai chung chung ('giao tiếp tốt', "
@@ -853,7 +864,7 @@ async def screen_cv(p: dict, cand: dict) -> Screening:
         "thường là reject; chỉ chưa rõ vì CV không nói tới thì là consider, kèm câu hỏi để làm rõ.\n"
         f"- {UNTRUSTED_CV}\n"
         "Viết tiếng Việt, ngắn, thẳng.")
-    prompt = (fmt_position(p) + "\n" + fmt_criteria(p) +
+    prompt = (f"## Vị trí: {p['title']}\n\n" + fmt_criteria(p) + "\n\n" + fmt_position(p, as_context=True) +
               f"\n\n## Ứng viên: {cand.get('name') or '(chưa rõ tên)'}\n### CV\n{fmt_cv(cand)}\n"
               f"### Ghi chú của HR\n{cand.get('notes') or '(không có)'}\n\n"
               "Chấm TẤT CẢ tiêu chí, đúng thứ tự và đúng tên trong khung; kiểm TỪNG yêu cầu bắt buộc và cộng điểm, "
@@ -983,6 +994,9 @@ async def evaluate(p: dict, cand: dict, segments: list) -> Evaluation:
               "Nhiệm vụ: đánh giá ứng viên SAU buổi phỏng vấn - đo lại TỪNG tiêu chí bằng CẢ HAI nguồn: CV và "
               "transcript. Phỏng vấn là bằng chứng mạnh hơn CV: CV là lời tự khai, còn trong buổi ứng viên phải "
               "giải thích bằng ví dụ thật. " + SCALE + " "
+              "KHUNG CHẤM DUY NHẤT là bộ tiêu chí (rubric) + yêu cầu bắt buộc bên dưới. JD / mô tả công việc chỉ là "
+              "BỐI CẢNH tham khảo: chấm theo đúng mô tả và 'dấu hiệu' của từng tiêu chí, KHÔNG chấm theo JD, không tự "
+              "thêm tiêu chí từ JD, không cộng/trừ điểm cho điều JD nêu mà không thuộc tiêu chí nào. "
               "Nguyên tắc: mỗi điểm số phải có trích dẫn nguyên văn làm bằng chứng; không đủ bằng chứng thì cho 0 và nói rõ. "
               "Phân biệt 'nói hay' với 'có làm thật': ưu tiên chi tiết cụ thể, con số, quyết định khó, thất bại đã trải. "
               "Không suy diễn tính cách từ giọng văn. Viết tiếng Việt, khách quan, thẳng.\n"
@@ -990,7 +1004,7 @@ async def evaluate(p: dict, cand: dict, segments: list) -> Evaluation:
               "CV trong bản sàng lọc (không có bản sàng lọc thì so với nội dung CV). "
               "Kiểm lại TỪNG yêu cầu bắt buộc và cộng điểm bằng CV + phỏng vấn (met | partial | not_met | unknown), "
               "chép y nguyên câu yêu cầu; vị trí không có danh sách yêu cầu thì để rỗng. " + UNTRUSTED_CV)
-    prompt = (fmt_position(p) + "\n" + fmt_criteria(p) +
+    prompt = (f"## Vị trí: {p['title']}\n\n" + fmt_criteria(p) + "\n\n" + fmt_position(p, as_context=True) +
               f"\n\n## Ứng viên: {cand['name']}\n### CV\n{fmt_cv(cand)}\n"
               f"### Ghi chú\n{cand.get('notes') or '(không có)'}" + fmt_screening(cand, p) + "\n\n"
               "## Transcript đầy đủ\n" + fmt_transcript(segments) +
