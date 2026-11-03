@@ -375,12 +375,15 @@ def talent_sync(request: Request):
 
 
 @app.post("/api/talent/import")
-def talent_import(body: TalentImportIn, request: Request):
+async def talent_import(body: TalentImportIn, request: Request):
     """Tạo một vị trí phỏng vấn từ job trên talent.urbox.vn: tự điền JD (không phải dán tay).
-    build=True -> tự chạy AI tạo tiêu chí từ JD. members -> admin chia sẻ luôn."""
+    build=True -> tự chạy AI tạo tiêu chí từ JD. members -> admin chia sẻ luôn.
+
+    Phải là async: build nền (_start_crit_job -> asyncio.create_task) cần event loop. DB/HTTP blocking
+    đẩy qua thread để không chặn vòng lặp của các buổi phỏng vấn đang chạy."""
     _talent_gate(request)
     me = auth.user_of(request)
-    j = talent.get_job(body.source_id)
+    j = await asyncio.to_thread(talent.get_job, body.source_id)
     if not j:
         raise HTTPException(404, "Không tìm thấy job này - thử bấm Đồng bộ lại.")
     f = {"title": j["title"], "jd": j["jd_text"],
@@ -391,12 +394,12 @@ def talent_import(body: TalentImportIn, request: Request):
         f["owner"] = me["email"]
     if body.members and interview_roles.is_admin(me):   # chỉ admin được gán người xem ngay khi nhập
         f["members"] = [str(m).strip().lower() for m in body.members if str(m).strip()]
-    pid = db.create_position(**f)
-    talent.mark_imported(j["source_id"], pid)
+    pid = await asyncio.to_thread(lambda: db.create_position(**f))
+    await asyncio.to_thread(talent.mark_imported, j["source_id"], pid)
     job = None
     if body.build and (j.get("jd_text") or "").strip():
         job = _start_crit_job(pid, "build", _build_work(pid))
-    p = _position(pid)
+    p = await asyncio.to_thread(_position, pid)
     p["build_job"] = job
     return p
 
