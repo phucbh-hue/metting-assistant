@@ -26,7 +26,8 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
-from meeting.interview_app import auth, db, files, live, llm, panel, recall, rolefix, voice
+from meeting import interview_roles
+from meeting.interview_app import auth, db, files, live, llm, panel, recall, rolefix, talent, voice
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("interview")
@@ -307,19 +308,11 @@ def _start_crit_job(pid: int, kind: str, work, file: str = "") -> dict:
     return _crit_job_view(pid)
 
 
-@app.post("/api/positions/{pid}/build")
-async def build_position(pid: int, force: bool = False):
-    """AI ĐỀ XUẤT tiêu chí từ JD (+ vocab + persona), chạy nền. Chỉ dùng khi HR chưa đưa bộ tiêu chí.
-
-    HR đã đưa rồi thì 409: đề xuất của AI không bao giờ lặng lẽ đè lên quyết
-    định của HR. `force=1` là HR tự bấm "bỏ tiêu chí HR, để AI đề xuất".
-    """
-    p = await asyncio.to_thread(_position, pid)
-    if p["criteria"].get("source") == "hr" and not force:
-        raise HTTPException(409, "Vị trí đang dùng tiêu chí do HR đưa ra - AI không đề xuất đè lên. "
-                                 "Muốn thay thì bấm \"Bỏ tiêu chí HR, để AI đề xuất\".")
-
+def _build_work(pid: int):
+    """Việc nền tạo khung năng lực: AI đọc JD của vị trí -> rubric + vocab + must/nice (+ persona nếu HR chưa gõ).
+    Dùng chung cho nút "Tạo khung" và cho lúc NHẬP JD từ talent.urbox.vn (tự tạo tiêu chí)."""
     async def work():
+        p = await asyncio.to_thread(_position, pid)
         try:
             b = await asyncio.wait_for(llm.build_position(p), READ_TIMEOUT_S)
         except Exception as e:
@@ -335,7 +328,77 @@ async def build_position(pid: int, force: bool = False):
             upd["persona"] = b.persona
         await asyncio.to_thread(db.update_position, pid, **upd)
         await _screen_missing(pid)
-    return {"job": _start_crit_job(pid, "build", work)}
+    return work
+
+
+@app.post("/api/positions/{pid}/build")
+async def build_position(pid: int, force: bool = False):
+    """AI ĐỀ XUẤT tiêu chí từ JD (+ vocab + persona), chạy nền. Chỉ dùng khi HR chưa đưa bộ tiêu chí.
+
+    HR đã đưa rồi thì 409: đề xuất của AI không bao giờ lặng lẽ đè lên quyết
+    định của HR. `force=1` là HR tự bấm "bỏ tiêu chí HR, để AI đề xuất".
+    """
+    p = await asyncio.to_thread(_position, pid)
+    if p["criteria"].get("source") == "hr" and not force:
+        raise HTTPException(409, "Vị trí đang dùng tiêu chí do HR đưa ra - AI không đề xuất đè lên. "
+                                 "Muốn thay thì bấm \"Bỏ tiêu chí HR, để AI đề xuất\".")
+    return {"job": _start_crit_job(pid, "build", _build_work(pid))}
+
+
+# ------------------------------------------------ Thư viện JD (talent.urbox.vn) ---
+def _talent_gate(request: Request):
+    """Danh mục JD chỉ dành cho người cấu hình được (owner/admin) - họ là người tạo vị trí."""
+    if not interview_roles.is_owner(auth.user_of(request)):
+        raise HTTPException(403, "Chỉ owner/admin mới dùng được Thư viện JD (liên hệ admin để được cấp quyền owner).")
+
+
+class TalentImportIn(BaseModel):
+    source_id: str
+    build: bool = True                    # tự tạo tiêu chí từ JD ngay sau khi nhập
+    members: list[str] | None = None      # admin có thể chia sẻ luôn cho user/owner khi nhập
+
+
+@app.get("/api/talent/jobs")
+def talent_jobs(request: Request, q: str = ""):
+    _talent_gate(request)
+    sync = talent.ensure_fresh()          # tự đồng bộ nếu danh mục trống hoặc đã cũ (>6h)
+    return {"jobs": talent.list_jobs(q), "last_sync": talent.last_sync(), "synced": sync}
+
+
+@app.post("/api/talent/sync")
+def talent_sync(request: Request):
+    _talent_gate(request)
+    try:
+        return talent.sync()
+    except Exception as e:
+        raise HTTPException(502, f"Không lấy được danh sách job từ talent.urbox.vn: {type(e).__name__}: {str(e)[:200]}")
+
+
+@app.post("/api/talent/import")
+def talent_import(body: TalentImportIn, request: Request):
+    """Tạo một vị trí phỏng vấn từ job trên talent.urbox.vn: tự điền JD (không phải dán tay).
+    build=True -> tự chạy AI tạo tiêu chí từ JD. members -> admin chia sẻ luôn."""
+    _talent_gate(request)
+    me = auth.user_of(request)
+    j = talent.get_job(body.source_id)
+    if not j:
+        raise HTTPException(404, "Không tìm thấy job này - thử bấm Đồng bộ lại.")
+    f = {"title": j["title"], "jd": j["jd_text"],
+         "talent_source": {"source_id": j["source_id"], "codename": j.get("codename"),
+                           "url": j.get("url"), "department": j.get("department"),
+                           "location": j.get("location"), "imported_at": time.time()}}
+    if me and me.get("email"):
+        f["owner"] = me["email"]
+    if body.members and interview_roles.is_admin(me):   # chỉ admin được gán người xem ngay khi nhập
+        f["members"] = [str(m).strip().lower() for m in body.members if str(m).strip()]
+    pid = db.create_position(**f)
+    talent.mark_imported(j["source_id"], pid)
+    job = None
+    if body.build and (j.get("jd_text") or "").strip():
+        job = _start_crit_job(pid, "build", _build_work(pid))
+    p = _position(pid)
+    p["build_job"] = job
+    return p
 
 
 class FileIn(BaseModel):

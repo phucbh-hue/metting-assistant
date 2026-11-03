@@ -451,7 +451,8 @@ async function home(app){
       <div class="m">${p.rubric.length} tiêu chí · ${p.n_candidates} ứng viên</div></div><span class="go">${I('chev')}</span></a>`).join('')
       ||empty('briefcase','Chưa có vị trí nào. Tạo vị trí đầu tiên ở dưới - gõ tên, hoặc tải file JD để AI điền sẵn.')}</div>
     <div class="section row"><input id="nt" placeholder="Tên vị trí, vd: CFO, Senior Backend Engineer" style="flex:1;min-width:220px"><button id="np">${I('plus','sm')} Tạo vị trí</button>
-      <button class="sec" id="npf" title="PDF, Word, ảnh chụp JD - AI điền tên vị trí, JD và yêu cầu">${I('upload','sm')} Tạo từ file JD</button></div>
+      <button class="sec" id="npf" title="PDF, Word, ảnh chụp JD - AI điền tên vị trí, JD và yêu cầu">${I('upload','sm')} Tạo từ file JD</button>
+      <button class="sec" id="njd" title="Lấy JD từ trang tuyển dụng talent.urbox.vn - tự điền, khỏi dán tay">${I('briefcase','sm')} Thư viện JD</button></div>
   </div>`;
   const bindLive=()=>{
     $('lives').querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{location.hash=`#/s/${b.dataset.go}`});
@@ -471,6 +472,7 @@ async function home(app){
   teardown=()=>{clearInterval(tick);clearInterval(poll)};
   $('nt').onkeydown=e=>{if(e.key==='Enter')$('np').click()};
   $('np').onclick=()=>{const t=$('nt').value.trim();if(!t)return;busy('np','đang tạo…',async()=>{const p=await api('/positions',{method:'POST',body:{title:t}});location.hash=`#/p/${p.id}`})};
+  $('njd').onclick=()=>jdLibraryDialog();
   $('npf').onclick=async()=>{const [f]=await pickFiles(ACC_DOC);if(!f)return;
     busy('npf','AI đang đọc JD…',async()=>{const r=await readDoc('jd',f);
       const nt=$('nt'),p=await api('/positions',{method:'POST',body:{title:(r.title||'').trim()||(nt?nt.value.trim():'')||baseName(f),jd:r.jd||'',requirements:r.requirements||''}});
@@ -783,6 +785,41 @@ async function shareDialog(pid,members){
     const emails=[...ov.querySelectorAll('#shList input:checked')].map(x=>x.value);
     const r=await api(`/positions/${pid}/members`,{method:'PUT',body:{members:emails}});
     toast(r.members.length?`Đã chia sẻ cho ${r.members.length} người`:'Đã bỏ chia sẻ với mọi người');close();route()});
+}
+
+/* Thư viện JD: kéo job từ talent.urbox.vn, tìm theo tên, nhập 1 cú -> tạo vị trí (tự điền JD + tuỳ chọn tự tạo tiêu chí).
+   Chỉ owner/admin dùng (server chặn). Nhập xong admin có thể bấm "Chia sẻ" ở trang vị trí để chia cho user/owner. */
+async function jdLibraryDialog(){
+  const dmy=ts=>ts?new Date(ts*1000).toLocaleDateString('vi-VN'):'';
+  const ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:60;padding:16px';
+  ov.innerHTML=`<div class="card" style="max-width:640px;width:100%;max-height:88vh;display:flex;flex-direction:column;margin:0">
+    <div class="card-h">${I('briefcase')}<h2>Thư viện JD</h2><span class="spacer"></span><button class="ghost sm icon" id="jdX" title="Đóng">${I('x','sm')}</button></div>
+    <div class="sub" style="margin:-2px 0 10px">Lấy JD từ <b>talent.urbox.vn</b> - chọn vị trí rồi bấm Nhập, hệ thống tự điền JD (khỏi dán tay). <span id="jdSt" class="xs mut"></span></div>
+    <div class="row" style="gap:8px"><input id="jdq" placeholder="🔍 Tìm vị trí theo tên, vd: data, kế toán, security" style="flex:1;min-width:180px">
+      <button class="sec" id="jdSync" title="Tải lại danh sách mới nhất từ talent.urbox.vn">${I('refresh','sm')} Đồng bộ</button></div>
+    <label class="check" style="margin:10px 0 6px;align-items:center"><input type="checkbox" id="jdBuild" checked> Tự tạo tiêu chí đánh giá từ JD (AI) ngay sau khi nhập</label>
+    <div id="jdList" style="overflow:auto;flex:1;min-height:80px">${empty('clock','Đang tải danh sách job…')}</div></div>`;
+  document.body.appendChild(ov);
+  const close=()=>ov.remove();
+  ov.onclick=e=>{if(e.target===ov)close()};$('jdX').onclick=close;
+  const card=j=>`<div class="item" style="align-items:flex-start">${av(j.title,'sq')}
+    <div style="flex:1;min-width:0"><div class="t">${esc(j.title)}</div>
+      <div class="m">${[j.department,j.location,j.num_positions?j.num_positions+' vị trí':'',j.close_ts?'hạn '+dmy(j.close_ts):''].filter(Boolean).join(' · ')||'—'}</div>
+      <div class="xs mut" style="margin-top:2px;max-height:34px;overflow:hidden">${esc(j.jd_preview||'')}${j.jd_len>240?'…':''}</div></div>
+    <button class="sec sm" data-imp="${esc(j.source_id)}" style="white-space:nowrap">${j.imported_pids&&j.imported_pids.length?I('plus','sm')+' Nhập lại':I('plus','sm')+' Nhập'}</button></div>`;
+  const render=jobs=>{const L=$('jdList');if(!L)return;
+    L.innerHTML=jobs.length?jobs.map(card).join(''):empty('briefcase','Không có vị trí nào khớp. Thử từ khoá khác hoặc bấm Đồng bộ.');
+    L.querySelectorAll('[data-imp]').forEach(b=>b.onclick=()=>busy(b,'đang nhập…',async()=>{
+      const r=await api('/talent/import',{method:'POST',body:{source_id:b.dataset.imp,build:$('jdBuild').checked}});
+      close();toast(`Đã tạo vị trí "${r.title}"${r.build_job?' · AI đang tạo tiêu chí từ JD…':''}`);location.hash=`#/p/${r.id}`;}));};
+  const load=async(q='')=>{try{const r=await api('/talent/jobs'+(q?('?q='+encodeURIComponent(q)):''));
+      if($('jdSt'))$('jdSt').textContent=r.last_sync?('· đồng bộ '+new Date(r.last_sync*1000).toLocaleString('vi-VN')):'';
+      render(r.jobs||[]);}catch(e){if($('jdList'))$('jdList').innerHTML=empty('alert',esc(e.message));}};
+  let tmr;$('jdq').oninput=()=>{clearTimeout(tmr);tmr=setTimeout(()=>load($('jdq').value.trim()),300)};
+  $('jdSync').onclick=()=>busy('jdSync','đang đồng bộ…',async()=>{const r=await api('/talent/sync',{method:'POST'});
+    toast(`Đã đồng bộ ${r.total} vị trí (thêm ${r.added}, cập nhật ${r.updated})`);await load($('jdq').value.trim());});
+  load();
 }
 
 /* --------------------------------------------------------- candidate */
