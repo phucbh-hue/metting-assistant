@@ -255,7 +255,7 @@ class GameRun:
         self._soon = asyncio.ensure_future(_later())
 
     async def say(self, text: str, mood: str = "happy") -> None:
-        await self.s._say(text, mood=mood)
+        await self.s._say(text, mood=mood, full=True)   # lời dẫn trò chơi đọc trọn, không cắt gọn
 
     # ---------------------------------------------------------- người chơi ---
     def _player(self, key: str, name: str, via: str, sid: Optional[int] = None) -> Optional[Dict[str, Any]]:

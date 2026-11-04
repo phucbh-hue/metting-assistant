@@ -117,12 +117,21 @@ _ACR_RE = re.compile(r"(?<!\w)(" + "|".join(_ACRONYMS) + r")(?!\w)")
 _UNITS = {"ms": "mi li giây", "s": "giây", "km": "ki lô mét", "kg": "ki lô gam", "gb": "gi ga bai", "mb": "mê ga bai",
           "tb": "tê ra bai", "h": "giờ", "x": "lần"}
 
+# Tên thương hiệu giọng đọc hay đọc sai (UrBox -> "U-e-rờ-box"/"Ơ-box", WikiBox -> sai): nạp phiên âm đúng.
+_BRAND_RE = re.compile(r"(?<!\w)(urbox|wiki-?box)(?!\w)", re.I)
+
+
+def _read_brands(t: str) -> str:
+    """UrBox -> 'giơ bốc', WikiBox -> 'quy ki bốc' (dùng cho cả Soniox lẫn Piper)."""
+    return _BRAND_RE.sub(lambda m: "giơ bốc" if m.group(1)[:2].lower() == "ur" else "quy ki bốc", t)
+
 
 def normalize_vi(text: str) -> str:
     """Chuẩn hóa để đọc tự nhiên: số, tiền, ngày, giờ, %, đơn vị, mã ticket, ký hiệu markdown."""
     t = str(text or "")
     t = re.sub(r"[*_`#>|~]+", " ", t)
     t = t.replace(chr(0x2014), ", ").replace(chr(0x2013), " ").replace("&", " và ").replace("…", ". ")
+    t = _read_brands(t)
     t = re.sub(r"\bTP\.?\s?HCM\b", "thành phố Hồ Chí Minh", t)
     t = re.sub(r"\bv\.v\.?", "vân vân", t)
     # mã ticket / mã sản phẩm: URBOX-102 -> URBOX 102
@@ -264,6 +273,7 @@ def clean_text(text: str) -> str:
     """Chuẩn hóa nhẹ cho Soniox: bỏ ký hiệu markdown; số, ngày, tiền, mã ticket, tiếng Anh Soniox tự đọc đúng."""
     t = re.sub(r"[*_`#>|~]+", " ", str(text or ""))
     t = t.replace(chr(0x2014), ", ").replace("&", " và ").replace(chr(0x2026), ". ")
+    t = _read_brands(t)
     t = re.sub(r"\s+([,.;:!?])", r"\1", t)
     return re.sub(r"\s+", " ", t).strip()[:SONIOX_MAX_CHARS]
 

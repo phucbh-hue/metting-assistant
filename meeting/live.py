@@ -2140,9 +2140,10 @@ class MeetingSession:
         art = self._art_cache.get(self.stage["artifact_id"]) if self.stage["artifact_id"] is not None else None
         return {"kind": art.get("kind"), "title": art.get("title", "")} if art else None
 
-    async def _say(self, text: str, mood: str = "happy", quiet: bool = False):
-        """quiet: chỉ hiện phụ đề, không đọc to (xác nhận chuyển slide: màn hình đổi là đủ, không cắt lời người nói)."""
-        await self.emit({"type": "ai_say", "text": text, "mood": mood, "quiet": quiet})
+    async def _say(self, text: str, mood: str = "happy", quiet: bool = False, full: bool = False):
+        """quiet: chỉ hiện phụ đề, không đọc to (xác nhận chuyển slide: màn hình đổi là đủ, không cắt lời người nói).
+        full: đọc trọn vẹn cả đoạn dài (dẫn trò chơi, thuyết trình) thay vì cắt gọn như câu trả lời thường."""
+        await self.emit({"type": "ai_say", "text": text, "mood": mood, "quiet": quiet, "full": full})
 
     async def _handle_stage_intent(self, intent: Dict[str, Any]) -> bool:
         """Thực hiện lệnh trình chiếu ngay (không gọi LLM). Trả về False nếu nên để LLM xử lý."""
