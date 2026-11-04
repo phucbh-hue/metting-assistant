@@ -122,8 +122,8 @@ _BRAND_RE = re.compile(r"(?<!\w)(urbox|wiki-?box)(?!\w)", re.I)
 
 
 def _read_brands(t: str) -> str:
-    """UrBox -> 'giơ bốc', WikiBox -> 'quy ki bốc' (dùng cho cả Soniox lẫn Piper)."""
-    return _BRAND_RE.sub(lambda m: "giơ bốc" if m.group(1)[:2].lower() == "ur" else "quy ki bốc", t)
+    """UrBox -> 'gio bốc', WikiBox -> 'quy ki bốc' (dùng cho cả Soniox lẫn Piper)."""
+    return _BRAND_RE.sub(lambda m: "gio bốc" if m.group(1)[:2].lower() == "ur" else "quy ki bốc", t)
 
 
 def normalize_vi(text: str) -> str:
