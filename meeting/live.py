@@ -1775,7 +1775,7 @@ class MeetingSession:
             preset = game_mod.preset_of(command)
             if preset is not None:                    # "mở trò chơi sinh nhật": bộ trò chơi soạn sẵn, không cần AI soạn
                 await self._progress("Dạ, em mở trò chơi ngay!", kind="ack")
-                await self.start_preset_game(preset)
+                await self.start_preset_game(preset, email=(self.meeting or {}).get("owner"))
                 return
             if self._ask and time.monotonic() < self._ask["until"]:
                 ans = llm.present_answer(command, asked=True)
@@ -1859,9 +1859,12 @@ class MeetingSession:
         run.task = asyncio.create_task(run.run())
         return run.public()
 
-    async def start_preset_game(self, preset_id: str) -> Dict[str, Any]:
-        """Mở một bộ trò chơi soạn sẵn (meeting/game_presets): lưu thành sản phẩm loại game của cuộc họp rồi dẫn luôn."""
+    async def start_preset_game(self, preset_id: str, email: Optional[str] = None) -> Dict[str, Any]:
+        """Mở một bộ trò chơi soạn sẵn (meeting/game_presets): lưu thành sản phẩm loại game của cuộc họp rồi dẫn luôn.
+        email: tài khoản yêu cầu (bộ có "owners" thì chỉ họ mở được)."""
         from meeting import game
+        if not game.preset_allowed(game.preset_info(preset_id), email):
+            raise ValueError("Bộ trò chơi này chỉ tài khoản phụ trách mới mở được")
         g = game.load_preset(preset_id)
         if not self.is_live():
             raise ValueError("Cuộc họp đã kết thúc")

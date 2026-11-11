@@ -204,7 +204,8 @@ def list_presets() -> List[Dict[str, Any]]:
             continue
         out.append({"id": f.stem, "title": g["title"], "teams": g["teams"], "questions": len(g["questions"]),
                     "prize": g["team_prize"] or g["prize"], "theme": g["theme"],
-                    "triggers": [retrieval.fold(str(t)) for t in (d.get("triggers") or []) if t]})
+                    "triggers": [retrieval.fold(str(t)) for t in (d.get("triggers") or []) if t],
+                    "owners": [str(e).strip().lower() for e in (d.get("owners") or []) if str(e).strip()]})
     return out
 
 
@@ -215,6 +216,23 @@ def load_preset(preset_id: str) -> Dict[str, Any]:
     if not pid or not f.is_file():
         raise ValueError("Không có bộ trò chơi này")
     return normalize(json.loads(f.read_text(encoding="utf-8")))
+
+
+def preset_info(preset_id: str) -> Optional[Dict[str, Any]]:
+    pid = re.sub(r"[^a-z0-9-]", "", str(preset_id or "").lower())[:60]
+    return next((p for p in list_presets() if p["id"] == pid), None)
+
+
+def preset_allowed(preset: Optional[Dict[str, Any]], email: Optional[str]) -> bool:
+    """Bộ có "owners" (email) thì chỉ các tài khoản đó thấy và mở được (giữ bí mật câu hỏi trước sự kiện); không có
+    thì ai cũng mở được. Chưa bật đăng nhập (chạy máy cá nhân) thì không khóa."""
+    owners = (preset or {}).get("owners") or []
+    if not owners:
+        return True
+    from meeting import auth
+    if not auth.ENABLED:
+        return True
+    return (email or "").strip().lower() in owners
 
 
 def preset_of(text: str) -> Optional[str]:

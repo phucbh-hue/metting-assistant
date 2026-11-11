@@ -6,6 +6,7 @@
   "top_n": 3,
   "theme": "A BIGGER ONE: 11 câu đố nội bộ về các team UrBox, hai văn phòng kéo co bằng điểm",
   "triggers": ["sinh nhat", "keo co", "bigger one", "11 tuoi", "hai van phong", "2 van phong"],
+  "owners": ["phuc.bh@urbox.vn"],
   "intro": "Xin chào cả nhà hai đầu cầu Hà Nội và Hồ Chí Minh! Em là Jarvis, MC được thuê với mức lương bằng không nhưng nhiệt huyết thì bằng mười một, đúng tuổi của UrBox hôm nay. Sinh nhật là phải có quà, mà quà thì phải giành, nên hai văn phòng mình sẽ kéo co bằng điểm, xem đầu cầu nào hiểu công ty hơn!",
   "rules": [
     "Quét mã QR, nhập tên và chọn văn phòng của mình",

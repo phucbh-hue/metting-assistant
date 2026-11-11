@@ -1601,14 +1601,14 @@ class PlayAnswerReq(BaseModel):
 
 
 @app.post("/api/meetings/{mid}/game")
-async def meeting_game(mid: int, req: GameActionReq):
+async def meeting_game(mid: int, req: GameActionReq, request: Request):
     """Điều khiển trò chơi trên màn hình trình chiếu (nút Bắt đầu, Câu tiếp, Bảng điểm, Dừng, Chơi lại)."""
     s = await _session_or_404(mid)
     try:
         if req.action == "preset":
             if not req.preset:
                 raise HTTPException(status_code=400, detail="Thiếu mã bộ trò chơi")
-            return {"game": await s.start_preset_game(req.preset)}
+            return {"game": await s.start_preset_game(req.preset, email=(_user(request) or {}).get("email"))}
         if req.action == "play":
             art = await s._get_artifact(req.artifact_id)
             if not art or art.get("meeting_id") != mid or art.get("kind") != "game":
@@ -1658,10 +1658,13 @@ async def play_answer(code: str, req: PlayAnswerReq):
 
 
 @app.get("/api/game-presets")
-def game_presets():
-    """Bộ trò chơi soạn sẵn (meeting/game_presets/*.json): mở bằng nút trong tab Trò chơi hoặc nói "mở trò chơi sinh nhật"."""
+def game_presets(request: Request):
+    """Bộ trò chơi soạn sẵn (meeting/game_presets/*.json): mở bằng nút trong tab Trò chơi hoặc nói "mở trò chơi sinh nhật".
+    Bộ có "owners" chỉ hiện với các tài khoản đó."""
     from meeting import game
-    return {"presets": [{k: v for k, v in p.items() if k != "triggers"} for p in game.list_presets()]}
+    email = (_user(request) or {}).get("email")
+    return {"presets": [{k: v for k, v in p.items() if k not in ("triggers", "owners")}
+                        for p in game.list_presets() if game.preset_allowed(p, email)]}
 
 
 # ==============================================================================
