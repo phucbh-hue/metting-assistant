@@ -98,6 +98,38 @@ def _open_local():
 PUBLIC_SEGMENT_FIELDS = {"_id": 0, "raw_embedding": 0}
 
 
+def _srv_fallback(uri: str) -> str:
+    """mongodb+srv:// phải tra DNS SRV/TXT; DNS văn phòng hay không trả lời loại bản ghi này (cổng 27017 vẫn mở) -> tra qua
+    DNS công cộng rồi đổi sang dạng mongodb://host1,host2,host3/?... (giữ nguyên user/pass và tham số). Không tra được: trả uri cũ."""
+    m = re.match(r"mongodb\+srv://(?P<auth>[^@/]*@)?(?P<host>[^/?]+)(?P<rest>/[^?]*)?(?:\?(?P<q>.*))?$", uri or "")
+    if not m:
+        return uri
+    try:
+        import dns.resolver
+        r = dns.resolver.Resolver(configure=False)
+        r.nameservers = ["8.8.8.8", "1.1.1.1"]
+        r.lifetime = 5
+        hosts = ",".join(f"{str(x.target).rstrip('.')}:{x.port}" for x in r.resolve("_mongodb._tcp." + m["host"], "SRV"))
+        params: Dict[str, str] = {}
+        try:                                          # TXT của Atlas: authSource=admin&replicaSet=...
+            for t in r.resolve(m["host"], "TXT"):
+                for kv in b"".join(t.strings).decode().split("&"):
+                    if "=" in kv:
+                        k, v = kv.split("=", 1)
+                        params[k] = v
+        except Exception:
+            pass
+        params.setdefault("tls", "true")              # +srv mặc định bật TLS
+        for kv in (m["q"] or "").split("&"):          # tham số ghi trong URI thắng TXT
+            if "=" in kv:
+                k, v = kv.split("=", 1)
+                params[k] = v
+        return f"mongodb://{m['auth'] or ''}{hosts}{m['rest'] or '/'}?" + "&".join(f"{k}={v}" for k, v in params.items())
+    except Exception as e:
+        log.info("meeting.db: không tra được SRV của Atlas qua DNS công cộng: %s", str(e)[:200])
+        return uri
+
+
 def _get_db():
     global _client, _db, _is_mock
     if _db is not None:
@@ -118,26 +150,36 @@ def _get_db():
 
     # 1. Thử kết nối tới MONGODB_URL nếu được cấu hình
     if MONGODB_URL:
-        try:
-            client = pymongo.MongoClient(
-                MONGODB_URL,
-                serverSelectionTimeoutMS=5000,
-                connectTimeoutMS=5000,
-                socketTimeoutMS=10000
-            )
-            client.admin.command("ping")
-            _client = client
-            _db = client[MONGODB_DB_NAME]
-            _is_mock = False
-            _mode = "atlas" if ("mongodb.net" in MONGODB_URL or "+srv" in MONGODB_URL) else "mongodb"
-            _atlas_error = ""
-            log.info("meeting.db: Đã kết nối thành công tới MongoDB (%s / db: %s)",
-                     MONGODB_URL.split("@")[-1] if "@" in MONGODB_URL else MONGODB_URL,
-                     MONGODB_DB_NAME)
-            return _db
-        except Exception as e:
-            _atlas_error = _explain_mongo_error(e)
-            log.warning("meeting.db: KHÔNG KẾT NỐI ĐƯỢC MONGODB_URL - %s. Chi tiết: %s", _atlas_error, str(e)[:300])
+        url, tried_alt = MONGODB_URL, False
+        while True:
+            try:
+                client = pymongo.MongoClient(
+                    url,
+                    serverSelectionTimeoutMS=5000,
+                    connectTimeoutMS=5000,
+                    socketTimeoutMS=10000
+                )
+                client.admin.command("ping")
+                _client = client
+                _db = client[MONGODB_DB_NAME]
+                _is_mock = False
+                _mode = "atlas" if ("mongodb.net" in MONGODB_URL or "+srv" in MONGODB_URL) else "mongodb"
+                _atlas_error = ""
+                log.info("meeting.db: Đã kết nối thành công tới MongoDB (%s / db: %s)%s",
+                         MONGODB_URL.split("@")[-1] if "@" in MONGODB_URL else MONGODB_URL, MONGODB_DB_NAME,
+                         " qua danh sách máy chủ tra bằng DNS công cộng" if tried_alt else "")
+                return _db
+            except Exception as e:
+                _atlas_error = _explain_mongo_error(e)
+                log.warning("meeting.db: KHÔNG KẾT NỐI ĐƯỢC MONGODB_URL%s - %s. Chi tiết: %s",
+                            " (dạng danh sách máy chủ)" if tried_alt else "", _atlas_error, str(e)[:300])
+                if tried_alt or not MONGODB_URL.startswith("mongodb+srv://"):
+                    break
+                alt = _srv_fallback(MONGODB_URL)      # DNS văn phòng không tra được SRV: thử lại bằng danh sách máy chủ
+                if alt == MONGODB_URL:
+                    break
+                url, tried_alt = alt, True
+                log.info("meeting.db: thử nối lại Atlas bằng danh sách máy chủ tra qua DNS công cộng (8.8.8.8 / 1.1.1.1)")
 
     # 2. Thử kết nối tới localhost:27017 mặc định
     try:
