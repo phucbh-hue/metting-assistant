@@ -32,7 +32,17 @@ def connect():
 
 
 def main():
-    db = connect()[MONGODB_DB_NAME]
+    client = connect()
+    print("Các database trên cluster (lưu trữ + index); database mẫu sample_* của Atlas xóa được nếu không dùng:")
+    for name in client.list_database_names():
+        if name in ("admin", "local", "config"):
+            continue
+        try:
+            s = client[name].command("dbStats")
+            print(f"  {(s['storageSize'] + s['indexSize']) / MB:7.1f} MB | {name}{'   <- app đang dùng' if name == MONGODB_DB_NAME else ''}")
+        except Exception as e:                                     # noqa: BLE001
+            print(f"  ? | {name} ({str(e)[:60]})")
+    db = client[MONGODB_DB_NAME]
     st = db.command("dbStats")
     print(f"DB {MONGODB_DB_NAME}: dữ liệu {st['dataSize'] / MB:.1f} MB, lưu trữ {st['storageSize'] / MB:.1f} MB, "
           f"index {st['indexSize'] / MB:.1f} MB, tổng {(st['storageSize'] + st['indexSize']) / MB:.1f} MB "
