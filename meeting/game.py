@@ -15,13 +15,20 @@ Hai cách chơi, cùng một bảng điểm:
   của máy đang đọc câu hỏi gửi khoảng lặng nên trợ lý không tự trả lời).
 - Quét mã QR trên màn hình để chơi trên điện thoại (/play/<mã>, không cần đăng nhập; mã ngẫu nhiên của từng lượt chơi).
 Phần thưởng chỉ hiện và đọc lên: ban tổ chức trao quà, ứng dụng không phát voucher thật.
+
+Chế độ đội (11/11/2026): trò chơi có "teams" (các văn phòng) thì người chơi chọn văn phòng khi vào; điểm từng người cộng
+vào văn phòng (tổng, hoặc trung bình nếu team_metric = "avg"), màn hình vẽ dây kéo co, top N mỗi văn phòng nhận quà, MC chêm
+lời vui theo thế trận. Bộ trò chơi soạn sẵn nằm ở game_presets/*.json; mở bằng nút trong tab Trò chơi hoặc nói
+"Jarvis ơi, mở trò chơi sinh nhật" (từ khóa trong "triggers").
 """
 import asyncio
+import json
 import logging
 import random
 import re
 import secrets
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from meeting import retrieval
@@ -38,6 +45,7 @@ MAX_PLAYERS = 300
 MAX_QUESTIONS = 12
 KEEP_ENDED_S = 30 * 60         # lượt đã xong: điện thoại vẫn xem được hạng và người thắng trong 30 phút
 GAMES: Dict[str, Any] = {}     # mã chơi trên điện thoại -> lượt đang mở (GameRun) hoặc kết quả lượt đã xong (EndedGame)
+PRESET_DIR = Path(__file__).resolve().parent / "game_presets"   # bộ trò chơi soạn sẵn (JSON cùng cấu trúc trò chơi AI soạn)
 
 GAME_SYSTEM = """Bạn là người thiết kế và dẫn trò chơi (MC) cho cuộc họp của UrBox (nền tảng quà tặng, e-voucher, loyalty tại
 Việt Nam). Thiết kế MỘT trò chơi đố vui có thưởng để mọi người trong phòng cùng chơi: trả lời bằng giọng nói ("đáp án B")
@@ -90,11 +98,24 @@ def normalize(data: Any) -> Dict[str, Any]:
     if not qs:
         raise ValueError("Trò chơi chưa có câu hỏi hợp lệ")
     fmt = data.get("format") if data.get("format") in FORMATS else "classic"
+    teams: List[str] = []
+    for t in (data.get("teams") or [])[:6]:            # chế độ đội (văn phòng): 2-6 đội kéo co bằng điểm
+        t = _clean(t, 30)
+        if t and t not in teams:
+            teams.append(t)
+    if len(teams) < 2:
+        teams = []
+    try:
+        top_n = max(1, min(5, int(data.get("top_n") or 3)))
+    except (TypeError, ValueError):
+        top_n = 3
     return {"title": _clean(data.get("title"), 80) or "Đố vui có thưởng", "format": fmt,
-            "theme": _clean(data.get("theme"), 160), "intro": _clean(data.get("intro"), 400),
+            "theme": _clean(data.get("theme"), 160), "intro": _clean(data.get("intro"), 600),
             "rules": [_clean(r, 120) for r in (data.get("rules") or []) if _clean(r, 120)][:4],
             "prize": _clean(data.get("prize"), 160) or "Phần quà bí mật từ UrBox",
-            "questions": qs, "outro": _clean(data.get("outro"), 300)}
+            "questions": qs, "outro": _clean(data.get("outro"), 300),
+            "teams": teams, "team_metric": "avg" if data.get("team_metric") == "avg" else "sum", "top_n": top_n,
+            "team_prize": _clean(data.get("team_prize"), 160), "lucky_prize": _clean(data.get("lucky_prize"), 160)}
 
 
 # --------------------------------------------------------------- nhận đáp án bằng giọng ---
@@ -145,6 +166,68 @@ def command_of(text: str) -> Optional[str]:
     return None
 
 
+# --------------------------------------------------------------- lời dẫn vui khi các văn phòng kéo co ---
+_pick = random.choice
+HOOKS = ["Câu tiếp theo nè, cả hai đầu cầu siết dây nào!",
+         "Căng chưa cả nhà? Em còn run hơn cả lúc deploy chiều thứ sáu.",
+         "Chuẩn bị tinh thần, câu này có thể đổi chiều dây kéo co đó nha!"]
+TIE = ["Hai văn phòng đang ngang tài ngang sức, dây kéo co căng như deadline cuối tháng!",
+       "Hòa nhau rồi, em hồi hộp hơn cả lúc sếp hỏi KPI tháng này.",
+       "Cân bằng tuyệt đối, chắc hai bên đang uống chung một loại cà phê."]
+LEAD = ["{lead} đang kéo mạnh hơn, {other} ơi uống thêm ly cà phê nữa nào!",
+        "Dây đang nghiêng về {lead}. {other} đừng lo, trận đấu còn dài, à mà cũng không dài lắm đâu.",
+        "{lead} dẫn trước! {other} hít thở sâu, mình còn nhiều câu để lật kèo.",
+        "Nhìn thanh kéo co là thấy {lead} đang hăng lắm. {other} tập trung nào, bấm cho nhanh tay vào!"]
+COMEBACK = ["Ơ kìa, {lead} vừa lật kèo ngoạn mục! Đúng chất A BIGGER ONE!",
+            "{lead} vượt lên rồi! {other} vừa chớp mắt một cái là mất luôn vị trí dẫn đầu.",
+            "Cú lật kèo của {lead}! Em suýt làm rơi micro luôn đó."]
+NOGAIN = ["Câu này cả hai văn phòng cùng im lặng, giống y lúc sếp hỏi ai làm cái này.",
+          "Không ai đúng cả, dây kéo co đứng yên. Chắc câu này do chính team đó ra đề.",
+          "Câu khó quá, hai đầu cầu đồng loạt bấm sai. Đoàn kết ghê chưa!"]
+CHAMP = ["Vỗ tay thật to cho {lead}! {other} đừng buồn, sinh nhật năm sau mình phục thù nha.",
+         "{lead} kéo cả văn phòng {other} về phía mình luôn rồi. Năm nay bánh kem phải chia phần to hơn đó!",
+         "{lead} vô địch kéo co! {other} thua trong danh dự, mà danh dự thì không đổi được voucher, tiếc ghê."]
+LUCKY_OPEN = ["Chưa hết đâu nha! Còn {prize} cho người chưa lọt top. Em quay số, ai nghe tên mình thì hét lên cho cả hai đầu cầu cùng nghe!",
+              "Khoan về đã! Còn {prize} dành cho người may mắn. Em quay số nè, hồi hộp chưa!"]
+
+
+# --------------------------------------------------------------- bộ trò chơi soạn sẵn ---
+def list_presets() -> List[Dict[str, Any]]:
+    """Các bộ trò chơi trong meeting/game_presets/*.json (bỏ qua file hỏng). 'triggers': từ khóa để gọi bằng giọng nói."""
+    out = []
+    for f in sorted(PRESET_DIR.glob("*.json")) if PRESET_DIR.is_dir() else []:
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+            g = normalize(d)
+        except Exception as e:
+            log.warning("meeting.game: bộ trò chơi %s lỗi: %s", f.name, e)
+            continue
+        out.append({"id": f.stem, "title": g["title"], "teams": g["teams"], "questions": len(g["questions"]),
+                    "prize": g["team_prize"] or g["prize"], "theme": g["theme"],
+                    "triggers": [retrieval.fold(str(t)) for t in (d.get("triggers") or []) if t]})
+    return out
+
+
+def load_preset(preset_id: str) -> Dict[str, Any]:
+    """Trò chơi chuẩn hóa từ một bộ soạn sẵn; không có thì ValueError."""
+    pid = re.sub(r"[^a-z0-9-]", "", str(preset_id or "").lower())[:60]
+    f = PRESET_DIR / f"{pid}.json"
+    if not pid or not f.is_file():
+        raise ValueError("Không có bộ trò chơi này")
+    return normalize(json.loads(f.read_text(encoding="utf-8")))
+
+
+def preset_of(text: str) -> Optional[str]:
+    """'Jarvis ơi, mở trò chơi sinh nhật' -> mã bộ trò chơi có từ khóa khớp; None nếu không phải lệnh mở bộ có sẵn."""
+    low = retrieval.fold(text or "")
+    if not re.search(r"\b(tro choi|game|keo co|do vui)\b", low):
+        return None
+    for p in list_presets():
+        if any(t and t in low for t in p["triggers"]):
+            return p["id"]
+    return None
+
+
 def _sent(text: str) -> str:
     """Câu kết thúc bằng dấu câu (ghép lời MC không bị dính câu)."""
     text = (text or "").strip()
@@ -173,6 +256,9 @@ class GameRun:
         self.reveal: Optional[Dict[str, Any]] = None
         self.winners: List[Dict[str, Any]] = []
         self.lucky: Optional[Dict[str, Any]] = None
+        self.team_winners: Dict[str, List[Dict[str, Any]]] = {}   # kéo co: top N của từng văn phòng (nhận quà)
+        self.champion: Optional[str] = None                        # văn phòng nhiều điểm nhất
+        self._team_prev_lead: Optional[str] = None                 # để MC nhận ra cú lật kèo
         self.task: Optional[asyncio.Task] = None
         self._go = asyncio.Event()
         self._skip = asyncio.Event()
@@ -200,10 +286,31 @@ class GameRun:
 
     def leaderboard(self, n: int = 10) -> List[Dict[str, Any]]:
         rows = [{"key": k, "name": self._name(k), "points": p["points"], "correct": p["correct"], "alive": p["alive"],
-                 "via": p["via"]} for k, p in self.players.items()]
+                 "via": p["via"], "team": p.get("team")} for k, p in self.players.items()]
         rows.sort(key=lambda r: (-int(r["alive"]) if self.g["format"] == "golden_bell" else 0, -r["points"],
                                  -r["correct"], r["name"]))
         return rows[:n]
+
+    def team_board(self) -> List[Dict[str, Any]]:
+        """Kéo co giữa các văn phòng: điểm từng đội (tổng hoặc trung bình thành viên), top N và phần dây (share)."""
+        teams = self.g["teams"]
+        if not teams:
+            return []
+        rows = []
+        for t in teams:
+            members = [{"key": k, "name": self._name(k), "points": p["points"], "correct": p["correct"]}
+                       for k, p in self.players.items() if p.get("team") == t]
+            members.sort(key=lambda r: (-r["points"], -r["correct"], r["name"]))
+            total, n = sum(m["points"] for m in members), len(members)
+            score = total / n if self.g["team_metric"] == "avg" and n else total
+            rows.append({"name": t, "players": n, "points": total, "avg": round(total / n) if n else 0,
+                         "score": round(score, 1), "top": members[:self.g["top_n"]]})
+        tot = sum(r["score"] for r in rows)
+        best = max(r["score"] for r in rows)
+        for r in rows:
+            r["share"] = round(r["score"] / tot, 4) if tot else round(1 / len(rows), 4)
+            r["lead"] = best > 0 and r["score"] == best and sum(1 for x in rows if x["score"] == best) == 1
+        return rows
 
     def public(self, pid: Optional[str] = None) -> Dict[str, Any]:
         q = self.question()
@@ -214,6 +321,10 @@ class GameRun:
             "deadline": self.deadline, "players": len(self.players), "ended": self.finished,
             "alive": sum(1 for p in self.players.values() if p["alive"]),
             "leaderboard": self.leaderboard(), "winners": self.winners, "lucky": self.lucky}
+        if self.g["teams"]:
+            out.update(teams=self.team_board(), team_metric=self.g["team_metric"], top_n=self.g["top_n"],
+                       team_prize=self.g["team_prize"], lucky_prize=self.g["lucky_prize"],
+                       team_winners=self.team_winners, champion=self.champion)
         if q is not None:
             out["question"] = {"q": q["q"], "options": q["options"], "type": q["type"],
                                "time": ANSWER_S[q["type"]]}
@@ -228,7 +339,10 @@ class GameRun:
                 rank = next((i + 1 for i, r in enumerate(self.leaderboard(len(self.players))) if r["key"] == pid), None)
                 a = self.answers.get(pid)
                 me.update(name=p["name"], points=p["points"], correct=p["correct"], alive=p["alive"], rank=rank,
-                          choice=a["choice"] if a else None, gain=p.get("last_gain"))
+                          choice=a["choice"] if a else None, gain=p.get("last_gain"), team=p.get("team"))
+                if p.get("team"):                        # hạng trong văn phòng mình (top N nhận quà)
+                    mates = [r for r in self.leaderboard(len(self.players)) if r.get("team") == p["team"]]
+                    me["team_rank"] = next((i + 1 for i, r in enumerate(mates) if r["key"] == pid), None)
             out["me"] = me
         return out
 
@@ -258,25 +372,33 @@ class GameRun:
         await self.s._say(text, mood=mood, full=True)   # lời dẫn trò chơi đọc trọn, không cắt gọn
 
     # ---------------------------------------------------------- người chơi ---
-    def _player(self, key: str, name: str, via: str, sid: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    def _player(self, key: str, name: str, via: str, sid: Optional[int] = None,
+                team: Optional[str] = None) -> Optional[Dict[str, Any]]:
         p = self.players.get(key)
         if p is None:
             if len(self.players) >= MAX_PLAYERS:
                 return None
             alive = self.g["format"] != "golden_bell" or self.qi <= 0     # Rung chuông vàng: vào muộn thì chỉ xem
             p = self.players[key] = {"name": _clean(name, 30) or "Người chơi", "via": via, "sid": sid, "points": 0,
-                                     "correct": 0, "alive": alive, "joined_at": time.time(), "last_gain": None}
+                                     "correct": 0, "alive": alive, "joined_at": time.time(), "last_gain": None,
+                                     "team": team}
         return p
 
-    def join(self, name: str) -> str:
-        """Người chơi trên điện thoại. Trả về mã người chơi (giữ trong trình duyệt của họ)."""
+    def join(self, name: str, team: str = "") -> str:
+        """Người chơi trên điện thoại. Trả về mã người chơi (giữ trong trình duyệt của họ). Kéo co: phải chọn văn phòng."""
         if self.finished or self.phase in ("final", "lucky"):
             raise ValueError("Trò chơi đã kết thúc")
         name = _clean(name, 30)
         if not name:
             raise ValueError("Nhập tên để chơi")
+        team = _clean(team, 30)
+        if self.g["teams"]:
+            if team not in self.g["teams"]:
+                raise ValueError("Chọn văn phòng của mình để vào chơi")
+        else:
+            team = ""
         pid = "p" + secrets.token_hex(6)
-        if self._player(pid, name, "phone") is None:
+        if self._player(pid, name, "phone", team=team or None) is None:
             raise ValueError("Đã đủ người chơi")
         self.emit_soon(0.2)                           # màn hình hiện người vừa vào
         return pid
@@ -354,7 +476,7 @@ class GameRun:
                 if self.g["format"] == "golden_bell" and self.players and \
                         sum(1 for p in self.players.values() if p["alive"]) <= 1 and i >= 1:
                     break                            # Rung chuông vàng: còn một người là xong
-                if i in (2, 4) and i < len(self.g["questions"]) - 1:
+                if i in (2, 4, 7) and i < len(self.g["questions"]) - 1:
                     await self._scores()
             await self._final()
         except asyncio.CancelledError:
@@ -375,11 +497,21 @@ class GameRun:
         how = ("Ai sai là bị loại, người trụ lại cuối cùng thắng." if g["format"] == "golden_bell"
                else "Đúng và càng nhanh thì càng nhiều điểm.")
         # luật chơi đã hiện trên màn hình: lời mở màn ngắn (khoảng 20 giây) để không lấn sang câu hỏi đầu tiên
-        text = " ".join(x for x in (
-            _sent(g["intro"] or "Chào cả nhà, mình cùng chơi một trò chơi nhỏ nhé!"),
-            _sent(f"Trò chơi hôm nay là: {g['title']}"), how,
-            "Cả nhà nói đáp án to và rõ, hoặc quét mã QR trên màn hình để chơi trên điện thoại.",
-            _sent(f"Phần thưởng là {g['prize']}"), "Sẵn sàng thì gọi em bắt đầu nhé!") if x)
+        if g["teams"]:                                # kéo co giữa các văn phòng
+            text = " ".join(x for x in (
+                _sent(g["intro"] or "Chào cả nhà, mình cùng kéo co bằng điểm nhé!"),
+                _sent(f"Trò chơi hôm nay là: {g['title']}"),
+                _sent("Mỗi người quét mã QR trên màn hình, nhập tên và chọn văn phòng của mình: " + " hay ".join(g["teams"])),
+                how, "Điểm của từng người cộng vào văn phòng mình, dây kéo co nghiêng về bên nào nhiều điểm hơn.",
+                _sent(f"Phần thưởng: {g['team_prize'] or g['prize']}"),
+                _sent(f"Cuối giờ còn quay số may mắn: {g['lucky_prize']}") if g["lucky_prize"] else "",
+                "Vào đủ người thì gọi em bắt đầu nhé!") if x)
+        else:
+            text = " ".join(x for x in (
+                _sent(g["intro"] or "Chào cả nhà, mình cùng chơi một trò chơi nhỏ nhé!"),
+                _sent(f"Trò chơi hôm nay là: {g['title']}"), how,
+                "Cả nhà nói đáp án to và rõ, hoặc quét mã QR trên màn hình để chơi trên điện thoại.",
+                _sent(f"Phần thưởng là {g['prize']}"), "Sẵn sàng thì gọi em bắt đầu nhé!") if x)
         await self.say(text)
         await self._wait(LOBBY_MAX_S, until=self._go)
 
@@ -392,7 +524,8 @@ class GameRun:
         await self.emit()
         opts = ". ".join(f"{LETTERS[k]}: {o}" for k, o in enumerate(q["options"])) if q["type"] == "choice" \
             else "Đúng hay Sai?"
-        text = f"Câu {i + 1}. {_sent(q['q'])} {_sent(opts)}"
+        hook = (_pick(HOOKS) + " ") if self.g["teams"] and i in (2, 5, 8) else ""
+        text = f"{hook}Câu {i + 1}. {_sent(q['q'])} {_sent(opts)}"
         await self.say(text, mood="thinking")
         await asyncio.sleep(speech_s(text))
         self.phase = "answering"
@@ -444,7 +577,13 @@ class GameRun:
                 for k in out_now:
                     self.players[k]["alive"] = False
         gains.sort(key=lambda g: g["at"])
+        team_gains: Dict[str, int] = {}
+        for gn in gains:                              # điểm từng văn phòng ghi được ở câu này (kéo co)
+            t = self.players[gn["key"]].get("team")
+            if t:
+                team_gains[t] = team_gains.get(t, 0) + gn["points"]
         self.reveal = {"answer": q["answer"], "counts": counts, "explain": q["explain"], "gains": gains[:10],
+                       "team_gains": team_gains,
                        "fastest": gains[0]["name"] if gains else None, "eliminated": [self._name(k) for k in out_now][:20]
                        if not revived else [], "revived": revived}
         self.phase = "reveal"
@@ -464,12 +603,45 @@ class GameRun:
                      else f" Còn {alive} người trụ lại." if self.players else "")
         lead = "Đáp án đúng là" if q["type"] == "choice" else "Đáp án là:"
         text = f"{lead} {_sent(right)} {_sent(q['explain'])} {cheer}{extra}".replace("  ", " ")
+        if self.g["teams"]:
+            text += " " + self._team_banter(team_gains)
         await self.say(text, mood="happy" if gains else "neutral")
         await self._wait(speech_s(text) + REVEAL_S)
+
+    def _team_banter(self, team_gains: Dict[str, int]) -> str:
+        """Lời MC về thế trận kéo co sau mỗi câu: văn phòng nào ghi điểm, bên nào đang dẫn, có lật kèo không."""
+        tb = self.team_board()
+        if team_gains:
+            got = ", ".join(f"{t} thêm {p} điểm" for t, p in sorted(team_gains.items(), key=lambda kv: -kv[1]))
+            line = f"Câu này {got}."
+        else:
+            line = _pick(NOGAIN)
+        lead = next((r["name"] for r in tb if r["lead"]), None)
+        others = ", ".join(r["name"] for r in tb if r["name"] != lead) or "đội bạn"
+        if lead is None:
+            line += " " + _pick(TIE)
+        elif self._team_prev_lead and lead != self._team_prev_lead:
+            line += " " + _pick(COMEBACK).format(lead=lead, other=others)
+        else:
+            line += " " + _pick(LEAD).format(lead=lead, other=others)
+        self._team_prev_lead = lead
+        return line
 
     async def _scores(self) -> None:
         self.phase = "scores"
         await self.emit()
+        if self.g["teams"]:
+            tb = self.team_board()
+            lead = next((r["name"] for r in tb if r["lead"]), None)
+            text = "Bảng điểm kéo co: " + ", ".join(f"{r['name']} {r['points']} điểm" for r in tb) + ". "
+            text += f"Dây đang nghiêng về {lead}. " if lead else "Hai bên đang hòa. "
+            tops = [f"{r['name']} có {r['top'][0]['name']} dẫn đầu với {r['top'][0]['points']} điểm"
+                    for r in tb if r["top"] and r["top"][0]["points"] > 0]
+            if tops:
+                text += "Ở từng văn phòng, " + "; ".join(tops) + "."
+            await self.say(text)
+            await self._wait(speech_s(text) + 3)
+            return
         top = self.leaderboard(3)
         if top and top[0]["points"] > 0:
             text = "Bảng điểm tạm thời: dẫn đầu là " + ", ".join(f"{r['name']} {r['points']} điểm" for r in top) + "."
@@ -480,32 +652,61 @@ class GameRun:
 
     async def _final(self) -> None:
         board = self.leaderboard(len(self.players) or 1)
-        if self.g["format"] == "golden_bell":
-            win = [r for r in board if r["alive"]] or board[:1]
+        g = self.g
+        if g["teams"]:                                # kéo co: văn phòng nhiều điểm nhất thắng, top N mỗi văn phòng nhận quà
+            tb = self.team_board()
+            self.team_winners = {r["name"]: [{"name": m["name"], "points": m["points"], "correct": m["correct"]}
+                                             for m in r["top"] if m["points"] > 0] for r in tb}
+            self.champion = next((r["name"] for r in tb if r["lead"]), None)
+            self.winners = [{**w, "team": t} for t, ws in self.team_winners.items() for w in ws]
+            self.phase = "final"
+            await self.emit()
+            if self.champion:
+                others = ", ".join(r["name"] for r in tb if r["name"] != self.champion) or "đội bạn"
+                text = (f"Và văn phòng thắng kéo co hôm nay là... {self.champion}! "
+                        + _pick(CHAMP).format(lead=self.champion, other=others) + " ")
+            else:
+                text = "Kết quả kéo co: các văn phòng hòa nhau, đoàn kết đúng chất một nhà UrBox! "
+            for t, ws in self.team_winners.items():
+                if ws:
+                    text += f"Top {len(ws)} văn phòng {t}: " + ", ".join(f"{w['name']} {w['points']} điểm" for w in ws) + ". "
+            text += _sent(f"Mỗi bạn trong top {g['top_n']} của từng văn phòng nhận {g['team_prize'] or g['prize']}, "
+                          "mời lên nhận quà từ ban tổ chức") + " " + _sent(g["outro"] or "Xin chúc mừng!")
+            await self.say(text.replace("  ", " "), mood="happy")
+            await self._wait(speech_s(text) + 2)
         else:
-            best = board[0]["points"] if board else 0
-            win = [r for r in board if r["points"] == best and best > 0][:3]
-        self.winners = [{"name": r["name"], "points": r["points"], "correct": r["correct"]} for r in win]
-        self.phase = "final"
-        await self.emit()
-        if self.winners:
-            names = ", ".join(w["name"] for w in self.winners)
-            text = (f"Và người chiến thắng là... {names}! {self.g['outro'] or 'Xin chúc mừng!'} "
-                    f"Phần thưởng {self.g['prize']} xin mời nhận quà từ ban tổ chức.")
-        else:
-            text = f"Trò chơi khép lại rồi. {self.g['outro'] or 'Cảm ơn cả nhà đã tham gia!'}"
-        await self.say(text, mood="happy")
-        await self._wait(speech_s(text) + 2)
-        pool = [r for r in board if r["name"] not in {w["name"] for w in self.winners} and
+            if g["format"] == "golden_bell":
+                win = [r for r in board if r["alive"]] or board[:1]
+            else:
+                best = board[0]["points"] if board else 0
+                win = [r for r in board if r["points"] == best and best > 0][:3]
+            self.winners = [{"name": r["name"], "points": r["points"], "correct": r["correct"]} for r in win]
+            self.phase = "final"
+            await self.emit()
+            if self.winners:
+                names = ", ".join(w["name"] for w in self.winners)
+                text = (f"Và người chiến thắng là... {names}! {g['outro'] or 'Xin chúc mừng!'} "
+                        f"Phần thưởng {g['prize']} xin mời nhận quà từ ban tổ chức.")
+            else:
+                text = f"Trò chơi khép lại rồi. {g['outro'] or 'Cảm ơn cả nhà đã tham gia!'}"
+            await self.say(text, mood="happy")
+            await self._wait(speech_s(text) + 2)
+        won = {w["name"] for w in self.winners}
+        pool = [r for r in board if r["name"] not in won and
                 (r["correct"] > 0 or self.players.get(r["key"], {}).get("via") == "phone")]
         if len(pool) >= 2:                           # quay số may mắn cho một người chơi khác người thắng
             pick = random.choice(pool)
-            self.lucky = {"names": [r["name"] for r in pool][:40], "winner": pick["name"], "at": time.time()}
+            self.lucky = {"names": [r["name"] for r in pool][:40], "winner": pick["name"], "team": pick.get("team"),
+                          "at": time.time()}
             self.phase = "lucky"
-            await self.say("Còn một phần quà may mắn nữa! Em quay số cho những người đã chơi nhé.")
+            if g["teams"]:
+                await self.say(_pick(LUCKY_OPEN).format(prize=g["lucky_prize"] or "một phần quà may mắn"))
+            else:
+                await self.say("Còn một phần quà may mắn nữa! Em quay số cho những người đã chơi nhé.")
             await self.emit()
             await asyncio.sleep(6.5)                 # màn hình quay tên khoảng 6 giây
-            await self.say(f"Người may mắn là {pick['name']}! Chúc mừng!", mood="happy")
+            who = pick["name"] + (f" của văn phòng {pick['team']}" if pick.get("team") else "")
+            await self.say(f"Người may mắn là {who}! Chúc mừng!", mood="happy")
             await asyncio.sleep(3)
         self.phase = "final"
         await self.emit()
@@ -515,7 +716,8 @@ class GameRun:
             from meeting import db
             res = {"played_at": self.started_at, "players": len(self.players), "winners": self.winners,
                    "lucky": (self.lucky or {}).get("winner"), "leaderboard": self.leaderboard(20),
-                   "questions_played": max(0, self.qi + 1)}
+                   "questions_played": max(0, self.qi + 1), "teams": self.team_board(), "champion": self.champion,
+                   "team_winners": self.team_winners}
             await asyncio.to_thread(db.update_artifact_meta, self.artifact_id, {"results": res})
         except Exception as e:
             log.info("meeting.game: không lưu được kết quả trò chơi: %s", e)
@@ -536,7 +738,7 @@ class EndedGame:
             out["me"] = self._me.get(pid) or {"joined": False}
         return out
 
-    def join(self, name: str) -> str:
+    def join(self, name: str, team: str = "") -> str:
         raise ValueError("Trò chơi đã kết thúc")
 
     def answer_phone(self, pid: str, choice: int) -> bool:

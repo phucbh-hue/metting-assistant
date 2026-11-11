@@ -89,7 +89,7 @@ async def lifespan(_app: FastAPI):
     db.flush()                  # lưu trên máy: ghi nốt phần còn chờ trước khi tắt
 
 
-APP_VERSION = "3.27.1"              # dấu hiệu phiên bản ở /healthz để kiểm tra bản mới đã lên server chưa (giữ khớp package.json)
+APP_VERSION = "3.28.0"              # dấu hiệu phiên bản ở /healthz để kiểm tra bản mới đã lên server chưa (giữ khớp package.json)
 app = FastAPI(title="Meeting Assistant AI", version=APP_VERSION, lifespan=lifespan)
 _MEETING_PATH = re.compile(r"^/(?:api/meetings|ws/meeting)/(\d+)(?:/|$)")
 _ARTIFACT_PATH = re.compile(r"^/api/artifacts/(\d+)(?:/|$)")
@@ -1585,12 +1585,14 @@ async def google_disconnect(request: Request):
 # TRÒ CHƠI CÓ THƯỞNG (meeting/game.py): trợ lý thiết kế và dẫn; người chơi nói đáp án hoặc chơi trên điện thoại
 # ==============================================================================
 class GameActionReq(BaseModel):
-    action: str = Field(..., max_length=20)            # play (bắt đầu lượt mới từ artifact_id), start, next, scores, stop
+    action: str = Field(..., max_length=20)            # play (lượt mới từ artifact_id), preset (bộ soạn sẵn), start, next, scores, stop
     artifact_id: Optional[int] = None
+    preset: Optional[str] = Field(None, max_length=60)
 
 
 class PlayJoinReq(BaseModel):
     name: str = Field(..., max_length=60)
+    team: str = Field("", max_length=40)               # kéo co: văn phòng của người chơi
 
 
 class PlayAnswerReq(BaseModel):
@@ -1603,6 +1605,10 @@ async def meeting_game(mid: int, req: GameActionReq):
     """Điều khiển trò chơi trên màn hình trình chiếu (nút Bắt đầu, Câu tiếp, Bảng điểm, Dừng, Chơi lại)."""
     s = await _session_or_404(mid)
     try:
+        if req.action == "preset":
+            if not req.preset:
+                raise HTTPException(status_code=400, detail="Thiếu mã bộ trò chơi")
+            return {"game": await s.start_preset_game(req.preset)}
         if req.action == "play":
             art = await s._get_artifact(req.artifact_id)
             if not art or art.get("meeting_id") != mid or art.get("kind") != "game":
@@ -1639,7 +1645,7 @@ async def play_state(code: str, pid: str = ""):
 @app.post("/play/{code}/join")
 async def play_join(code: str, req: PlayJoinReq):
     try:
-        return {"pid": _play(code).join(req.name)}
+        return {"pid": _play(code).join(req.name, req.team)}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1649,6 +1655,13 @@ async def play_answer(code: str, req: PlayAnswerReq):
     if not _play(code).answer_phone(req.pid, req.choice):
         raise HTTPException(status_code=409, detail="Không nhận được câu trả lời (hết giờ hoặc đã trả lời)")
     return {"ok": True}
+
+
+@app.get("/api/game-presets")
+def game_presets():
+    """Bộ trò chơi soạn sẵn (meeting/game_presets/*.json): mở bằng nút trong tab Trò chơi hoặc nói "mở trò chơi sinh nhật"."""
+    from meeting import game
+    return {"presets": [{k: v for k, v in p.items() if k != "triggers"} for p in game.list_presets()]}
 
 
 # ==============================================================================
@@ -2714,7 +2727,8 @@ async def assistant_command(mid: int, payload: Dict[str, Any]):
     intent = llm.stage_intent(text)
     loose = bool(intent and intent.get("action") == "explain" and intent.get("loose"))   # có thể là câu hỏi chung
     needs_llm = (intent is None or loose) and not (s.stage["artifact_id"] and llm.is_edit_command(text))
-    if needs_llm and not artifacts.llm_available():
+    from meeting import game
+    if needs_llm and not artifacts.llm_available() and game.preset_of(text) is None:   # mở bộ trò chơi có sẵn: không cần AI
         raise HTTPException(status_code=503, detail=NO_LLM)
     q = await s.subscribe()
     try:

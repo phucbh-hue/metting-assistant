@@ -1771,6 +1771,12 @@ class MeetingSession:
         try:
             if self.game is not None and self.game.active and await self._game_voice(command):
                 return
+            from meeting import game as game_mod
+            preset = game_mod.preset_of(command)
+            if preset is not None:                    # "mở trò chơi sinh nhật": bộ trò chơi soạn sẵn, không cần AI soạn
+                await self._progress("Dạ, em mở trò chơi ngay!", kind="ack")
+                await self.start_preset_game(preset)
+                return
             if self._ask and time.monotonic() < self._ask["until"]:
                 ans = llm.present_answer(command, asked=True)
                 if ans:
@@ -1853,6 +1859,22 @@ class MeetingSession:
         run.task = asyncio.create_task(run.run())
         return run.public()
 
+    async def start_preset_game(self, preset_id: str) -> Dict[str, Any]:
+        """Mở một bộ trò chơi soạn sẵn (meeting/game_presets): lưu thành sản phẩm loại game của cuộc họp rồi dẫn luôn."""
+        from meeting import game
+        g = game.load_preset(preset_id)
+        if not self.is_live():
+            raise ValueError("Cuộc họp đã kết thúc")
+        content = json.dumps(g, ensure_ascii=False)
+        title = f"Trò chơi: {g['title'][:60]}"
+        aid = await asyncio.to_thread(db.save_artifact, self.id, "game", title, content, f"preset:{preset_id}")
+        art = await asyncio.to_thread(db.get_artifact, aid) or {"id": aid, "meeting_id": self.id, "kind": "game",
+                                                                "title": title, "content": content, "version": 1}
+        self._art_cache[aid] = art
+        await self.emit({"type": "artifact_created", "artifact": art})
+        await self.emit({"type": "stage_command", "action": "open"})
+        return await self.start_game(art)
+
     async def game_command(self, action: str) -> Dict[str, Any]:
         """start (bắt đầu từ màn chờ), next (bỏ qua thời gian chờ), scores (xem bảng điểm), stop."""
         g = self.game
@@ -1866,6 +1888,10 @@ class MeetingSession:
             await g.stop()
             await self._say("Dạ, em dừng trò chơi. Cảm ơn cả nhà đã tham gia!")
         elif action == "scores":
+            if g.g["teams"]:                          # kéo co: đọc điểm từng văn phòng
+                tb = g.team_board()
+                await self._say("Kéo co: " + ", ".join(f"{r['name']} {r['points']} điểm" for r in tb) + ".")
+                return g.public()
             board = g.leaderboard(3)
             await self._say("Bảng điểm: " + ", ".join(f"{r['name']} {r['points']} điểm" for r in board) + "."
                             if board else "Chưa có ai ghi điểm ạ.")

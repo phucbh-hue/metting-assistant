@@ -178,6 +178,32 @@
     @keyframes gmPulse { from { transform: scale(1); } to { transform: scale(1.12); } }
     @media (max-width: 900px) { .gm-lobby { grid-template-columns: 1fr; } .gm-opts { grid-template-columns: 1fr; } }
     @media (prefers-reduced-motion: reduce) { .gm-confetti { display: none; } .gm-sec.hot, .gm-chip, .gm-step .who { animation: none; } }
+    /* kéo co giữa các văn phòng (trò chơi chế độ đội) */
+    .gm-tug { display: grid; grid-template-columns: minmax(130px, auto) minmax(0, 1fr) minmax(130px, auto); align-items: center; gap: 16px; padding: 14px 18px; border-radius: 22px;
+      background: rgb(var(--ink) / .06); border: 1px solid rgb(var(--ink) / .1); }
+    .gm-tug-sm { padding: 8px 14px; gap: 12px; }
+    .gm-tug .side { text-align: left; min-width: 0; } .gm-tug .side.r { text-align: right; }
+    .gm-tug .side b { display: block; font-size: clamp(16px, 1.7vw, 26px); font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .gm-tug-sm .side b { font-size: clamp(14px, 1.3vw, 20px); }
+    .gm-tug .side span { font-size: clamp(14px, 1.3vw, 20px); font-variant-numeric: tabular-nums; opacity: .9; }
+    .gm-tug .side small { display: block; font-size: 12.5px; opacity: .7; }
+    .gm-tug .side .t3 { display: block; font-style: normal; font-size: clamp(12px, 1.1vw, 17px); opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .gm-tug-sm .side small { display: none; }
+    .gm-tug.lead0 .side:first-child b, .gm-tug.lead1 .side.r b { color: #FFD54A; }
+    .gm-rope { position: relative; height: 30px; border-radius: 999px; background: linear-gradient(90deg, #D99100, #F2B000); box-shadow: inset 0 2px 6px rgb(0 0 0 / .25); }
+    .gm-tug-sm .gm-rope { height: 20px; }
+    .gm-rope i { position: absolute; inset: 0 auto 0 0; border-radius: 999px 0 0 999px; background: linear-gradient(90deg, #7A2BE0, #9B4DF0); transition: width .9s cubic-bezier(.2, .8, .2, 1); }
+    .gm-rope em { position: absolute; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: #fff; display: grid; place-items: center; font-style: normal; font-size: 24px;
+      box-shadow: 0 8px 20px rgb(0 0 0 / .4); transition: left .9s cubic-bezier(.2, .8, .2, 1); }
+    .gm-tug-sm .gm-rope em { width: 30px; height: 30px; margin: -15px 0 0 -15px; font-size: 16px; }
+    .gm-teams { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+    .gm-team { padding: 16px 18px; border-radius: 20px; background: rgb(var(--ink) / .06); border: 1px solid rgb(var(--ink) / .1); }
+    .gm-team.win { border-color: rgba(255, 183, 0, .75); box-shadow: 0 0 0 2px rgba(255, 183, 0, .25), 0 16px 40px rgb(0 0 0 / .25); }
+    .gm-team h4 { margin: 0 0 10px; font-size: clamp(18px, 1.9vw, 28px); font-weight: 800; display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+    .gm-team h4 small { font-size: .7em; font-weight: 600; opacity: .8; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .gm-t0 h4 { color: #C9A6FF; } .gm-t1 h4 { color: #FFD54A; } .gm-t2 h4 { color: #8FB8FF; } .gm-t3 h4 { color: #7EE2A8; }
+    .gm-team .gm-row { font-size: clamp(15px, 1.4vw, 22px); }
+    @media (max-width: 700px) { .gm-tug { grid-template-columns: 1fr; gap: 8px; } .gm-tug .side.r { text-align: left; } }
     .bd-grid { display: grid; grid-template-columns: minmax(250px, 330px) minmax(0, 1fr); }
     @media (max-width: 860px) {
       .bd-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 30%) minmax(0, 1fr); }
@@ -3012,7 +3038,8 @@ async function renderArtifactPane() {
         game: [`Nhờ ${AN()} tạo trò chơi có thưởng: ${AN()} tự soạn câu hỏi và làm MC dẫn trên màn hình. Mọi người nói đáp án hoặc quét mã QR để chơi trên điện thoại.`, 'Tạo trò chơi có thưởng', 'Tạo một trò chơi có thưởng để mọi người tương tác'],
       }[R.tab];
       pane.innerHTML = `<div class="text-muted"><p class="mb-3">${hint[0]}${R.meeting.minutes_status === 'failed' && R.tab === 'docs' ? ' Lần lập tự động vừa rồi thất bại.' : ''}</p>
-        <button class="btn btn-ghost btn-sm" data-act="quick" data-prompt="${esc(hint[2])}">${hint[1]}</button></div>`;
+        <button class="btn btn-ghost btn-sm" data-act="quick" data-prompt="${esc(hint[2])}">${hint[1]}</button>${R.tab === 'game' ? '<div class="mt-4" data-gm-presets></div>' : ''}</div>`;
+      if (R.tab === 'game') gmFillPresets(pane);
     }
     return;
   }
@@ -3056,6 +3083,7 @@ async function renderArtifactPane() {
   } else if (art.kind === 'game') {
     bar.classList.add('hidden');
     pane.innerHTML = gamePanelHtml(art);
+    gmFillPresets(pane);
   } else if (art.kind === 'web_design') {
     const mobile = R.vp === 'mobile';
     pane.innerHTML = `<div class="h-full w-full grid place-items-center"><iframe title="Bản thiết kế giao diện" sandbox="allow-scripts allow-modals allow-forms"
@@ -4508,7 +4536,7 @@ function applyExplained(ev) {
 /* =====================================================================
    TRÒ CHƠI CÓ THƯỞNG (14/10/2026): trợ lý thiết kế và dẫn trên màn hình trình chiếu
    ===================================================================== */
-const GM = { qrLib: null, beepCtx: null, lastPhase: '', lastQi: -1, ticked: -1, skew: 0 };
+const GM = { qrLib: null, beepCtx: null, lastPhase: '', lastQi: -1, ticked: -1, skew: 0, presets: null };
 const GM_LETTER = 'ABCD';
 function parseGame(content) { try { const g = JSON.parse(content || '{}'); return g && Array.isArray(g.questions) ? g : null; } catch (e) { return null; } }
 function gameFor(art) { const R = S.room; return R && R.game && art && R.game.artifact_id === art.id ? R.game : null; }
@@ -4555,6 +4583,56 @@ function gmBoardHtml(g, n = 8) {
     <span class="nm"><i style="width:${Math.max(4, (r.points / max) * 100)}%"></i><span>${esc(r.name)}${r.via === 'phone' ? ' 📱' : ''}</span></span>
     <span class="pt">${g.format === 'golden_bell' ? (r.alive ? 'trụ lại' : 'bị loại') : `${r.points} điểm`}</span></div>`).join('')}</div>`;
 }
+const GM_TEAM_BG = ['linear-gradient(90deg,#7A2BE0,#9B4DF0)', 'linear-gradient(90deg,#D99100,#F2B000)', 'linear-gradient(90deg,#2563EB,#3B82F6)', 'linear-gradient(90deg,#0F9F5A,#18B86A)'];
+/** Dây kéo co giữa các văn phòng (2 đội: một dây; nhiều hơn: mỗi đội một thanh). compact: dải mỏng phía trên câu hỏi. */
+function gmTugHtml(g, compact) {
+  const ts = g.teams || []; if (!ts.length) return '';
+  const val = t => g.team_metric === 'avg' ? `${t.avg} điểm TB` : `${t.points} điểm`;
+  const top3 = t => (t.top || []).filter(r => r.points > 0).slice(0, 3).map((r, k) => `${k + 1}. ${esc(r.name)}`).join(' · ');   // top từng văn phòng ngay trên dây
+  if (ts.length === 2) {
+    const [a, b] = ts; const p = Math.round((a.share == null ? .5 : a.share) * 100);
+    return `<div class="gm-tug ${a.lead ? 'lead0' : b.lead ? 'lead1' : ''} ${compact ? 'gm-tug-sm' : ''}">
+      <div class="side"><b>${a.lead ? '🔥 ' : ''}${esc(a.name)}</b><span>${val(a)}</span><small>${a.players} người</small><i class="t3">${top3(a)}</i></div>
+      <div class="gm-rope"><i style="width:${p}%"></i><em style="left:${p}%">🪢</em></div>
+      <div class="side r"><b>${esc(b.name)}${b.lead ? ' 🔥' : ''}</b><span>${val(b)}</span><small>${b.players} người</small><i class="t3">${top3(b)}</i></div></div>`;
+  }
+  return `<div class="gm-board">${ts.map((t, i) => `<div class="gm-row"><span class="rk">${i + 1}</span><span class="nm"><i style="width:${Math.max(4, (t.share || 0) * 100)}%;background:${GM_TEAM_BG[i % 4]}"></i><span>${t.lead ? '🔥 ' : ''}${esc(t.name)} · ${t.players} người</span></span><span class="pt">${val(t)}</span></div>`).join('')}</div>`;
+}
+/** Top N của từng văn phòng (final: danh sách nhận quà đã chốt, văn phòng thắng được tô vàng). */
+function gmTeamsHtml(g, final) {
+  const ts = g.teams || []; if (!ts.length) return '';
+  const n = g.top_n || 3;
+  return `<div class="gm-teams">${ts.map((t, i) => {
+    const top = (final ? ((g.team_winners || {})[t.name] || []) : (t.top || [])).slice(0, n);
+    const win = final && g.champion === t.name;
+    return `<div class="gm-team gm-t${i % 4} ${win ? 'win' : ''}"><h4><span>${win ? '🏆 ' : ''}${esc(t.name)}</span><small>${t.points} điểm · ${t.players} người</small></h4>
+      ${top.length ? `<div class="gm-board">${top.map((r, k) => `<div class="gm-row"><span class="rk">${k + 1}</span><span class="nm"><span>${esc(r.name)}${final ? ' 🎁' : ''}</span></span><span class="pt">${r.points} điểm</span></div>`).join('')}</div>` : '<p class="text-muted" style="margin:0">Chưa có điểm</p>'}</div>`;
+  }).join('')}</div>`;
+}
+function gmTeamGainsHtml(rv) {
+  return Object.entries((rv && rv.team_gains) || {}).sort((a, b) => b[1] - a[1]).map(([t, p]) => `<span class="gm-pill gm-gold">${esc(t)} +${p}</span>`).join('');
+}
+/** Bộ trò chơi soạn sẵn (meeting/game_presets): nút mở trong tab Trò chơi, hoặc nói "mở trò chơi sinh nhật". */
+async function gmLoadPresets() {
+  if (!GM.presets) { try { GM.presets = ((await GET('/api/game-presets')).presets) || []; } catch (e) { GM.presets = []; } }
+  return GM.presets;
+}
+function gmPresetsHtml(ps) {
+  if (!ps.length) return '';
+  return `<div class="text-[12px] text-muted mb-1">Bộ trò chơi có sẵn (hoặc nói "${esc(AN())} ơi, mở trò chơi sinh nhật")</div>
+    <div class="flex flex-wrap gap-2">${ps.map(p => `<button class="btn btn-primary btn-sm" data-act="game-preset" data-preset="${esc(p.id)}" title="${esc(p.theme || '')}">🎂 ${esc(p.title)}${(p.teams || []).length ? ` · ${p.teams.map(esc).join(' vs ')}` : ''} · ${p.questions} câu</button>`).join('')}</div>`;
+}
+function gmFillPresets(host) {
+  gmLoadPresets().then(ps => { const el = $('[data-gm-presets]', host); if (el && document.contains(el)) el.innerHTML = gmPresetsHtml(ps); });
+}
+async function gamePreset(id) {
+  const R = S.room; if (!R || !id) return;
+  try {
+    const r = await POST(`/api/meetings/${R.id}/game`, { action: 'preset', preset: id });
+    if (r.game) onGameState(r.game);
+    openStage(true);
+  } catch (e) { toast(e.message, 'err'); }
+}
 /** Nội dung trò chơi trên màn hình trình chiếu (g: trạng thái lượt chơi đang chạy, hoặc null để xem trước). */
 function gameStageHtml(art, g) {
   const d = parseGame(art.content) || { title: art.title, questions: [] };
@@ -4568,22 +4646,24 @@ function gameStageHtml(art, g) {
   const q = g.question;
   const head = `<div class="gm-top"><div class="flex flex-wrap gap-2"><span class="gm-pill">${esc(fmtName)}</span>
       ${g.qi >= 0 && g.phase !== 'final' && g.phase !== 'lucky' ? `<span class="gm-pill gm-gold">Câu ${g.qi + 1}/${g.total}</span>` : ''}</div>
-    <span class="gm-pill">${g.format === 'golden_bell' && g.qi >= 0 ? `${g.alive}/${g.players} người trụ lại` : `${g.players} người chơi`}</span></div>`;
+    <span class="gm-pill">${(g.teams || []).length ? g.teams.map(t => `${esc(t.name)} ${t.players}`).join(' · ') + ' người' : g.format === 'golden_bell' && g.qi >= 0 ? `${g.alive}/${g.players} người trụ lại` : `${g.players} người chơi`}</span></div>`;
   if (g.phase === 'lobby') {
     const url = playUrl(g.code);
+    const ts = g.teams || [];
     return `<div class="gm">${head}<div class="gm-lobby"><div>
         <div class="gm-title">${esc(g.title)}</div><p class="text-[20px] mt-2 text-muted">${esc(g.theme || '')}</p>
         <ul class="gm-rules">${(g.rules || []).map(r => `<li>${esc(r)}</li>`).join('')}
-          <li>Nói to, rõ đáp án: "Đáp án B", "câu C"; câu Đúng/Sai thì nói "Đúng" hoặc "Sai"</li></ul>
-        <div class="gm-prize">🎁 <span>Phần thưởng: <b>${esc(g.prize || '')}</b></span></div></div>
+          ${ts.length ? `<li>Chọn đúng văn phòng của mình: ${ts.map(t => esc(t.name)).join(' hoặc ')}</li>` : '<li>Nói to, rõ đáp án: "Đáp án B", "câu C"; câu Đúng/Sai thì nói "Đúng" hoặc "Sai"</li>'}</ul>
+        <div class="gm-prize">🎁 <span>Phần thưởng: <b>${esc(g.team_prize || g.prize || '')}</b>${g.lucky_prize ? `<br>Quay số may mắn: <b>${esc(g.lucky_prize)}</b>` : ''}</span></div>
+        ${ts.length ? `<div class="gm-chips mt-4">${ts.map((t, i) => `<span class="gm-pill" style="background:${GM_TEAM_BG[i % 4]};color:#fff;border-color:transparent">${esc(t.name)}: ${t.players} người</span>`).join('')}</div>` : ''}</div>
       <div class="gm-qr"><div data-gm-qr></div><div style="font-weight:800;font-size:18px;margin-top:6px">Quét để chơi trên điện thoại</div>
         <div class="u">${esc(url)}</div></div></div>
-      <div class="gm-chips">${(g.leaderboard || []).map(r => `<span class="gm-chip">${esc(r.name)}</span>`).join('')}</div></div>`;
+      <div class="gm-chips">${(g.leaderboard || []).map(r => `<span class="gm-chip">${esc(r.name)}${r.team ? ` · ${esc(r.team)}` : ''}</span>`).join('')}</div></div>`;
   }
   if (q && ['reading', 'answering', 'closing'].includes(g.phase)) {
     const left = gmLeft(g);
     const status = g.phase === 'reading' ? `${esc(AN())} đang đọc câu hỏi...` : g.phase === 'closing' ? 'Đang chốt đáp án...' : '';
-    return `<div class="gm">${head}<div class="gm-q">${esc(q.q)}</div>${gmOpts(g, q, g.phase === 'answering' ? '' : 'wait')}
+    return `<div class="gm">${head}${gmTugHtml(g, true)}<div class="gm-q">${esc(q.q)}</div>${gmOpts(g, q, g.phase === 'answering' ? '' : 'wait')}
       <div class="gm-timer">${g.phase === 'answering' ? `<div class="gm-bar"><i data-gm-bar style="width:${(left / q.time) * 100}%"></i></div><span class="gm-sec ${left <= 3 ? 'hot' : ''}" data-gm-sec>${Math.ceil(left)}</span>`
         : `<span class="text-[20px] text-muted">${status}</span>`}</div>
       <div class="gm-chips">${g.n_answered ? `<span class="text-muted mr-1">Đã trả lời (${g.n_answered}):</span>` : ''}${(g.answered || []).map(n => `<span class="gm-chip">${esc(n)}</span>`).join('')}</div></div>`;
@@ -4591,15 +4671,22 @@ function gameStageHtml(art, g) {
   if (q && g.phase === 'reveal' && g.reveal) {
     const rv = g.reveal;
     const gains = (rv.gains || []).slice(0, 5).map(x => `<span class="gm-chip">${esc(x.name)} +${x.points}</span>`).join('');
-    return `<div class="gm" data-gm-celebrate="${(rv.gains || []).length ? 1 : 0}">${head}<div class="gm-q">${esc(q.q)}</div>${gmOpts(g, q, 'reveal')}
+    return `<div class="gm" data-gm-celebrate="${(rv.gains || []).length ? 1 : 0}">${head}${gmTugHtml(g, true)}<div class="gm-q">${esc(q.q)}</div>${gmOpts(g, q, 'reveal')}
       ${rv.explain ? `<div class="gm-explain">💡 ${esc(rv.explain)}</div>` : ''}
-      <div class="gm-chips">${rv.fastest ? `<span class="gm-pill gm-gold">⚡ Nhanh nhất: ${esc(rv.fastest)}</span>` : ''}${gains}
+      <div class="gm-chips">${gmTeamGainsHtml(rv)}${rv.fastest ? `<span class="gm-pill gm-gold">⚡ Nhanh nhất: ${esc(rv.fastest)}</span>` : ''}${gains}
         ${rv.revived ? '<span class="gm-pill">Cả phòng cùng sai: cứu trợ!</span>' : ''}${(rv.eliminated || []).length ? `<span class="text-muted">Bị loại: ${rv.eliminated.map(esc).join(', ')}</span>` : ''}</div></div>`;
   }
+  if (g.phase === 'scores' && (g.teams || []).length) return `<div class="gm">${head}<div class="gm-title" style="font-size:clamp(28px,3.4vw,52px)">Kéo co đến đâu rồi?</div>${gmTugHtml(g)}${gmTeamsHtml(g)}</div>`;
   if (g.phase === 'scores') return `<div class="gm">${head}<div class="gm-title" style="font-size:clamp(28px,3.4vw,52px)">Bảng điểm</div>${gmBoardHtml(g)}</div>`;
   if (g.phase === 'lucky' && g.lucky) {
     return `<div class="gm">${head}<div class="gm-title" style="text-align:center">Quay số may mắn 🎁</div>
-      <div class="gm-slot" data-gm-slot>...</div><p class="text-center text-muted">Một phần quà cho người đã chơi (không tính người thắng)</p></div>`;
+      <div class="gm-slot" data-gm-slot>...</div><p class="text-center text-muted">${g.lucky_prize ? `${esc(g.lucky_prize)} · ` : ''}Quay trong số người ${(g.teams || []).length ? 'chưa lọt top' : 'đã chơi (không tính người thắng)'}</p></div>`;
+  }
+  if ((g.phase === 'final' || g.phase === 'stopped') && (g.teams || []).length) {
+    return `<div class="gm" data-gm-celebrate="${g.phase === 'final' && g.champion ? 1 : 0}">${head}
+      <div class="gm-title" style="text-align:center">${g.phase === 'stopped' ? 'Trò chơi đã dừng' : g.champion ? `🏆 ${esc(g.champion)} thắng kéo co!` : 'Hai văn phòng hòa nhau!'}</div>
+      ${gmTugHtml(g)}${gmTeamsHtml(g, true)}
+      <div class="gm-prize" style="justify-content:center">🎁 <span>Top ${g.top_n || 3} mỗi văn phòng: <b>${esc(g.team_prize || g.prize || '')}</b>${g.lucky ? ` · May mắn: <b>${esc(g.lucky.winner)}</b>${g.lucky.team ? ` (${esc(g.lucky.team)})` : ''}` : ''}</span></div></div>`;
   }
   if (g.phase === 'final' || g.phase === 'stopped') {
     const w = g.winners || [];
@@ -4685,15 +4772,16 @@ function gamePanelHtml(art) {
   const results = art.meta && art.meta.results;
   return `<div class="flex flex-col gap-3">
     <div><div class="text-[20px] font-semibold">${esc(d.title || art.title)}</div>
-      <div class="text-[12.5px] text-muted">${d.format === 'golden_bell' ? 'Rung chuông vàng (sai là bị loại)' : 'Đấu trường tri thức (đúng và nhanh được nhiều điểm)'}, ${(d.questions || []).length} câu. Phần thưởng: ${esc(d.prize || '')}</div></div>
+      <div class="text-[12.5px] text-muted">${(d.teams || []).length ? `Kéo co ${d.teams.map(esc).join(' vs ')}: điểm từng người cộng vào văn phòng, top ${d.top_n || 3} mỗi văn phòng nhận quà. ` : ''}${d.format === 'golden_bell' ? 'Rung chuông vàng (sai là bị loại)' : 'Đấu trường tri thức (đúng và nhanh được nhiều điểm)'}, ${(d.questions || []).length} câu. Phần thưởng: ${esc(d.team_prize || d.prize || '')}</div></div>
     ${live ? `<div class="notice notice-info"><b>Đang chơi:</b> ${esc({ lobby: 'chờ bắt đầu', reading: 'đang đọc câu hỏi', answering: 'đang đếm ngược', closing: 'đang chốt đáp án', reveal: 'công bố đáp án', scores: 'bảng điểm', lucky: 'quay số may mắn' }[g.phase] || g.phase)}${g.qi >= 0 ? `, câu ${g.qi + 1}/${g.total}` : ''}. ${g.players} người chơi.
       <div class="flex flex-wrap gap-2 mt-2">${gameNavHtml(art, g)}<button class="btn btn-ghost btn-sm" data-act="stage-open">Mở màn hình trình chiếu</button></div></div>`
       : `<div class="flex flex-wrap gap-2"><button class="btn btn-primary btn-sm" data-act="game-play" data-aid="${art.id}">${g || results ? 'Chơi lại trên màn hình' : 'Chơi trên màn hình'}</button></div>`}
     ${g && (g.leaderboard || []).length ? `<div><div class="text-[12px] text-muted mb-1">Bảng điểm</div>${gmBoardHtml(g, 10)}</div>` : ''}
-    ${results && !live ? `<p class="text-[12.5px] text-muted">Lần chơi gần nhất: ${results.players} người, thắng: ${esc((results.winners || []).map(w => w.name).join(', ') || 'chưa có')}${results.lucky ? `, may mắn: ${esc(results.lucky)}` : ''}.</p>` : ''}
+    ${results && !live ? `<p class="text-[12.5px] text-muted">Lần chơi gần nhất: ${results.players} người${results.champion ? `, văn phòng thắng: ${esc(results.champion)}` : ''}, thắng: ${esc((results.winners || []).map(w => w.name).join(', ') || 'chưa có')}${results.lucky ? `, may mắn: ${esc(results.lucky)}` : ''}.</p>` : ''}
     <details class="panel p-3"><summary class="cursor-pointer text-[13px]">Câu hỏi và đáp án (chỉ người dẫn xem, đừng chiếu)</summary>
       <ol class="mt-2 flex flex-col gap-2 text-[13px]" style="list-style:decimal;padding-left:18px">${(d.questions || []).map(q => `<li><b>${esc(q.q)}</b>
         <div class="text-muted">${q.options.map((o, i) => `${i === q.answer ? '<b style="color:rgb(var(--accent))">' : ''}${q.type === 'truefalse' ? '' : GM_LETTER[i] + '. '}${esc(o)}${i === q.answer ? ' ✓</b>' : ''}`).join(' · ')}</div></li>`).join('')}</ol></details>
+    <div data-gm-presets></div>
   </div>`;
 }
 
@@ -6410,6 +6498,7 @@ document.addEventListener('click', async e => {
     case 'create-meeting': return openCreateMeeting();
     case 'game-play': case 'game-start': case 'game-next': case 'game-scores': case 'game-stop':
       return gameAction(act.slice(5), el.dataset.aid ? parseInt(el.dataset.aid, 10) : null);
+    case 'game-preset': return gamePreset(el.dataset.preset);
     case 'tpl-manage': return openTemplates();
     case 'minutes-regen': if (S.room) openMeetingTemplate(S.room, true); return;
     case 'hub-group': location.hash = el.dataset.gid ? `#/g/${el.dataset.gid}` : '#/'; return;

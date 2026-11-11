@@ -34,6 +34,18 @@
   .ok { color: var(--ok); } .bad { color: var(--bad); }
   .pill { display: inline-block; padding: 4px 10px; border-radius: 99px; background: #EFE7FB; color: var(--brand); font-size: 13px; font-weight: 600; }
   .gift { font-size: 15px; background: #FFF6DB; border-radius: 14px; padding: 12px 14px; }
+  /* kéo co giữa các văn phòng */
+  .teams { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+  .team { padding: 14px 10px; border-radius: 14px; border: 2px solid #E3DDF0; background: #fff; font-weight: 700; font-size: 16px; color: var(--ink);
+          display: flex; flex-direction: column; gap: 2px; align-items: center; }
+  .team small { font-weight: 500; color: var(--muted); font-size: 12.5px; }
+  .team.on { border-color: var(--brand2); background: #F1E8FF; color: var(--brand); }
+  .tug { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; font-size: 13px; font-weight: 700; margin-top: 10px; }
+  .tug .r { text-align: right; } .tug small { display: block; font-weight: 500; color: var(--muted); }
+  .rope { position: relative; height: 16px; border-radius: 99px; background: #F2B000; }
+  .rope i { position: absolute; inset: 0 auto 0 0; border-radius: 99px 0 0 99px; background: linear-gradient(90deg, #7A2BE0, #9B4DF0); transition: width .8s; }
+  .rope em { position: absolute; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, .3); transition: left .8s; }
+  .tw { text-align: left; font-size: 14px; margin: 8px 0; } .tw b { color: var(--brand); }
   ol { margin: 6px 0 0; padding-left: 20px; } li { margin: 4px 0; }
   #net { text-align: center; font-size: 13px; color: var(--bad); padding: 0 16px; }
   footer { text-align: center; font-size: 12px; color: var(--muted); padding: 10px 0 18px; }
@@ -77,6 +89,13 @@ async function poll() {
   clearTimeout(timer); timer = setTimeout(poll, st && ['answering', 'closing', 'lucky'].includes(st.phase) ? 700 : 1200);
 }
 function left() { return st && st.deadline ? Math.max(0, st.deadline - (Date.now() / 1000 + skew)) : 0; }
+function tugHtml(ts) {                              // dây kéo co: 2 văn phòng thì một dây, nhiều hơn thì mỗi đội một thanh
+  if (ts.length === 2) {
+    const [a, b] = ts; const p = Math.round((a.share == null ? .5 : a.share) * 100);
+    return `<div class="tug"><div>${a.lead ? '🔥 ' : ''}${esc(a.name)}<small>${a.points} điểm</small></div><div class="rope"><i style="width:${p}%"></i><em style="left:${p}%"></em></div><div class="r">${esc(b.name)}${b.lead ? ' 🔥' : ''}<small>${b.points} điểm</small></div></div>`;
+  }
+  return ts.map(t => `<div class="tug" style="margin-top:4px"><div>${t.lead ? '🔥 ' : ''}${esc(t.name)}</div><div class="rope" style="background:#E9E3F5"><i style="width:${Math.round((t.share || 0) * 100)}%"></i></div><div class="r">${t.points}</div></div>`).join('');
+}
 function render() {
   $('#title').textContent = st.title || 'Trò chơi';
   const me = st.me || {};
@@ -87,33 +106,39 @@ function render() {
       return;
     }
     if ($('#nm')) {                              // đang nhập tên: giữ nguyên ô nhập, chỉ cập nhật chữ xung quanh
-      $('#theme').textContent = st.theme || ''; $('#prize').textContent = st.prize || '';
+      $('#theme').textContent = st.theme || ''; $('#prize').textContent = st.team_prize || st.prize || '';
+      app.querySelectorAll('.team').forEach(b => { const t = (st.teams || []).find(x => x.name === b.dataset.team); const s = b.querySelector('small'); if (t && s) s.textContent = `${t.players} người đã vào`; });
       return;
     }
     lastSig = 'join';
+    const teams = st.teams || [];
     app.innerHTML = `<div class="card"><p class="muted" style="margin-top:0" id="theme">${esc(st.theme || '')}</p>
       <label for="nm" class="muted">Tên hiện trên bảng điểm</label>
       <input id="nm" maxlength="30" placeholder="Ví dụ: Lan - Marketing" autocomplete="nickname" enterkeyhint="go">
+      ${teams.length ? `<div class="muted" style="margin-top:12px">Văn phòng của mình</div><div class="teams">${teams.map(t => `<button type="button" class="team" data-team="${esc(t.name)}">${esc(t.name)}<small>${t.players} người đã vào</small></button>`).join('')}</div>` : ''}
       <button class="primary" id="go">Vào chơi</button></div>
-      <div class="gift">Phần thưởng: <b id="prize">${esc(st.prize || '')}</b></div>`;
+      <div class="gift">Phần thưởng: <b id="prize">${esc(st.team_prize || st.prize || '')}</b>${st.lucky_prize ? `<br>Quay số may mắn: <b>${esc(st.lucky_prize)}</b>` : ''}</div>`;
+    app.querySelectorAll('.team').forEach(b => b.onclick = () => app.querySelectorAll('.team').forEach(x => x.classList.toggle('on', x === b)));
     $('#go').onclick = join; $('#nm').onkeydown = e => { if (e.key === 'Enter') join(); };
     $('#nm').focus();
     return;
   }
+  const teamy = (st.teams || []).length > 0;   // kéo co giữa các văn phòng
   const sig = JSON.stringify([st.phase, st.qi, st.phase === 'lobby' ? st.players : 0, me.joined, me.name, me.choice,
     me.points, me.rank, me.alive, me.gain, st.reveal ? st.reveal.answer : null, st.lucky ? st.lucky.winner : null,
-    (st.winners || []).map(w => w.name).join('|')]);
+    (st.winners || []).map(w => w.name).join('|'), (st.teams || []).map(t => `${t.points}:${t.players}`).join('|'), me.team_rank, st.champion]);
   if (sig === lastSig) return;                   // không đổi gì: thanh thời gian tự chạy, không vẽ lại cả khung
   lastSig = sig;
-  const head = `<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-    <div><div style="font-weight:700">${esc(me.name || '')}</div><div class="muted">${me.points || 0} điểm${me.rank && me.points ? `, hạng ${me.rank}` : ''}${st.format === 'golden_bell' && st.qi >= 0 ? (me.alive ? ', đang trụ lại' : ', đã bị loại') : ''}</div></div>
-    ${st.total && st.qi >= 0 && st.phase !== 'final' ? `<span class="pill">Câu ${st.qi + 1}/${st.total}</span>` : ''}</div>`;
+  const head = `<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+    <div><div style="font-weight:700">${esc(me.name || '')}${me.team ? ` <span class="pill">${esc(me.team)}</span>` : ''}</div><div class="muted">${me.points || 0} điểm${me.team && me.team_rank && me.points ? `, hạng ${me.team_rank} ở ${esc(me.team)}` : me.rank && me.points ? `, hạng ${me.rank}` : ''}${st.format === 'golden_bell' && st.qi >= 0 ? (me.alive ? ', đang trụ lại' : ', đã bị loại') : ''}</div></div>
+    ${st.total && st.qi >= 0 && st.phase !== 'final' ? `<span class="pill">Câu ${st.qi + 1}/${st.total}</span>` : ''}
+    ${teamy && st.qi >= 0 ? `<div style="flex-basis:100%">${tugHtml(st.teams)}</div>` : ''}</div>`;
   const q = st.question;
   let body = '';
   if (st.phase === 'lobby') {
-    body = `<div class="card"><div class="big">Đã vào!</div><p class="muted" style="text-align:center">Chờ người dẫn bắt đầu. ${st.players} người đang chơi.</p>
+    body = `<div class="card"><div class="big">Đã vào!</div><p class="muted" style="text-align:center">${me.team ? `Anh chị chơi cho văn phòng <b>${esc(me.team)}</b>. ` : ''}Chờ người dẫn bắt đầu. ${st.players} người đang chơi${teamy ? ` (${st.teams.map(t => `${esc(t.name)} ${t.players}`).join(', ')})` : ''}.</p>
       ${(st.rules || []).length ? `<ol>${st.rules.map(r => `<li>${esc(r)}</li>`).join('')}</ol>` : ''}</div>
-      <div class="gift">Phần thưởng: <b>${esc(st.prize || '')}</b></div>`;
+      <div class="gift">Phần thưởng: <b>${esc(st.team_prize || st.prize || '')}</b>${st.lucky_prize ? `<br>Quay số may mắn: <b>${esc(st.lucky_prize)}</b>` : ''}</div>`;
   } else if (q && (st.phase === 'reading' || st.phase === 'answering' || st.phase === 'closing')) {
     const open = st.phase === 'answering' && left() > 0 && me.alive !== false;
     const picked = me.choice;
@@ -128,10 +153,19 @@ function render() {
     const won = mine === right;
     body = `<div class="card" style="text-align:center"><div class="big ${won ? 'ok' : 'bad'}">${mine == null ? 'Chưa trả lời' : won ? `+${me.gain || 0}` : 'Chưa đúng'}</div>
       <p>Đáp án đúng: <b>${q.type === 'truefalse' ? esc(q.options[right]) : `${L[right]}. ${esc(q.options[right])}`}</b></p>
-      ${st.reveal.explain ? `<p class="muted">${esc(st.reveal.explain)}</p>` : ''}</div>`;
+      ${st.reveal.explain ? `<p class="muted">${esc(st.reveal.explain)}</p>` : ''}
+      ${teamy && st.reveal.team_gains ? `<p class="muted">${Object.entries(st.reveal.team_gains).map(([t, p]) => `<b>${esc(t)}</b> +${p}`).join(' · ') || 'Chưa văn phòng nào ghi điểm câu này'}</p>` : ''}</div>`;
   } else if (st.phase === 'lucky' && st.lucky) {
     body = `<div class="card" style="text-align:center"><div class="muted">Quay số may mắn</div><div class="big" id="spin">...</div></div>`;
     spin();
+  } else if ((st.phase === 'final' || st.phase === 'stopped') && teamy) {
+    const tw = st.team_winners || {}; const mine = tw[me.team] || []; const inTop = mine.some(w => w.name === me.name);
+    body = `<div class="card" style="text-align:center"><div class="muted">Kết thúc</div>
+      <div class="big">${st.champion ? `🏆 ${esc(st.champion)}` : st.phase === 'stopped' ? 'Đã dừng' : 'Hòa nhau!'}</div>
+      ${st.champion ? '<p class="muted" style="margin-top:0">thắng kéo co!</p>' : ''}
+      ${inTop ? `<p class="ok"><b>Chúc mừng! Anh chị lọt Top ${st.top_n || 3} văn phòng ${esc(me.team)}, nhận ${esc(st.team_prize || st.prize || 'quà')}.</b></p>` : `<p class="muted">${me.team_rank ? `Anh chị xếp hạng ${me.team_rank} ở ${esc(me.team)}.` : 'Cảm ơn anh chị đã chơi!'}</p>`}
+      ${Object.entries(tw).map(([t, ws]) => `<div class="tw"><b>${esc(t)}</b>: ${ws.length ? ws.map((w, i) => `${i + 1}. ${esc(w.name)} (${w.points})`).join(' · ') : 'chưa có điểm'}</div>`).join('')}
+      ${st.lucky ? `<p>🎁 May mắn: <b>${esc(st.lucky.winner)}</b></p>` : ''}</div>`;
   } else if (st.phase === 'final' || st.phase === 'stopped') {
     const w = (st.winners || []).map(x => esc(x.name)).join(', ');
     body = `<div class="card" style="text-align:center"><div class="muted">Kết thúc</div>
@@ -151,15 +185,17 @@ function spin() {
   tick();
 }
 setInterval(() => { const b = $('#bar'); if (b && st && st.question) b.style.width = `${(left() / st.question.time) * 100}%`; }, 200);
+function joinErr(text) {
+  let msg = $('#joinerr'); if (!msg) { msg = document.createElement('p'); msg.id = 'joinerr'; msg.className = 'bad'; $('#go').after(msg); }
+  msg.textContent = text;
+}
 async function join() {
   const name = ($('#nm').value || '').trim(); if (!name) return $('#nm').focus();
+  const tb = $('.team.on'); const team = tb ? tb.dataset.team : '';
+  if ((st.teams || []).length && !team) return joinErr('Chọn văn phòng của mình trước nhé');
   $('#go').disabled = true;
-  try { const r = await api('/join', { name }); pid = r.pid; try { localStorage.setItem(KEY, pid); } catch (e) { /* chỉ giữ trong phiên */ } poll(); }
-  catch (e) {
-    $('#go').disabled = false;
-    let msg = $('#joinerr'); if (!msg) { msg = document.createElement('p'); msg.id = 'joinerr'; msg.className = 'bad'; $('#go').after(msg); }
-    msg.textContent = e.message;
-  }
+  try { const r = await api('/join', { name, team }); pid = r.pid; try { localStorage.setItem(KEY, pid); } catch (e) { /* chỉ giữ trong phiên */ } poll(); }
+  catch (e) { $('#go').disabled = false; joinErr(e.message); }
 }
 async function answer(i) {
   if (sending) return; sending = true;
