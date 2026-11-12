@@ -43,6 +43,10 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
   công cụ `people_search`, app chọn nhầm nó làm công cụ tìm tài liệu (cùng chứa "search") nên mọi câu tra ra "chưa thấy
   tài liệu nào khớp" -> `search_tool` bỏ qua công cụ tìm người / hoạt động người dùng, ưu tiên tên `search`; ô Kiểm tra
   trong Cài đặt hiện công cụ đã dùng và kết quả thô khi không đọc ra tài liệu (`wikibox.search_raw`).
+- **3.29.3** (13/11/2026): WikiBox chuyển tên miền `wiki.urbox.dev` -> `wiki.urbox.vn` (tên miền cũ trả 404 cho
+  `/.well-known/oauth-protected-resource` và `/mcp`, Bảng BD báo "WikiBox trả lỗi 404 khi đọc /.well-known..."). Mặc định
+  `WIKIBOX_URL` đổi sang `.vn`; token OAuth cấp bởi máy chủ cũ không dùng được, mọi người phải **kết nối lại** WikiBox trong
+  Cài đặt. Nếu Render có đặt tay biến `WIKIBOX_URL` thì phải sửa ở đó, biến môi trường thắng mặc định trong mã.
 - **3.29.2**: công cụ `search` của WikiBox trả **văn bản liệt kê** (`[1] tiêu đề — kho · loại · ngày`, `about:`, `url:`,
   `id:`, `Summary:`) chứ không phải JSON, nên `normalize_hits` không đọc ra tài liệu nào dù tìm thấy 5 kết quả. Thêm
   `_parse_listing`: mỗi mục thành một hit {title, kb, url, id, text = about + Summary + đoạn khớp}; Bảng BD có nguồn U.
@@ -160,7 +164,7 @@ Hai việc để bật mic/thu liên tục không bị ngắt và không tốn p
 Từ 23/10/2026 WikiBox cho Copilot đăng nhập OAuth: đăng ký ứng dụng tự động (`/api/v1/oauth/register`) nhận cả
 `https://urbox-meeting-api.onrender.com` lẫn `http://localhost:8080`, trang đăng nhập WikiBox có "Đăng nhập bằng
 Google". Mã OAuth (`meeting/wikibox.py`) không đổi; Cài đặt ghi rõ các bước, hướng dẫn mục 13.4 cập nhật, chỉ dẫn
-tạo API key trỏ tới `wiki.urbox.dev/platform/wikibox-mcp`. Tên gọi chính thức là WikiBox (không còn UrWiki): bộ
+tạo API key trỏ tới `wiki.urbox.vn/platform/wikibox-mcp` (tên miền đổi từ `.dev` sang `.vn` ngày 13/11/2026). Tên gọi chính thức là WikiBox (không còn UrWiki): bộ
 slide và kịch bản trong `docs/pitch/` đã đổi theo.
 
 ## Bản 3.21.1: PowerPoint hiện đúng thiết kế

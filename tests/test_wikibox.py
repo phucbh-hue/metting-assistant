@@ -211,16 +211,16 @@ class KeyAndSearchTests(WikiBase):
         listing = ("5 results (documents 3, wiki 2) · apps: ok (reachable) 15 · more: call search again with cursor=\"offset:5\"\n\n"
                    "[1] Media Coverage - Bài báo về UrBox — Thông tin của UrBox/(root) · xlsx · 2026-11-10\n"
                    "   about: Tài liệu liệt kê một số bài đăng nổi bật liên quan đến các hạng mục trong nội dung submission...\n"
-                   "   url: https://wiki.urbox.dev/platform/knowledge-bases/8ec648cc?knowledge_id=9b63c25d\n"
+                   "   url: https://wiki.urbox.vn/platform/knowledge-bases/8ec648cc?knowledge_id=9b63c25d\n"
                    "   id: doc:9b63c25d\n"
                    "   at=3 · Summary: Báo Tuổi Trẻ đưa tin UrBox hợp tác với 300 thương hiệu.\n"
                    "[2] Chính sách đổi trả voucher — Wiki/Chính sách · wiki · 2026-09-01\n"
                    "   Voucher điện tử đổi trả trong 7 ngày: liên hệ CSKH.\n"
-                   "   url: https://wiki.urbox.dev/platform/knowledge-bases/8ec648cc?knowledge_id=abc\n")
+                   "   url: https://wiki.urbox.vn/platform/knowledge-bases/8ec648cc?knowledge_id=abc\n")
         hits = wikibox.normalize_hits({"result": listing})
         self.assertEqual([h["title"] for h in hits], ["Media Coverage - Bài báo về UrBox", "Chính sách đổi trả voucher"])
         self.assertEqual((hits[0]["kb"], hits[0]["id"], hits[0]["url"]),
-                         ("Thông tin của UrBox/(root)", "doc:9b63c25d", "https://wiki.urbox.dev/platform/knowledge-bases/8ec648cc?knowledge_id=9b63c25d"))
+                         ("Thông tin của UrBox/(root)", "doc:9b63c25d", "https://wiki.urbox.vn/platform/knowledge-bases/8ec648cc?knowledge_id=9b63c25d"))
         self.assertIn("Tài liệu liệt kê một số bài đăng", hits[0]["text"])
         self.assertIn("Báo Tuổi Trẻ đưa tin", hits[0]["text"])
         self.assertNotIn("doc:9b63c25d", hits[0]["text"])
