@@ -43,6 +43,9 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
   công cụ `people_search`, app chọn nhầm nó làm công cụ tìm tài liệu (cùng chứa "search") nên mọi câu tra ra "chưa thấy
   tài liệu nào khớp" -> `search_tool` bỏ qua công cụ tìm người / hoạt động người dùng, ưu tiên tên `search`; ô Kiểm tra
   trong Cài đặt hiện công cụ đã dùng và kết quả thô khi không đọc ra tài liệu (`wikibox.search_raw`).
+- **3.29.2**: công cụ `search` của WikiBox trả **văn bản liệt kê** (`[1] tiêu đề — kho · loại · ngày`, `about:`, `url:`,
+  `id:`, `Summary:`) chứ không phải JSON, nên `normalize_hits` không đọc ra tài liệu nào dù tìm thấy 5 kết quả. Thêm
+  `_parse_listing`: mỗi mục thành một hit {title, kb, url, id, text = about + Summary + đoạn khớp}; Bảng BD có nguồn U.
 
 ## Bản 3.23.4: bot Meet không còn tự nhắn tin chào vào chat
 

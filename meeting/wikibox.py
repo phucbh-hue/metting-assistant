@@ -518,10 +518,72 @@ def search_tool(found: List[Dict[str, Any]]) -> Optional[Tuple[str, str, str]]:
 
 
 _LIST_KEYS = ("results", "hits", "items", "documents", "chunks", "data", "matches", "result")
+_ENTRY = re.compile(r"^\[(\d+)\]\s*(.*)$")
+_LISTING = re.compile(r"(?:^|\n)\[\d+\]\s")
+_FIELD = re.compile(r"^([A-Za-z_][A-Za-z_ ]{0,19})\s*[:=]\s*(.*)$")
+_META_KEYS = {"url", "id", "at", "type", "date", "score", "kb", "source", "cursor"}
+
+
+def _parse_listing(text: str) -> List[Dict[str, Any]]:
+    """Công cụ search của WikiBox (12/11/2026) trả VĂN BẢN liệt kê chứ không phải JSON:
+
+        5 results (documents 3, wiki 2) · apps: ok (reachable) 15 · more: call search again with cursor="offset:5"
+
+        [1] Media Coverage - Bài báo về UrBox — Thông tin của UrBox/(root) · xlsx · 2026-11-10
+           about: Tài liệu liệt kê một số bài đăng nổi bật...
+           url: https://wiki.urbox.dev/platform/knowledge-bases/<kb>?knowledge_id=<id>
+           id: doc:<id>
+           at=3 · Summary: ...
+
+    Mỗi mục "[n] tiêu đề — đường dẫn kho · loại · ngày" rồi các dòng "khóa: giá trị" (có thể nhiều cặp trên một dòng, cách
+    nhau bằng " · "). Chữ của mục = mọi giá trị không phải siêu dữ liệu (about, Summary, đoạn khớp...) nối lại."""
+    entries: List[Dict[str, Any]] = []
+    cur: Optional[Dict[str, Any]] = None
+    for ln in text.splitlines():
+        s = ln.strip()
+        if not s:
+            continue
+        m = _ENTRY.match(s)
+        if m:
+            cur = {"head": m.group(2).strip(), "meta": {}, "parts": []}
+            entries.append(cur)
+            continue
+        if cur is None:
+            continue                                   # dòng tổng kết trước mục đầu tiên
+        for p in ([x.strip() for x in s.split(" · ")] if " · " in s else [s]):
+            fm = _FIELD.match(p)
+            if fm and fm.group(1).strip().lower() in _META_KEYS:
+                cur["meta"][fm.group(1).strip().lower()] = fm.group(2).strip()
+            elif fm:
+                if fm.group(2).strip():
+                    cur["parts"].append(fm.group(2).strip())
+            elif p:
+                cur["parts"].append(p)
+    out = []
+    for e in entries:
+        head, kb = e["head"], ""
+        if " — " in head:
+            head, rest = head.split(" — ", 1)
+            kb = rest.split(" · ")[0].strip()
+        title = head.split(" · ")[0].strip()
+        url = e["meta"].get("url", "")
+        text_ = re.sub(r"\s+", " ", " ".join(e["parts"])).strip()
+        if title or text_:
+            out.append({"title": (title or "Tài liệu WikiBox")[:200], "text": text_[:1800],
+                        "url": url if url.startswith(("http://", "https://")) else "", "score": None, "kb": kb[:120],
+                        "id": e["meta"].get("id", "")[:120]})
+    return out
 
 
 def normalize_hits(data: Any, k: int = 5) -> List[Dict[str, Any]]:
     """Kết quả tìm kiếm (dạng chưa biết trước) -> [{title, text, url, score, kb}]."""
+    blob = data if isinstance(data, str) else (
+        next((data[x] for x in ("result", "text", "content", "output") if isinstance(data.get(x), str)), None)
+        if isinstance(data, dict) else None)
+    if blob and _LISTING.search(blob):
+        parsed = _parse_listing(blob)
+        if parsed:
+            return parsed[:k]
     items: Any = data
     if isinstance(data, dict):
         items = next((data[x] for x in _LIST_KEYS if isinstance(data.get(x), list)), None)
@@ -566,9 +628,9 @@ async def search_raw(owner: str, query: str, k: int = 5) -> Tuple[List[Dict[str,
     if res.get("error"):
         raise WikiboxError(str(res["error"])[:200])
     try:
-        raw = json.dumps(res, ensure_ascii=False, default=str)[:600]
+        raw = json.dumps(res, ensure_ascii=False, default=str)[:2500]
     except Exception:
-        raw = str(res)[:600]
+        raw = str(res)[:2500]
     return normalize_hits(res, k), name, raw
 
 
