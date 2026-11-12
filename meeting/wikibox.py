@@ -561,7 +561,10 @@ async def search_for_meeting(meeting: Optional[Dict[str, Any]], query: str, k: i
     if not owner or not connected(owner):
         return []
     try:
-        return await asyncio.wait_for(search(owner, query, k), SEARCH_TIMEOUT_S)
+        hits = await asyncio.wait_for(search(owner, query, k), SEARCH_TIMEOUT_S)
+        if hits:                                    # tìm được: xóa lỗi cũ còn ghi trên kết nối (nếu có)
+            _col().update_one({"owner": owner, "error": {"$nin": [None, ""]}}, {"$set": {"error": ""}})
+        return hits
     except (WikiboxError, asyncio.TimeoutError) as e:
         # Trước đây nuốt lỗi âm thầm nên kết nối hết hạn mà không ai biết: ghi lỗi lên kết nối để Cài đặt hiện đúng lý do
         # ("cần kết nối lại WikiBox" / "WikiBox chậm") thay vì cứ báo "không tìm được tài liệu".
@@ -572,6 +575,36 @@ async def search_for_meeting(meeting: Optional[Dict[str, Any]], query: str, k: i
         except Exception:
             pass
         return []
+
+
+async def search_with_note(meeting: Optional[Dict[str, Any]], query: str, k: int = 5
+                           ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Bảng BD: kết quả tìm + ghi chú vì sao không có nguồn WikiBox, để bảng nói rõ thay vì im lặng không có U1.."""
+    hits = await search_for_meeting(meeting, query, k)
+    return hits, note_for_meeting(meeting, hits)
+
+
+def note_for_meeting(meeting: Optional[Dict[str, Any]], hits: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """{"state": "ok" | "none" | "off" | "error", "text": lý do viết cho người dùng} cho một lượt hỏi đáp BD."""
+    if hits:
+        return {"state": "ok", "n": len(hits)}
+    if not enabled():
+        return {"state": "off", "text": "WikiBox chưa bật trên server (WIKIBOX_URL)"}
+    owner = owner_of(meeting)
+    doc = _col().find_one({"owner": owner}, {"error": 1}) if owner else None
+    if not doc:
+        who_txt = "người tạo cuộc họp" if auth.ENABLED else "máy này"
+        return {"state": "off", "text": f"{who_txt} chưa kết nối WikiBox (Cài đặt > Kho tri thức WikiBox)"}
+    if doc.get("error"):
+        return {"state": "error", "text": str(doc["error"])[:200]}
+    return {"state": "none", "text": "không có tài liệu khớp câu hỏi này"}
+
+
+def bd_status(meeting: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Đầu bảng BD: WikiBox có dùng được cho cuộc họp này không (kết nối của người tạo cuộc họp) và lỗi gần nhất."""
+    owner = owner_of(meeting)
+    doc = _col().find_one({"owner": owner}, {"error": 1}) if (owner and enabled()) else None
+    return {"enabled": enabled(), "connected": bool(doc), "error": str((doc or {}).get("error") or "")[:200]}
 
 
 def agent_tool_lines(found: List[Dict[str, Any]], limit: int = 8) -> Dict[str, str]:

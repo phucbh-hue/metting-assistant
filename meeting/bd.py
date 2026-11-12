@@ -293,10 +293,11 @@ class BDAssistant:
         if auto:
             self.auto_inflight += 1
         await self.emit(self.status())
+        wiki_note: Dict[str, Any] = {}
         try:
             artifacts.set_meeting(self.s.id, "BD gợi ý")
             gid = self.s.meeting.get("group_id")
-            wiki_job = asyncio.ensure_future(wikibox.search_for_meeting(self.s.meeting, turn["question"], U_SOURCES))
+            wiki_job = asyncio.ensure_future(wikibox.search_with_note(self.s.meeting, turn["question"], U_SOURCES))
             idx = await asyncio.to_thread(retrieval.group_index, gid) if gid else retrieval.Index([])
             history = "" if auto else await asyncio.to_thread(self._history, turn["at"])
             search = f"{turn['question']} {history[-300:] if history else ''}".strip()
@@ -304,8 +305,9 @@ class BDAssistant:
             hist = idx.search(search, k=M_SOURCES, kinds={"minutes", "talk"}, exclude_meeting=self.s.id)
             refs = {f"K{i + 1}": p for i, p in enumerate(kb)}
             refs.update({f"M{i + 1}": p for i, p in enumerate(hist)})
+            wiki_hits, wiki_note = await wiki_job
             refs.update({f"U{i + 1}": {"kind": "wiki", "title": h["title"], "ref": h["kb"] or "WikiBox", "text": h["text"],
-                                       "url": h["url"]} for i, h in enumerate(await wiki_job)})
+                                       "url": h["url"]} for i, h in enumerate(wiki_hits)})
             src = "\n\n".join(f"[{c}] {p.get('title')} - {p.get('ref')}:\n{p.get('text', '')[:1400]}" for c, p in refs.items())
             label = {"auto": "KHÁCH NÓI, trợ lý tự nhận ra từ lời nói", "typed": "ĐỘI BD HỎI TRÊN KHUNG CHAT",
                      "marked": "ĐỘI BD ĐÁNH DẤU CÂU NÀY TRONG LỜI NÓI"}[turn["source"]]
@@ -326,7 +328,8 @@ class BDAssistant:
                 used = list(dict.fromkeys(_CODE.findall(" ".join([answer] + notes))))
                 upd = {"status": "done", "question": question or turn["question"], "answer": answer, "notes": notes,
                        "sources": [_src(c, refs[c]) for c in used if c in refs][:8],
-                       "confidence": _clean(data.get("confidence"), 10).lower()}
+                       "confidence": _clean(data.get("confidence"), 10).lower(),
+                       "wiki": wiki_note}                  # vì sao không có nguồn U (chưa kết nối / lỗi / không khớp)
         except Exception as e:
             log.warning("meeting.bd: trả lời câu hỏi lỗi: %s", e)
             upd = {"status": "error", "answer": f"Chưa trả lời được: {e}"}

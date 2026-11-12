@@ -36,6 +36,10 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
   có tiếng lại mở luồng mới đúng cấu hình. `MEET_DIARIZE=1` vẫn bật cho mọi luồng.
 - Test: `tests/test_calendar_meet.py::test_room_account_split_mode_separates_voices_like_mic`,
   `tests/test_api.py::test_live_filter_lists_only_open_meetings`.
+- **3.29.1**: Bảng BD (app và bảng trên tab họp) nói rõ vì sao câu trả lời không có nguồn U: người tạo cuộc họp chưa kết
+  nối WikiBox, kết nối lỗi / hết hạn (ghi ở `wikibox_tokens.error`, xóa khi tìm lại được), hay chỉ là không có tài liệu
+  khớp (`wikibox.search_with_note`, `turn["wiki"]`, `GET /api/meetings/{id}/bd` có `wikibox`). "Tra thêm trên mạng" báo
+  thẳng khi API key Claude của server bị từ chối (401) thay vì lỗi chung chung.
 
 ## Bản 3.23.4: bot Meet không còn tự nhắn tin chào vào chat
 

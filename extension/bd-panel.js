@@ -161,6 +161,11 @@
     return `<div class="a web"><div class="warn">Trên mạng: thông tin công khai, chưa kiểm chứng. Kiểm tra lại trước khi nói với khách.</div>${esc(w.answer || '')}`
       + `${(w.notes || []).length ? `<ul class="n">${w.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}<div class="src">${legend(w.sources)}</div></div>`;
   }
+  const wikiHtml = t => {           // vì sao không có nguồn U (WikiBox chưa kết nối / lỗi): nói rõ thay vì im lặng
+    const w = t.wiki;
+    if (!w || w.state === 'ok' || w.state === 'none' || !w.text) return '';
+    return `<div class="warn" style="margin-top:4px">WikiBox: ${esc(w.text)}</div>`;
+  };
   function turnHtml(t) {
     let a;
     if (t.status === 'pending') a = '<div class="a m">Đang tìm trong tài liệu, các buổi trước và kho tri thức...</div>';
@@ -169,7 +174,7 @@
       a = `<div class="a ${t.id === st.fresh ? 'fresh' : ''}">${esc(t.answer || '')}`
         + `${(t.notes || []).length ? `<div class="m" style="margin-top:6px">Ghi chú cho đội mình</div><ul class="n">${t.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}`
         + `<div class="src">${t.confidence ? `<span class="chip">độ chắc: ${esc(t.confidence)}</span>` : ''}${legend(t.sources)}`
-        + `<button class="lnk" data-copy="${esc(t.id)}" style="margin-left:auto">Chép</button></div></div>`;
+        + `<button class="lnk" data-copy="${esc(t.id)}" style="margin-left:auto">Chép</button></div>${wikiHtml(t)}</div>`;
     }
     return `<div class="tn"><div class="m">${who(t)}, ${at(t)}</div><div class="q">${esc(t.question || t.asked || '')}</div>${a}${webHtml(t)}</div>`;
   }

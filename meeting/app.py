@@ -89,7 +89,7 @@ async def lifespan(_app: FastAPI):
     db.flush()                  # lưu trên máy: ghi nốt phần còn chờ trước khi tắt
 
 
-APP_VERSION = "3.29.0"              # dấu hiệu phiên bản ở /healthz để kiểm tra bản mới đã lên server chưa (giữ khớp package.json)
+APP_VERSION = "3.29.1"              # dấu hiệu phiên bản ở /healthz để kiểm tra bản mới đã lên server chưa (giữ khớp package.json)
 app = FastAPI(title="Meeting Assistant AI", version=APP_VERSION, lifespan=lifespan)
 _MEETING_PATH = re.compile(r"^/(?:api/meetings|ws/meeting)/(\d+)(?:/|$)")
 _ARTIFACT_PATH = re.compile(r"^/api/artifacts/(\d+)(?:/|$)")
@@ -2284,7 +2284,8 @@ async def meeting_bd(mid: int):
         return {"enabled": False}
     g = groups.get_group(s.meeting.get("group_id")) or {}
     return {"enabled": True, "turns": await asyncio.to_thread(bd.load_turns, mid), "roles": a.roles, "busy": a.inflight,
-            "group": {"id": g.get("id"), "name": g.get("name"), "doc_count": group_kb.signature(g["id"])[0] if g else 0}}
+            "group": {"id": g.get("id"), "name": g.get("name"), "doc_count": group_kb.signature(g["id"])[0] if g else 0},
+            "wikibox": await asyncio.to_thread(wikibox.bd_status, s.meeting)}
 
 
 @app.post("/api/meetings/{mid}/bd/ask")

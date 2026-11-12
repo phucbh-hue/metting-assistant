@@ -296,3 +296,42 @@ class WikiApiTests(WikiBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BdNoteTests(unittest.TestCase):
+    """Bảng BD nói rõ vì sao không có nguồn WikiBox (chưa kết nối / lỗi / không khớp), thay vì im lặng."""
+
+    def setUp(self):
+        reset_db()
+        wikibox._ACCESS.clear()
+
+    def test_note_and_status_explain_missing_wikibox_sources(self):
+        from meeting import auth as auth_mod
+        m = {"owner": "an@urbox.vn"}
+        with mock.patch.object(auth_mod, "ENABLED", True):
+            self.assertEqual(wikibox.note_for_meeting(m, [{"title": "x"}]), {"state": "ok", "n": 1})
+            note = wikibox.note_for_meeting(m, [])
+            self.assertEqual(note["state"], "off")
+            self.assertIn("chưa kết nối WikiBox", note["text"])
+            self.assertEqual(wikibox.bd_status(m), {"enabled": True, "connected": False, "error": ""})
+            db._get_db()["wikibox_tokens"].insert_one({"owner": "an@urbox.vn", "kind": "key", "key_enc": "x",
+                                                        "error": "WikiBox phản hồi chậm quá 12 giây"})
+            self.assertEqual(wikibox.note_for_meeting(m, []), {"state": "error", "text": "WikiBox phản hồi chậm quá 12 giây"})
+            self.assertEqual(wikibox.bd_status(m)["error"], "WikiBox phản hồi chậm quá 12 giây")
+            db._get_db()["wikibox_tokens"].update_one({"owner": "an@urbox.vn"}, {"$set": {"error": ""}})
+            self.assertEqual(wikibox.note_for_meeting(m, [])["state"], "none")
+        with mock.patch.dict(os.environ, {"WIKIBOX_DISABLED": "1"}):
+            self.assertEqual(wikibox.note_for_meeting(m, [])["state"], "off")
+            self.assertFalse(wikibox.bd_status(m)["enabled"])
+
+    def test_search_clears_old_error_when_it_works_again(self):
+        from meeting import auth as auth_mod
+        db._get_db()["wikibox_tokens"].insert_one({"owner": "an@urbox.vn", "kind": "key", "key_enc": "x",
+                                                    "error": "WikiBox phản hồi chậm quá 12 giây"})
+
+        async def ok(owner, query, k=5):
+            return [{"title": "Bảng giá", "text": "...", "url": "", "score": None, "kb": "UrBox"}]
+        with mock.patch.object(auth_mod, "ENABLED", True), mock.patch.object(wikibox, "search", ok):
+            hits, note = asyncio.run(wikibox.search_with_note({"owner": "an@urbox.vn"}, "giá", 3))
+        self.assertEqual((len(hits), note), (1, {"state": "ok", "n": 1}))
+        self.assertEqual(db._get_db()["wikibox_tokens"].find_one({"owner": "an@urbox.vn"})["error"], "")

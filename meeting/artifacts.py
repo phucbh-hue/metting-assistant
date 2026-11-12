@@ -802,6 +802,10 @@ async def _web_search_tool(query: str, on_progress, rewrite: bool, max_uses: int
     try:
         body, sources, _ = await _claude_search(query, max_uses=max_uses, basic=basic)
     except Exception as e:
+        msg = str(e)
+        if "invalid x-api-key" in msg or "authentication_error" in msg or "Error code: 401" in msg:
+            return {"error": "API key Claude của server (ANTHROPIC_API_KEY) không hợp lệ hoặc đã bị thu hồi: quản trị viên "
+                             "cập nhật key mới trong .env (máy) hoặc Environment trên Render (web) rồi khởi động lại"}
         return {"error": f"chưa tra cứu được trên mạng ({e})"}
     sources = sorted(sources, key=lambda s: not s.get("excerpt"))     # nguồn có đoạn trích dẫn lên trước
     return {"query": query, "engine": "Claude web_search", "summary": body[:4000],
