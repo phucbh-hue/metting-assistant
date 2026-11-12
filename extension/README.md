@@ -1,6 +1,6 @@
 # Extension Chrome: nghe tiếng cuộc họp qua tab, không cần bot
 
-Nguồn âm thanh thứ tư cho Meeting Copilot, bên cạnh mic, tệp và bot Recall.ai. Bản hiện tại: **0.4.1**.
+Nguồn âm thanh thứ tư cho Meeting Copilot, bên cạnh mic, tệp và bot Recall.ai. Bản hiện tại: **0.4.2** (0.4.2: thêm Callio vào quyền sẵn).
 
 ## Làm gì
 
@@ -83,7 +83,7 @@ Muốn chạy với server trên máy thì mở app ở `http://localhost:8080` 
 
 Bản dev (load unpacked) **không tự cập nhật**. Mỗi máy: kéo code mới về (`git pull`), vào `chrome://extensions` bấm
 **reload** ở thẻ extension (hoặc **Load unpacked** lại nếu đổi thư mục), rồi F5 tab app và tab họp để nạp lại content
-script. Số bản hiện ở thẻ extension phải là **0.4.1**; máy nào còn 0.1.x / 0.3.x / 0.4.0 là chưa cập nhật.
+script. Số bản hiện ở thẻ extension phải là **0.4.2**; máy nào còn 0.1.x / 0.3.x / 0.4.x cũ hơn là chưa cập nhật.
 
 Dễ vấp: Chrome đọc `popup.html` / `popup.js` **mới ngay từ đĩa** mỗi lần mở popup, nhưng `background.js` và `manifest.json`
 chỉ nạp lại khi bấm **Reload**. Kéo code về mà chưa Reload thì popup mới chạy với phần nền cũ: không thấy nút "Dừng nghe"
@@ -122,7 +122,7 @@ Server: WebSocket `/ws/meeting/{mid}/tab?token=<token người dùng>` (`meeting
 `mute-watch.js` đọc nút tắt mic của nền tảng; khi anh chị mute trong app, extension gửi im lặng cho luồng mic (vẫn giữ
 đúng mốc thời gian). **Fail-open**: không đọc được nút thì coi như KHÔNG mute (thà lọt vài câu còn hơn nuốt sạch tiếng).
 - **Google Meet** đọc `data-is-muted`; **Teams / Zoom** và nền tảng khác đọc nhãn nút ("Unmute"/"Bật tiếng" = đang tắt).
-- Meet / Teams / Zoom tự chạy (trong `host_permissions`). Nền tảng khác (**Callio**...): bấm **"Im theo nút tắt mic của
+- Meet / Teams / Zoom / **Callio** (`client.callio.vn`, từ 0.4.2) tự chạy (trong `host_permissions`). Nền tảng khác: bấm **"Im theo nút tắt mic của
   trang này"** trong popup một lần để cấp quyền đọc trang đó.
 - Chưa chắc đúng với mọi nền tảng vì mỗi app một DOM: nếu mute mà popup vẫn báo "Mic: gửi ..." tăng đều (không có "im
   theo app"), gửi em HTML của nút tắt mic để chỉnh bộ dò.

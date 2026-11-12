@@ -46,6 +46,9 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 - **3.29.2**: công cụ `search` của WikiBox trả **văn bản liệt kê** (`[1] tiêu đề — kho · loại · ngày`, `about:`, `url:`,
   `id:`, `Summary:`) chứ không phải JSON, nên `normalize_hits` không đọc ra tài liệu nào dù tìm thấy 5 kết quả. Thêm
   `_parse_listing`: mỗi mục thành một hit {title, kb, url, id, text = about + Summary + đoạn khớp}; Bảng BD có nguồn U.
+- **Extension 0.4.2** (13/11/2026, server không đổi): thêm `client.callio.vn` / `*.callio.vn` vào `host_permissions`:
+  bảng BD và im-theo-mute chạy luôn trên Callio, không phải bấm "Im theo nút tắt mic của trang này" nữa (lỗi thật:
+  "Cannot access contents of url ... Extension manifest must request permission to access this host"). Reload extension.
 - **Extension 0.4.1** (12/11/2026, server không đổi): lỗi thật "Không thu được tiếng tab này (Cannot capture a tab with an
   active stream)" rồi cuộc họp vừa tạo trống. `offscreen.js` chỉ ghi nhận track tab trong `pipe()`, nên mic bị từ chối
   (lần đầu dùng, Chrome mở tab xin quyền) hay AudioContext lỗi thì `stop()` không nhả luồng thu tab; Chrome coi tab vẫn

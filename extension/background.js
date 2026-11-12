@@ -171,7 +171,7 @@ async function showPanel(tabId) {
   try {
     await chrome.scripting.executeScript({ target: { tabId }, files: ['bd-panel.js'] });
   } catch (e) {
-    return `Không chèn được bảng vào tab họp (${e && e.message || e}). Tab họp phải là Google Meet / Teams / Zoom, hoặc trang đã được cấp quyền bằng nút "Im theo nút tắt mic của trang này".`;
+    return `Không chèn được bảng vào tab họp (${e && e.message || e}). Tab họp phải là Google Meet / Teams / Zoom / Callio, hoặc trang đã được cấp quyền bằng nút "Im theo nút tắt mic của trang này".`;
   }
   let res;
   try {
