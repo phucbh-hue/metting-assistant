@@ -173,16 +173,20 @@ function pipe(stream, name) {
   };
   src.connect(node);            // KHÔNG nối ra ctx.destination
   nodes.push(src, node);
-  stream.getTracks().forEach(t => tracks.push(t));
 }
 
 async function start({ base, mid, token, streamId, micOn, bd }) {
-  if (ctx || Object.keys(links).length) stop();      // không bao giờ chạy hai bộ thu
+  if (ctx || Object.keys(links).length || tracks.length) stop();      // không bao giờ chạy hai bộ thu
   stopping = false;
   session = { base, mid, token };
   const tabStream = await navigator.mediaDevices.getUserMedia({
     audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: streamId } }
   });
+  // Ghi nhận track NGAY khi có, để stop() nhả được dù bước sau (mic, AudioContext) lỗi. Bản 0.4.0 chỉ ghi trong pipe():
+  // mic bị từ chối -> stop() không chạm tới track tab -> Chrome vẫn coi tab đang bị thu -> mọi lần bấm sau đều
+  // "Cannot capture a tab with an active stream" cho tới khi reload extension.
+  tabStream.getTracks().forEach(t => tracks.push(t));
+  if (stopping) { stop(); return { ok: false, error: 'Bộ thu bị dừng giữa chừng.' }; }
   document.getElementById('playback').srcObject = tabStream;   // trả tiếng lại cho người dùng
   const tabTrack = tabStream.getAudioTracks()[0];
   if (tabTrack) {
@@ -197,11 +201,13 @@ async function start({ base, mid, token, streamId, micOn, bd }) {
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: false }
       });
     } catch (e) {
-      stop();
+      stop();                                     // nhả cả track tab (đã ghi ở trên)
       // Chưa cấp quyền mic: báo background mở tab xin quyền. NotAllowedError = bị từ chối/bỏ qua.
       if (e && e.name === 'NotAllowedError') return { ok: false, needMic: true };
       return { ok: false, error: `Không mở được micro: ${e && e.message || e}` };
     }
+    micStream.getTracks().forEach(t => tracks.push(t));
+    if (stopping) { stop(); return { ok: false, error: 'Bộ thu bị dừng giữa chừng.' }; }
   }
 
   ctx = new AudioContext({ sampleRate: RATE });   // Chrome tự hạ 48k -> 16k

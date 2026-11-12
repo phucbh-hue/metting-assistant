@@ -1,6 +1,6 @@
 # Extension Chrome: nghe tiếng cuộc họp qua tab, không cần bot
 
-Nguồn âm thanh thứ tư cho Meeting Copilot, bên cạnh mic, tệp và bot Recall.ai. Bản hiện tại: **0.4.0**.
+Nguồn âm thanh thứ tư cho Meeting Copilot, bên cạnh mic, tệp và bot Recall.ai. Bản hiện tại: **0.4.1**.
 
 ## Làm gì
 
@@ -34,6 +34,20 @@ vừa đăng nhập lại ở tab app). Popup báo "đang nối lại (lần n)"
 - Tab họp bị đóng / tải lại khiến Chrome thu hồi quyền bắt tiếng: extension dừng và nhắc **mở popup trên tab họp, bấm
   "Tiếp tục nghe #id"** (Chrome bắt buộc có thao tác của người dùng trên tab để bắt tiếng lại).
 - Lúc không có mạng, âm thanh không chép được (bỏ, không gửi bù): nối lại thì server tự nối dòng thời gian.
+
+## Lỗi "Cannot capture a tab with an active stream" (sửa ở 0.4.1)
+
+Chrome chỉ cho **một** luồng thu cho mỗi tab. Bản 0.4.0 chỉ ghi nhận track tab trong `pipe()`, nên nếu bước sau đó lỗi
+(mic bị từ chối - lần đầu dùng Chrome mở tab xin quyền mic - hay AudioContext lỗi) thì `stop()` không nhả luồng thu tab:
+Chrome coi tab vẫn đang bị thu, mọi lần bấm sau đều "Không thu được tiếng tab này (Cannot capture a tab with an active
+stream)" cho tới khi reload extension. Vì extension **tạo cuộc họp trước rồi mới thu**, cuộc họp vừa tạo nằm trống.
+- 0.4.1: `offscreen.js` ghi nhận track ngay khi có; background **đóng hẳn offscreen** trước mỗi lần bắt đầu, gặp "active
+  stream" thì đóng offscreen rồi xin lại (chờ 0,4 giây, tối đa 8 lần), vẫn kẹt thì báo đúng là **luồng khác** đang thu
+  tab (extension ghi âm / tăng âm lượng / ghi màn hình). Lỗi activeTab ("mở popup trên đúng tab họp") được báo riêng.
+- `start()` có khóa: popup bị đóng rồi mở lại giữa chừng thấy "Đang bắt đầu nghe #id..." thay vì nút bấm thêm (bấm
+  thêm là chen vào bộ thu đang mở); lý do thất bại giữ lại cho lần mở popup sau.
+- Máy còn 0.4.0 gặp lỗi này: Reload extension ở `chrome://extensions` (hoặc đóng tab họp, mở lại link) rồi bấm
+  **Tiếp tục nghe #id** - cuộc họp đã tạo vẫn đang mở.
 
 ## Bảng gợi ý BD ngay trên tab họp (0.4.0)
 
@@ -69,7 +83,7 @@ Muốn chạy với server trên máy thì mở app ở `http://localhost:8080` 
 
 Bản dev (load unpacked) **không tự cập nhật**. Mỗi máy: kéo code mới về (`git pull`), vào `chrome://extensions` bấm
 **reload** ở thẻ extension (hoặc **Load unpacked** lại nếu đổi thư mục), rồi F5 tab app và tab họp để nạp lại content
-script. Số bản hiện ở thẻ extension phải là **0.4.0**; máy nào còn 0.1.x / 0.3.x là chưa cập nhật.
+script. Số bản hiện ở thẻ extension phải là **0.4.1**; máy nào còn 0.1.x / 0.3.x / 0.4.0 là chưa cập nhật.
 
 Dễ vấp: Chrome đọc `popup.html` / `popup.js` **mới ngay từ đĩa** mỗi lần mở popup, nhưng `background.js` và `manifest.json`
 chỉ nạp lại khi bấm **Reload**. Kéo code về mà chưa Reload thì popup mới chạy với phần nền cũ: không thấy nút "Dừng nghe"

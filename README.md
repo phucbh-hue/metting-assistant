@@ -46,6 +46,14 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 - **3.29.2**: công cụ `search` của WikiBox trả **văn bản liệt kê** (`[1] tiêu đề — kho · loại · ngày`, `about:`, `url:`,
   `id:`, `Summary:`) chứ không phải JSON, nên `normalize_hits` không đọc ra tài liệu nào dù tìm thấy 5 kết quả. Thêm
   `_parse_listing`: mỗi mục thành một hit {title, kb, url, id, text = about + Summary + đoạn khớp}; Bảng BD có nguồn U.
+- **Extension 0.4.1** (12/11/2026, server không đổi): lỗi thật "Không thu được tiếng tab này (Cannot capture a tab with an
+  active stream)" rồi cuộc họp vừa tạo trống. `offscreen.js` chỉ ghi nhận track tab trong `pipe()`, nên mic bị từ chối
+  (lần đầu dùng, Chrome mở tab xin quyền) hay AudioContext lỗi thì `stop()` không nhả luồng thu tab; Chrome coi tab vẫn
+  đang bị thu và từ chối mọi lần bấm sau cho tới khi reload extension. Sửa: ghi nhận track ngay khi có; background đóng
+  hẳn offscreen trước mỗi lần bắt đầu, gặp "active stream" thì đóng offscreen rồi xin lại (0,4 giây × 8), vẫn kẹt thì
+  báo là luồng khác đang thu tab; `start()` có khóa + popup mở lại giữa chừng thấy "Đang bắt đầu nghe #id..."; lý do
+  thất bại giữ lại. Phải Reload extension trên từng máy (`PROTO` 3). Đo lại Soniox 12/11: trần `transcribe_concurrent`
+  vẫn **10** cho cả tổ chức (TTS 3): mic = 1 chỗ, extension = 2, bot Meet = 1 chỗ mỗi người đang nói (nhả sau 8 giây).
 
 ## Bản 3.23.4: bot Meet không còn tự nhắn tin chào vào chat
 

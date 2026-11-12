@@ -7,12 +7,47 @@ const APP_HOSTS = ['https://urbox-meeting-api.onrender.com/*', 'http://localhost
 const BD_KEEP = 60;                 // số lượt hỏi đáp BD giữ lại để vẽ lại bảng khi tab họp tải lại trang
 // Popup (đọc tươi từ đĩa mỗi lần mở) hỏi số này để biết service worker có đang chạy bản cũ không: Chrome chỉ nạp lại
 // background.js / manifest khi bấm Reload ở chrome://extensions, còn popup.html thì đọc mới ngay -> nửa cũ nửa mới.
-const PROTO = 2;
+const PROTO = 3;
 
 chrome.runtime.onInstalled.addListener(async () => {
   try { if (await chrome.offscreen.hasDocument()) await chrome.offscreen.closeDocument(); } catch (e) {}
   await chrome.storage.session.set({ running: null, bdTurns: [], note: '' });
 });
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+/** Đóng hẳn offscreen document: cách chắc chắn duy nhất để Chrome nhả mọi luồng thu tab mà nó đang giữ. */
+async function closeOffscreen() {
+  try {
+    if (!(await chrome.offscreen.hasDocument())) return;
+    await chrome.runtime.sendMessage({ cmd: 'offscreen:stop' }).catch(() => {});   // gửi "stop" cho server trước
+    await chrome.offscreen.closeDocument();
+  } catch (e) {}
+}
+
+/** Xin streamId của tab. "Cannot capture a tab with an active stream" = tab đang có luồng thu còn sống: lần đầu coi như
+ *  bộ thu cũ của chính extension (đóng hẳn offscreen rồi thử lại; Chrome nhả chỗ không tức thì nên chờ ngắn vài lần);
+ *  vẫn kẹt thì là extension khác đang thu tab đó. */
+async function captureId(tabId) {
+  for (let i = 0; i < 8; i++) {
+    try {
+      return { streamId: await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }) };
+    } catch (e) {
+      const m = String(e && e.message || e);
+      if (/active stream/i.test(m)) {
+        if (i === 0) await closeOffscreen();
+        await sleep(400);
+        continue;
+      }
+      if (/activeTab|not been invoked/i.test(m)) {
+        return { error: 'Chrome chỉ cho thu tab mà popup vừa được bấm trên đó: chuyển sang tab cuộc họp, mở popup ở đó rồi bấm lại.' };
+      }
+      return { error: `Không thu được tiếng tab này (${m}).` };
+    }
+  }
+  return { error: 'Tab này đang bị một luồng khác thu tiếng (extension ghi âm / tăng âm lượng / ghi màn hình đang bật trên tab). '
+    + 'Tắt luồng đó rồi bấm lại; không tìm ra thì đóng tab họp, mở lại link họp và bấm lại.' };
+}
 
 async function ensureOffscreen() {
   if (await chrome.offscreen.hasDocument()) return;
@@ -167,7 +202,22 @@ async function withRunning(fn) {
   return fn(r);
 }
 
-async function start({ mid, micOn }) {
+let startJob = null;      // start() đang chạy: lần bấm thứ hai (popup bị đóng rồi mở lại giữa chừng) không được chen vào
+async function start(opts) {
+  if (startJob) return { ok: false, error: 'Đang bắt đầu nghe, chờ vài giây rồi mở lại popup.' };
+  startJob = startInner(opts);
+  await chrome.storage.session.set({ starting: { mid: opts.mid, at: Date.now() } });
+  try {
+    const r = await startJob;
+    if (r && r.ok === false && r.error) await chrome.storage.session.set({ note: r.error });   // popup mở lại vẫn đọc được lý do
+    return r;
+  } finally {
+    startJob = null;
+    await chrome.storage.session.set({ starting: null });
+  }
+}
+
+async function startInner({ mid, micOn }) {
   const { base, token } = await auth();
   if (!base || !token) return { ok: false, error: 'Chưa có quyền đăng nhập.' };
   // Hỏi server trước: cuộc họp còn mở không, tên gì. Chạy vào cuộc họp đã kết thúc chỉ sinh lỗi 4003 rồi im lặng.
@@ -177,20 +227,19 @@ async function start({ mid, micOn }) {
   if (m.status === 'ended') return { ok: false, error: `Cuộc họp #${mid} đã kết thúc nên không nối tiếp được. Tạo cuộc họp mới.` };
   const prev = await getRunning();
   if (prev) panelSend(prev.tabId, { cmd: 'bdpanel:stop' });                     // bảng BD của cuộc họp trước (nếu có) gỡ đi
-  await ensureOffscreen();
-  await chrome.runtime.sendMessage({ cmd: 'offscreen:stop' }).catch(() => {});   // dọn bộ thu còn sót
+  await closeOffscreen();                   // mỗi lần bắt đầu là một offscreen mới: không còn bộ thu cũ nào sót lại
   await chrome.storage.session.set({ running: null, bdTurns: [] });
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab) return { ok: false, error: 'Không tìm thấy tab đang mở.' };
-  let streamId;
-  try {
-    // getMediaStreamId chạy được trong service worker (Chrome 116+). Id dùng MỘT lần, hết hạn sau vài giây nếu không xài ngay.
-    streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
-  } catch (e) {
-    return { ok: false, error: `Không thu được tiếng tab này (${e.message || e}). Mở popup ngay trên tab cuộc họp rồi bấm lại.` };
-  }
+  await ensureOffscreen();
   const bdInfo = await apiCall(`/meetings/${mid}/bd`);
   const bd = !!(bdInfo.ok && bdInfo.data && bdInfo.data.enabled);
+  // getMediaStreamId chạy được trong service worker (Chrome 116+). Id dùng MỘT lần, hết hạn sau vài giây nếu không xài
+  // ngay -> xin sau cùng, ngay trước khi đưa cho offscreen.
+  const cap = await captureId(tab.id);
+  if (cap.error) return { ok: false, error: cap.error };
+  await ensureOffscreen();                  // captureId có thể đã phải đóng offscreen để nhả luồng cũ
+  const streamId = cap.streamId;
   const r = await chrome.runtime.sendMessage({ cmd: 'offscreen:start', base, mid, token, streamId, micOn: micOn !== false, bd });
   if (r && r.needMic) {        // chưa cấp quyền mic: mở tab xin quyền (không xin được từ popup/offscreen)
     await chrome.tabs.create({ url: chrome.runtime.getURL('permission.html') });
@@ -217,10 +266,7 @@ async function start({ mid, micOn }) {
 
 async function stop(note) {
   const running = await getRunning();
-  if (await chrome.offscreen.hasDocument()) {
-    await chrome.runtime.sendMessage({ cmd: 'offscreen:stop' }).catch(() => {});
-    await chrome.offscreen.closeDocument().catch(() => {});
-  }
+  await closeOffscreen();
   if (running) panelSend(running.tabId, { cmd: 'bdpanel:stop' });
   await chrome.storage.session.set({ running: null, bdTurns: [], note: note || '' });
 }
@@ -258,7 +304,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     case 'bg:start': return run(start(msg));
     case 'bg:stop': return run(stop(''));
     case 'bg:state':
-      return run(chrome.storage.session.get(['running', 'note']).then(d => ({ running: d.running || null, note: d.note || '' })));
+      return run(chrome.storage.session.get(['running', 'note', 'starting']).then(d => ({
+        running: d.running || null, note: d.note || '',
+        starting: d.starting && Date.now() - d.starting.at < 30000 ? d.starting : null   // start() đang chạy (tối đa 30 giây)
+      })));
     case 'bg:meetings': return run(apiCall('/meetings?live=1'));
     case 'bg:groups': return run(apiCall('/groups'));
     case 'bg:create':

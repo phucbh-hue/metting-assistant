@@ -147,6 +147,14 @@ async function refreshRunningView() {
   const st = await send({ cmd: 'bg:state' });
   const run = st && st.running;
   const live = !!(run && run.mid);
+  if (!live && st && st.starting) {
+    // Background đang bắt đầu (popup bị đóng giữa chừng rồi mở lại): chờ chứ không hiện nút - bấm thêm lần nữa là chen
+    // vào bộ thu đang mở.
+    $('pick').style.display = 'none'; $('live').style.display = 'none';
+    setMsg(`Đang bắt đầu nghe cuộc họp #${st.starting.mid}...`, 'muted');
+    setTimeout(refreshRunningView, 1000);
+    return false;
+  }
   $('pick').style.display = live ? 'none' : '';
   $('live').style.display = live ? '' : 'none';
   if (live) {
@@ -184,9 +192,9 @@ async function init() {
   // chưa Reload thì popup mới nói chuyện với phần nền cũ (không biết bg:groups, bg:state trả dạng cũ) -> báo rõ, không chạy.
   let pong = null;
   try { pong = await send({ cmd: 'bg:ping' }); } catch (e) { pong = null; }
-  if (!pong || pong.proto !== 2) {
+  if (!pong || pong.proto !== 3) {
     $('auth').innerHTML = '<span class="err">Extension chưa nạp bản mới: phần nền vẫn chạy bản cũ. Mở <b>chrome://extensions</b>, bấm '
-      + '<b>Reload</b> (biểu tượng ⟳) ở thẻ "UrBox Meeting Copilot - thu tiếng tab" (số bản phải là 0.4.0), rồi mở lại popup này.</span>';
+      + '<b>Reload</b> (biểu tượng ⟳) ở thẻ "UrBox Meeting Copilot - thu tiếng tab" (số bản phải là 0.4.1), rồi mở lại popup này.</span>';
     $('pick').style.display = 'none';
     $('live').style.display = 'none';
     return;
