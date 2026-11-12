@@ -179,6 +179,17 @@ async function pollStats() {
 }
 
 async function init() {
+  // Chrome nạp lại background.js chỉ khi bấm Reload ở chrome://extensions, còn popup đọc mới từ đĩa: kéo code mới về mà
+  // chưa Reload thì popup mới nói chuyện với phần nền cũ (không biết bg:groups, bg:state trả dạng cũ) -> báo rõ, không chạy.
+  let pong = null;
+  try { pong = await send({ cmd: 'bg:ping' }); } catch (e) { pong = null; }
+  if (!pong || pong.proto !== 2) {
+    $('auth').innerHTML = '<span class="err">Extension chưa nạp bản mới: phần nền vẫn chạy bản cũ. Mở <b>chrome://extensions</b>, bấm '
+      + '<b>Reload</b> (biểu tượng ⟳) ở thẻ "UrBox Meeting Copilot - thu tiếng tab" (số bản phải là 0.4.0), rồi mở lại popup này.</span>';
+    $('pick').style.display = 'none';
+    $('live').style.display = 'none';
+    return;
+  }
   $('resume').onclick = doResume;
   $('create').onclick = doCreate;
   $('reload').onclick = () => loadMeetings();

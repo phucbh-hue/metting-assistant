@@ -70,6 +70,10 @@ Bản dev (load unpacked) **không tự cập nhật**. Mỗi máy: kéo code m�
 **reload** ở thẻ extension (hoặc **Load unpacked** lại nếu đổi thư mục), rồi F5 tab app và tab họp để nạp lại content
 script. Số bản hiện ở thẻ extension phải là **0.4.0**; máy nào còn 0.1.x / 0.3.x là chưa cập nhật.
 
+Dễ vấp: Chrome đọc `popup.html` / `popup.js` **mới ngay từ đĩa** mỗi lần mở popup, nhưng `background.js` và `manifest.json`
+chỉ nạp lại khi bấm **Reload**. Kéo code về mà chưa Reload thì popup mới chạy với phần nền cũ: không thấy nút "Dừng nghe"
+dù đang nghe, ô nhóm trống, không có bảng BD. Từ 0.4.0 popup hỏi phần nền (`bg:ping`) và báo thẳng "chưa nạp bản mới".
+
 ## File
 
 | File | Việc |

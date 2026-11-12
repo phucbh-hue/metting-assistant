@@ -5,6 +5,9 @@
 const OFFSCREEN = 'offscreen.html';
 const APP_HOSTS = ['https://urbox-meeting-api.onrender.com/*', 'http://localhost:8080/*', 'http://127.0.0.1:8080/*'];
 const BD_KEEP = 60;                 // số lượt hỏi đáp BD giữ lại để vẽ lại bảng khi tab họp tải lại trang
+// Popup (đọc tươi từ đĩa mỗi lần mở) hỏi số này để biết service worker có đang chạy bản cũ không: Chrome chỉ nạp lại
+// background.js / manifest khi bấm Reload ở chrome://extensions, còn popup.html thì đọc mới ngay -> nửa cũ nửa mới.
+const PROTO = 2;
 
 chrome.runtime.onInstalled.addListener(async () => {
   try { if (await chrome.offscreen.hasDocument()) await chrome.offscreen.closeDocument(); } catch (e) {}
@@ -234,6 +237,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     case 'bridge:token':              // token-bridge.js trên trang app đẩy token sang
       if (msg.token) chrome.storage.local.set({ ma: { base: msg.base, token: msg.token } });
       return;
+    case 'bg:ping': return run(Promise.resolve({ ok: true, proto: PROTO }));
     case 'bg:start': return run(start(msg));
     case 'bg:stop': return run(stop(''));
     case 'bg:state':
