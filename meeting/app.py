@@ -1880,11 +1880,12 @@ async def wikibox_test(req: WikiboxTestReq, request: Request):
     owner = wikibox.who(_wiki_email(request))
     try:
         found = await wikibox.tools(owner, refresh=True)
-        hits = await wikibox.search(owner, req.query, 5)
+        hits, used, raw = await wikibox.search_raw(owner, req.query, 5)
     except wikibox.WikiboxError as e:
         raise HTTPException(status_code=400, detail=str(e))
     st = wikibox.search_tool(found)
-    return {"tools": [t["name"] for t in found], "search_tool": st[0] if st else None, "hits": hits}
+    return {"tools": [t["name"] for t in found], "search_tool": st[0] if st else None, "hits": hits,
+            "raw": "" if hits else raw}         # không đọc ra tài liệu nào: đưa kết quả thô để chỉnh normalize_hits
 
 
 # ==============================================================================

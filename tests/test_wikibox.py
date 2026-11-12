@@ -199,6 +199,14 @@ class KeyAndSearchTests(WikiBase):
         tools = [{"name": t.name, "description": t.description, "input_schema": t.input_schema} for t in TOOLS]
         self.assertEqual(wikibox.search_tool(tools), ("search_documents", "query", "top_k"))
         self.assertEqual(wikibox.search_tool([tools[0]]), None)                          # chỉ có hỏi Thủ thư: không coi là tìm kiếm
+        # 12/11/2026: WikiBox thêm people_search / user_activity / get_agent_context; công cụ tìm tài liệu vẫn phải là "search"
+        schema = {"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["query"]}
+        people = {"name": "people_search", "description": "Search people (tìm người) by name, team or skill", "input_schema": schema}
+        activity = {"name": "user_activity", "description": "Search recent activity of a user", "input_schema": schema}
+        ctx = {"name": "get_agent_context", "description": "Retrieve context for the agent", "input_schema": schema}
+        plain = {"name": "search", "description": "Semantic search over the knowledge base", "input_schema": schema}
+        self.assertEqual(wikibox.search_tool([tools[0], people, activity, ctx, plain]), ("search", "query", "limit"))
+        self.assertEqual(wikibox.search_tool([people, activity, ctx]), None)
         self.assertEqual(wikibox.normalize_hits({"text": "Đoạn trả lời"}), [{"title": "WikiBox", "text": "Đoạn trả lời",
                                                                              "url": "", "score": None, "kb": ""}])
         self.assertEqual(wikibox.normalize_hits({"items": ["một", "hai"]}, 1)[0]["text"], "một")

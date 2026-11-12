@@ -485,8 +485,16 @@ _QUERY_KEYS = ("query", "q", "question", "keyword", "keywords", "search", "text"
 _LIMIT_KEYS = ("top_k", "limit", "k", "max_results", "n", "size", "match_count")
 
 
+# Công cụ tìm NGƯỜI / hoạt động người dùng (people_search, user_activity, get_agent_context...) không bao giờ là công cụ
+# tìm tài liệu. WikiBox thêm people_search ngày 12/11/2026 và bản cũ chọn nhầm nó (cùng chứa "search"): tra "quy trình phát
+# hành voucher" thành tìm nhân sự, ra "chưa thấy tài liệu nào khớp".
+_PEOPLE_WORDS = ("people", "person", "user", "member", "employee", "staff", "activity", "profile", "contact", "agent_context")
+_EXACT_DOC_SEARCH = ("search", "search_documents", "document_search", "search_docs", "kb_search", "knowledge_search",
+                     "search_knowledge", "semantic_search")
+
+
 def search_tool(found: List[Dict[str, Any]]) -> Optional[Tuple[str, str, str]]:
-    """(tên công cụ tìm kiếm, tham số câu hỏi, tham số số kết quả) đoán theo tên / mô tả / schema."""
+    """(tên công cụ tìm TÀI LIỆU, tham số câu hỏi, tham số số kết quả) đoán theo tên / mô tả / schema."""
     best, best_score = None, 0
     for t in found or []:
         props = ((t.get("input_schema") or {}).get("properties") or {})
@@ -496,8 +504,12 @@ def search_tool(found: List[Dict[str, Any]]) -> Optional[Tuple[str, str, str]]:
         if q is None:
             continue
         name, desc = t.get("name", "").lower(), (t.get("description") or "").lower()
+        if any(w in name for w in _PEOPLE_WORDS):
+            continue
         score = (6 if "search" in name else 5 if "retriev" in name else 3 if ("query" in name or "find" in name) else 0)
+        score += 4 if name in _EXACT_DOC_SEARCH else 0
         score += 2 if any(w in desc for w in ("search", "tìm", "retriev", "truy xuất")) else 0
+        score += 1 if any(w in desc for w in ("document", "tài liệu", "knowledge", "kho tri thức")) else 0
         score -= 4 if any(w in name for w in ("chat", "ask", "librarian", "answer")) else 0
         if score > best_score:
             limit = next((k for k in _LIMIT_KEYS if k in props), "")
@@ -538,13 +550,14 @@ def normalize_hits(data: Any, k: int = 5) -> List[Dict[str, Any]]:
     return out[:k]
 
 
-async def search(owner: str, query: str, k: int = 5) -> List[Dict[str, Any]]:
-    """Tìm trong kho tri thức của người này. Chưa kết nối / không có công cụ tìm kiếm: []. Lỗi: WikiboxError."""
+async def search_raw(owner: str, query: str, k: int = 5) -> Tuple[List[Dict[str, Any]], str, str]:
+    """(kết quả đã chuẩn hóa, tên công cụ đã dùng, kết quả thô rút gọn) - ô Kiểm tra trong Cài đặt hiện kết quả thô khi
+    không đọc ra tài liệu nào, để biết WikiBox trả về dạng gì mà normalize_hits chưa hiểu."""
     if not query.strip() or not connected(owner):
-        return []
+        return [], "", ""
     st = search_tool(await tools(owner))
     if st is None:
-        return []
+        return [], "", ""
     name, qkey, lkey = st
     args: Dict[str, Any] = {qkey: query[:500]}
     if lkey:
@@ -552,7 +565,17 @@ async def search(owner: str, query: str, k: int = 5) -> List[Dict[str, Any]]:
     res = parse_result(await _with_token(owner, lambda s: s.call_tool(name, args)))
     if res.get("error"):
         raise WikiboxError(str(res["error"])[:200])
-    return normalize_hits(res, k)
+    try:
+        raw = json.dumps(res, ensure_ascii=False, default=str)[:600]
+    except Exception:
+        raw = str(res)[:600]
+    return normalize_hits(res, k), name, raw
+
+
+async def search(owner: str, query: str, k: int = 5) -> List[Dict[str, Any]]:
+    """Tìm trong kho tri thức của người này. Chưa kết nối / không có công cụ tìm kiếm: []. Lỗi: WikiboxError."""
+    hits, _, _ = await search_raw(owner, query, k)
+    return hits
 
 
 async def search_for_meeting(meeting: Optional[Dict[str, Any]], query: str, k: int = 5) -> List[Dict[str, Any]]:

@@ -39,7 +39,10 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 - **3.29.1**: Bảng BD (app và bảng trên tab họp) nói rõ vì sao câu trả lời không có nguồn U: người tạo cuộc họp chưa kết
   nối WikiBox, kết nối lỗi / hết hạn (ghi ở `wikibox_tokens.error`, xóa khi tìm lại được), hay chỉ là không có tài liệu
   khớp (`wikibox.search_with_note`, `turn["wiki"]`, `GET /api/meetings/{id}/bd` có `wikibox`). "Tra thêm trên mạng" báo
-  thẳng khi API key Claude của server bị từ chối (401) thay vì lỗi chung chung.
+  thẳng khi API key Claude của server bị từ chối (401) thay vì lỗi chung chung. Lỗi thật ngày 12/11/2026: WikiBox thêm
+  công cụ `people_search`, app chọn nhầm nó làm công cụ tìm tài liệu (cùng chứa "search") nên mọi câu tra ra "chưa thấy
+  tài liệu nào khớp" -> `search_tool` bỏ qua công cụ tìm người / hoạt động người dùng, ưu tiên tên `search`; ô Kiểm tra
+  trong Cài đặt hiện công cụ đã dùng và kết quả thô khi không đọc ra tài liệu (`wikibox.search_raw`).
 
 ## Bản 3.23.4: bot Meet không còn tự nhắn tin chào vào chat
 

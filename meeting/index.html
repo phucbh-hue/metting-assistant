@@ -5678,7 +5678,8 @@ async function renderWikiboxSettings(box) {
       const r = await POST('/api/wikibox/test', { query: f.q.value.trim() });
       out.innerHTML = (r.hits || []).length ? `<ul class="flex flex-col gap-1.5">${r.hits.map(h => `<li class="text-[12.5px]"><b>${h.url ? `<a class="link" href="${esc(h.url)}" target="_blank" rel="noopener noreferrer">${esc(h.title)}</a>` : esc(h.title)}</b>${h.kb ? ` <span class="text-muted">(${esc(h.kb)})</span>` : ''}
           <div class="text-muted">${esc((h.text || '').slice(0, 220))}${(h.text || '').length > 220 ? '...' : ''}</div></li>`).join('')}</ul>`
-        : `<p class="text-[12.5px] text-muted">${r.search_tool ? 'Chưa thấy tài liệu nào khớp.' : 'WikiBox chưa có công cụ tìm kiếm cho tài khoản này.'}</p>`;
+        : `<p class="text-[12.5px] text-muted">${r.search_tool ? `Chưa thấy tài liệu nào khớp (công cụ ${esc(r.search_tool)}).` : 'WikiBox chưa có công cụ tìm tài liệu cho tài khoản này.'}</p>`
+          + (r.raw ? `<pre class="text-[11px] text-muted mt-1" style="white-space:pre-wrap;max-height:140px;overflow:auto">Kết quả thô WikiBox trả về: ${esc(r.raw)}</pre>` : '');
     } catch (err) { toast(err.message, 'err', 8000); }
     finally { btn.disabled = false; }
   };
