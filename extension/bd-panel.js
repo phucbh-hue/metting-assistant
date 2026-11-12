@@ -199,10 +199,14 @@
   function hide() { st.open = false; if (host) host.style.display = 'none'; }
   function destroy() { if (host) host.remove(); host = root = list = null; st.open = false; st.turns = []; }
 
-  chrome.runtime.onMessage.addListener((msg) => {
+  chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     if (!msg || !alive()) return;
-    if (msg.cmd === 'bdpanel:show') show(msg.state);
-    else if (msg.cmd === 'bdpanel:hide') hide();
+    if (msg.cmd === 'bdpanel:show') {           // trả lời để background/popup biết bảng có vẽ được không (lỗi thì nói rõ)
+      try { show(msg.state); reply({ ok: true }); }
+      catch (e) { reply({ ok: false, error: String(e && e.message || e) }); }
+      return;
+    }
+    if (msg.cmd === 'bdpanel:hide') hide();
     else if (msg.cmd === 'bdpanel:stop') destroy();
     else if (msg.cmd === 'bdpanel:event' && st.open) {
       const ev = msg.ev || {};

@@ -130,18 +130,35 @@ async function onBdEvent(ev) {
   panelSend(running.tabId, { cmd: 'bdpanel:event', ev });
 }
 
+/** Chèn bảng BD vào tab họp và bảo nó hiện. Trả về lỗi cụ thể (không chèn được / tab không nhận lệnh / bảng vẽ lỗi)
+ *  để popup hiện cho người dùng, thay vì im lặng. */
+async function showPanel(tabId) {
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['bd-panel.js'] });
+  } catch (e) {
+    return `Không chèn được bảng vào tab họp (${e && e.message || e}). Tab họp phải là Google Meet / Teams / Zoom, hoặc trang đã được cấp quyền bằng nút "Im theo nút tắt mic của trang này".`;
+  }
+  let res;
+  try {
+    res = await chrome.tabs.sendMessage(tabId, { cmd: 'bdpanel:show', state: await panelState() });
+  } catch (e) {
+    return `Tab họp không nhận được lệnh hiện bảng (${e && e.message || e}). F5 tab họp rồi bấm lại.`;
+  }
+  if (res && res.ok === false) return `Bảng BD vẽ lỗi trên tab họp: ${res.error || ''}`;
+  return '';
+}
+
 async function bdToggle() {
   const r = await getRunning();
-  if (!r || !r.bd) return { open: false };
+  if (!r || !r.bd) return { open: false, error: 'Cuộc họp đang nghe không thuộc nhóm BD nên không có bảng gợi ý.' };
   const open = r.bdOpen === false;
   await setRunning({ bdOpen: open });
-  if (open) {
-    try { await chrome.scripting.executeScript({ target: { tabId: r.tabId }, files: ['bd-panel.js'] }); } catch (e) {}
-    panelSend(r.tabId, { cmd: 'bdpanel:show', state: await panelState() });
-  } else {
+  if (!open) {
     panelSend(r.tabId, { cmd: 'bdpanel:hide' });
+    return { open };
   }
-  return { open };
+  const error = await showPanel(r.tabId);
+  return { open, error };
 }
 
 async function withRunning(fn) {
@@ -191,8 +208,8 @@ async function start({ mid, micOn }) {
     // Chỉ chạy được với host đã có quyền (Meet/Teams/Zoom trong manifest, hoặc nền tảng khác đã được cấp quyền).
     try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['mute-watch.js'] }); } catch (e) {}
     if (bd) {
-      try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['bd-panel.js'] }); } catch (e) {}
-      panelSend(tab.id, { cmd: 'bdpanel:show', state: await panelState() });
+      const err = await showPanel(tab.id);
+      if (err) await setRunning({ error: err });      // popup đọc ở trạng thái đang nghe
     }
   }
   return r;

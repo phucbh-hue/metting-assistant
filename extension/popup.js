@@ -155,6 +155,7 @@ async function refreshRunningView() {
     $('liveConn').textContent = t; $('liveConn').className = 'row ' + cls;
     $('bdRow').style.display = run.bd ? '' : 'none';
     $('bdToggle').textContent = run.bdOpen ? BD_ON : BD_OFF;
+    if (run.error) setMsg(run.error, 'err');
     if (!statsTimer) statsTimer = setInterval(pollStats, 1000);
   } else {
     if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
@@ -210,8 +211,13 @@ async function init() {
     if (run && base) chrome.tabs.create({ url: `${base}/#/m/${run.mid}` });
   };
   $('bdToggle').onclick = async () => {
+    $('bdToggle').disabled = true;
     const r = await send({ cmd: 'bg:bdToggle' });
+    $('bdToggle').disabled = false;
     $('bdToggle').textContent = r && r.open ? BD_ON : BD_OFF;
+    if (r && r.error) setMsg(r.error, 'err');
+    else if (r && r.open) setMsg('Bảng gợi ý BD đang hiện ở góc dưới phải tab họp (kéo thả được; bấm "–" để thu gọn).', 'ok');
+    else setMsg('');
   };
   $('muteSync').onclick = async () => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
