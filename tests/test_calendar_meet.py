@@ -357,6 +357,40 @@ class ReceiverTests(MeetBase):
         self.assertEqual(pub["people"][0]["mode"], "listen")
         self.assertEqual(db.get_meeting(mid)["meet"]["modes"], {"meet7": "listen"})
 
+    def test_room_account_split_mode_separates_voices_like_mic(self):
+        """Một tài khoản Meet mà nhiều người thay nhau nói (laptop phòng họp): chọn "Nhiều người" (split) thì luồng đó
+        tách người theo giọng như mic, không gắn tên tài khoản; lưu theo cuộc họp; đổi chế độ thì mở luồng Soniox mới."""
+        mid = asyncio.run(meet_bots.meeting_for(self.rec))
+
+        async def go():
+            s = await live.get_session(mid)
+            room = {"id": "8", "name": "Máy phòng họp", "email": "", "is_host": False}
+            await s.feed_meet(room, tone(0.5))
+            old = s.streams["meet8"]
+            before = (old.diarize, s._meet_profile({"stream": "meet8", "raw": "1", "epoch": 0, "t_start": 1.0}))
+            pub = await s.set_meet_mode("meet8", "split")
+            await s.feed_meet(room, tone(0.5))
+            await asyncio.sleep(0.01)                                           # luồng cũ đóng ở nền
+            new = s.streams["meet8"]
+            after = (new.diarize, s._meet_profile({"stream": "meet8", "raw": "1", "epoch": 0, "t_start": 2.0}))
+            try:
+                await s.set_meet_mode("meet8", "chia")
+                bad = False
+            except ValueError:
+                bad = True
+            return old, new, before, after, pub, bad, s.meet_ignored("meet8")
+        old, new, before, after, pub, bad, ignored = asyncio.run(go())
+        self.assertFalse(before[0])                                             # mặc định: một người một luồng
+        self.assertIsNotNone(before[1])                                         # ... gắn hồ sơ mang tên tài khoản Meet
+        self.assertIsNot(old, new)
+        self.assertTrue(old.closed)
+        self.assertTrue(new.diarize)                                            # split: Soniox tách người nói
+        self.assertIsNone(after[1])                                             # ... và không ép tên tài khoản Meet
+        self.assertEqual((pub["people"][0]["mode"], pub["people"][0]["ignored"], ignored), ("split", False, False))
+        self.assertEqual(db.get_meeting(mid)["meet"]["modes"], {"meet8": "split"})
+        self.assertEqual(self.opened, ["meet8", "meet8"])
+        self.assertTrue(bad)
+
     def test_bot_leaving_ends_the_meeting_and_media_is_deleted(self):
         self.serve([frame(1, "Trần Thị Lan", tone(0.5))])
         [rec] = self.records()

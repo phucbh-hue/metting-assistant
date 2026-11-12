@@ -4,21 +4,29 @@
 <meta charset="utf-8">
 <style>
   :root { color-scheme: light dark; }
-  body { width: 320px; margin: 0; padding: 14px; font: 13px/1.45 system-ui, "Segoe UI", sans-serif; }
-  h1 { font-size: 14px; margin: 0 0 10px; }
+  body { width: 340px; margin: 0; padding: 14px; font: 13px/1.45 system-ui, "Segoe UI", sans-serif; }
+  h1 { font-size: 14px; margin: 0 0 8px; }
+  h2 { font-size: 11.5px; margin: 0 0 6px; color: #777; text-transform: uppercase; letter-spacing: .04em; }
   .row { margin: 8px 0; }
-  label { display: block; font-size: 12px; color: #666; margin-bottom: 3px; }
   select, input, button { width: 100%; box-sizing: border-box; padding: 7px 8px; font-size: 13px; border-radius: 7px;
     border: 1px solid #bbb; background: Field; color: FieldText; }
   button { cursor: pointer; border-color: #7c3aed; background: #7c3aed; color: #fff; font-weight: 600; }
   button.ghost { background: transparent; color: #7c3aed; }
+  button.danger { background: #c0392b; border-color: #c0392b; }
   button:disabled { opacity: .5; cursor: default; }
+  button.link { width: auto; background: none; border: none; color: #7c3aed; padding: 0; font-weight: 500; font-size: 12px;
+    text-decoration: underline; }
+  .card { border: 1px solid #0003; border-radius: 10px; padding: 10px; margin: 10px 0; }
+  .card.primary { border-color: #7c3aed88; background: #7c3aed12; }
   .muted { color: #777; font-size: 12px; }
   .err { color: #c0392b; font-size: 12px; }
   .ok { color: #1a7f37; font-size: 12px; }
+  .warn { color: #b7791f; font-size: 12px; }
   .split { display: flex; gap: 8px; }
   .split > * { flex: 1; }
-  hr { border: none; border-top: 1px solid #0002; margin: 12px 0; }
+  .right { text-align: right; margin-top: 3px; }
+  .check { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12.5px; }
+  .check input { width: auto; }
 </style>
 </head>
 <body>
@@ -26,37 +34,40 @@
   <div class="row" id="auth"><span class="muted">Đang kiểm tra quyền...</span></div>
 
   <div id="pick">
-    <div class="row">
-      <label>Cuộc họp nhận lời thoại</label>
-      <select id="meeting"><option value="">Đang tải...</option></select>
+    <div class="card primary">
+      <h2>Tiếp tục cuộc họp đang mở</h2>
+      <div class="row muted" id="lastNote"></div>
+      <div class="row">
+        <select id="meeting" disabled><option value="">Đang tải danh sách...</option></select>
+        <div class="right"><button type="button" class="link" id="reload">Tải lại danh sách</button></div>
+      </div>
+      <div class="row"><button id="resume" disabled>Tiếp tục nghe</button></div>
+      <div class="muted">Lời thoại nối tiếp vào đúng cuộc họp đã chọn. Nút này không bao giờ tạo cuộc họp mới.</div>
     </div>
-    <div class="row split">
-      <button class="ghost" id="refresh">Lấy lại quyền / tải lại</button>
+
+    <div class="card">
+      <h2>Hoặc tạo cuộc họp mới</h2>
+      <div class="row"><input id="newTitle" placeholder="Tên cuộc họp mới" maxlength="200"></div>
+      <div class="row"><select id="group"><option value="">Không thuộc nhóm</option></select></div>
+      <div class="row"><button id="create" class="ghost" disabled>Tạo cuộc họp mới và nghe</button></div>
+      <div class="muted">Cuộc họp trong nhóm BD có thêm bảng gợi ý ngay trên tab họp.</div>
     </div>
-    <div class="row">
-      <label>Hoặc tạo cuộc họp mới</label>
-      <input id="newTitle" placeholder="Tên cuộc họp" maxlength="200">
-    </div>
-    <div class="row">
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-        <input type="checkbox" id="micOn" checked style="width:auto">
-        <span>Thu cả tiếng tôi nói (mic) - lần đầu cần cấp quyền micro</span>
-      </label>
-    </div>
-    <div class="row">
-      <button id="start">Bắt đầu nghe</button>
-    </div>
-    <div class="row muted">Mở popup ngay trên tab đang họp (Google Meet, Teams, Zoom web...). Extension thu tiếng người
-      online (qua tab) và tiếng anh chị nói (mic). Nên đeo tai nghe để tiếng họp không vọng vào mic.</div>
+
+    <div class="row"><label class="check"><input type="checkbox" id="micOn" checked>
+      <span>Thu cả tiếng tôi nói (mic) - lần đầu cần cấp quyền micro</span></label></div>
+    <div class="row muted">Mở popup ngay trên tab đang họp (Google Meet, Teams, Zoom web...). Nên đeo tai nghe để tiếng họp
+      không vọng vào mic.</div>
   </div>
 
   <div id="live" style="display:none">
     <div class="row ok" id="liveInfo">Đang nghe.</div>
+    <div class="row" id="liveConn"></div>
     <div class="row muted" id="liveStats"></div>
-    <div class="row"><button id="stop">Dừng nghe</button></div>
+    <div class="row split"><button id="stop" class="danger">Dừng nghe</button><button id="openApp" class="ghost">Mở phòng họp</button></div>
+    <div class="row" id="bdRow" style="display:none"><button class="ghost" id="bdToggle">Hiện bảng gợi ý BD trên tab họp</button></div>
     <div class="row"><button class="ghost" id="muteSync">Im theo nút tắt mic của trang này</button></div>
-    <div class="row muted">Google Meet / Teams / Zoom tự đồng bộ sẵn. Nền tảng khác (Callio...) bấm nút trên một lần
-      (cấp quyền đọc trang) để khi anh chị mute trong app thì extension cũng im.</div>
+    <div class="row muted">Mất mạng thì extension tự nối lại vào đúng cuộc họp này, không tạo cuộc họp mới. Google Meet /
+      Teams / Zoom tự đồng bộ mute; nền tảng khác (Callio...) bấm nút trên một lần.</div>
   </div>
 
   <div class="row" id="msg"></div>

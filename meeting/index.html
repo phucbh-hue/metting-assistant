@@ -1550,7 +1550,9 @@ function openMeetPeople() {
   }
   openModal(`<h3 class="text-lg font-semibold mb-1">Người trong Google Meet</h3>
     <p class="text-muted text-[13px] mb-3">Mỗi người trong Meet được chép lời riêng, có tên theo Meet. Máy trong phòng vừa bật mic của ứng dụng vừa vào Meet thì
-      chọn "Bỏ qua" để không chép trùng (ứng dụng tự bỏ qua nếu trùng tên hoặc email với người đang bật mic).</p>
+      chọn "Bỏ qua" để không chép trùng (ứng dụng tự bỏ qua nếu trùng tên hoặc email với người đang bật mic). Một tài khoản mà
+      nhiều người thay nhau nói (laptop phòng họp vào Meet) thì chọn "Nhiều người": tách từng người theo giọng, ai đã có hồ sơ giọng
+      thì ra đúng tên.</p>
     <ul id="meet-people" class="flex flex-col gap-1.5"></ul>
     <div class="flex justify-end mt-4"><button type="button" class="btn btn-ghost" data-act="modal-close">Đóng</button></div>`, { onMount(m) { renderMeetPeople(m, true); } });
 }
@@ -1562,11 +1564,12 @@ function renderMeetPeople(root = document, force = false) {
   ul.dataset.sig = sig;
   ul.innerHTML = people.length ? people.map(p => `<li class="llm-row" style="grid-template-columns:minmax(0,1fr) auto">
       <div class="min-w-0"><div class="font-medium truncate">${esc(p.name || 'Chưa rõ tên')}${p.is_host ? ' <span class="chip" style="font-size:11px">chủ phòng</span>' : ''}</div>
-        <div class="text-[12px] text-muted truncate">${esc(p.email || '')}${p.ignored ? (p.mode === 'ignore' ? ' Đang bỏ qua.' : ' Đang bỏ qua: trùng người bật mic trong phòng.') : ''}</div></div>
+        <div class="text-[12px] text-muted truncate">${esc(p.email || '')}${p.ignored ? (p.mode === 'ignore' ? ' Đang bỏ qua.' : ' Đang bỏ qua: trùng người bật mic trong phòng.') : p.mode === 'split' ? ' Tách từng người theo giọng.' : ''}</div></div>
       <select class="input" data-meet-mode="${esc(p.stream)}" style="height:30px;font-size:12.5px;width:auto" aria-label="Chép lời của ${esc(p.name || 'người này')}">
         <option value="auto" ${p.mode === 'auto' ? 'selected' : ''}>Tự động</option>
         <option value="ignore" ${p.mode === 'ignore' ? 'selected' : ''}>Bỏ qua (máy trong phòng)</option>
-        <option value="listen" ${p.mode === 'listen' ? 'selected' : ''}>Luôn chép</option></select></li>`).join('')
+        <option value="listen" ${p.mode === 'listen' ? 'selected' : ''}>Luôn chép</option>
+        <option value="split" ${p.mode === 'split' ? 'selected' : ''}>Nhiều người (máy phòng họp)</option></select></li>`).join('')
     : '<li class="text-muted text-[13px]">Chưa có ai trong Meet nói (bot chưa vào, hoặc mọi người đang tắt mic).</li>';
   $$('[data-meet-mode]', ul).forEach(sel => sel.addEventListener('change', async () => {
     try {

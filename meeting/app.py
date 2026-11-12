@@ -89,7 +89,7 @@ async def lifespan(_app: FastAPI):
     db.flush()                  # lưu trên máy: ghi nốt phần còn chờ trước khi tắt
 
 
-APP_VERSION = "3.28.2"              # dấu hiệu phiên bản ở /healthz để kiểm tra bản mới đã lên server chưa (giữ khớp package.json)
+APP_VERSION = "3.29.0"              # dấu hiệu phiên bản ở /healthz để kiểm tra bản mới đã lên server chưa (giữ khớp package.json)
 app = FastAPI(title="Meeting Assistant AI", version=APP_VERSION, lifespan=lifespan)
 _MEETING_PATH = re.compile(r"^/(?:api/meetings|ws/meeting)/(\d+)(?:/|$)")
 _ARTIFACT_PATH = re.compile(r"^/api/artifacts/(\d+)(?:/|$)")
@@ -1392,14 +1392,20 @@ def _visible_filter(u: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 
 
 @app.get("/api/meetings")
-def get_meetings(request: Request, group_id: Optional[int] = None):
+def get_meetings(request: Request, group_id: Optional[int] = None, live: bool = False):
+    """live=1: chỉ cuộc họp chưa kết thúc (extension thu tiếng tab dùng để "Tiếp tục" đúng cuộc họp, không tải cả kho)."""
     u = _user(request)
     if group_id is not None:
         g = groups.get_group(group_id)
         if g is None or groups.role_of(g, (u or {}).get("email")) is None:
             raise HTTPException(status_code=404, detail="Không tìm thấy nhóm")
-        return {"meetings": db.list_meetings_with_stats(where={"group_id": g["id"]})}
-    return {"meetings": db.list_meetings_with_stats(where=_visible_filter(u))}
+        where: Optional[Dict[str, Any]] = {"group_id": g["id"]}
+    else:
+        where = _visible_filter(u)
+    if live:
+        open_ = {"status": {"$ne": "ended"}}
+        where = {"$and": [where, open_]} if where else open_
+    return {"meetings": db.list_meetings_with_stats(where=where)}
 
 
 @app.post("/api/meetings")
@@ -2066,7 +2072,8 @@ async def meet_bot_leave(rid: str, request: Request):
 
 @app.put("/api/meetings/{mid}/meet-people/{stream}")
 async def set_meet_person_mode(mid: int, stream: str, req: MeetModeReq):
-    """Người trong Meet: auto (bỏ qua khi trùng người đang bật mic), ignore (máy trong phòng), listen (luôn chép)."""
+    """Người trong Meet: auto (bỏ qua khi trùng người đang bật mic), ignore (máy trong phòng), listen (luôn chép),
+    split (nhiều người nói sau một tài khoản: tách từng người theo giọng)."""
     s = await _session_or_404(mid)
     try:
         return await s.set_meet_mode(stream, req.mode)

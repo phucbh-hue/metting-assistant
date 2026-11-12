@@ -7,7 +7,7 @@ vẽ sơ đồ tư duy kiểu NotebookLM (bấm vào ý nào cũng nghe giải t
 trình bày (tự trình bày hoặc đọc theo kịch bản). Trợ lý nói bằng giọng người Việt tự nhiên của Soniox, đọc rõ cả từ tiếng
 Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy, miễn phí), vừa làm vừa báo những gì tìm thấy. AI chạy bằng API key hoặc gói đăng ký Claude.ai / ChatGPT / Gemini.
 
-- Phiên bản: 3.21.2 - cập nhật 23/10/2026 - phụ trách: phuc.bh@urbox.vn
+- Phiên bản: 3.29.0 - cập nhật 12/11/2026 - phụ trách: phuc.bh@urbox.vn
 - Hướng dẫn sử dụng cho người dùng (đăng nhập, mọi tính năng, Cài đặt) kèm video demo:
   [docs/huong-dan-su-dung.md](docs/huong-dan-su-dung.md).
 - Bộ slide demo để Jarvis tự trình bày (mở tệp, chọn "Theo ghi chú trong tệp"):
@@ -16,6 +16,26 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 - Dữ liệu lưu trên MongoDB Atlas (database `meeting_assistant`), tách biệt dự án phỏng vấn.
 
 ---
+
+## Bản 3.29.0: extension không tách cuộc họp khi mất mạng, bảng BD ngay trên tab họp, máy phòng họp trong Meet
+
+- **Extension 0.4.0** (`extension/`, bản dev nên phải reload unpacked trên từng máy, xem `extension/README.md`):
+  - Popup tách hai nút: **Tiếp tục nghe #id** (chỉ liệt kê cuộc họp đang mở, chọn sẵn cuộc họp nghe lần trước, không bao
+    giờ tạo mới) và **Tạo cuộc họp mới và nghe** (bắt buộc nhập tên, chọn nhóm). Bản cũ chỉ có một nút "Bắt đầu nghe" lấy
+    cuộc họp đầu tiên trong ô chọn tải chậm, nên lúc tạo mới dù muốn nối tiếp, lúc chạy vào cuộc họp cũ dù đã gõ tên.
+  - Mất mạng / server khởi động lại: ba WebSocket (tab, mic, bd) tự nối lại vào đúng cuộc họp (lùi dần 1-15 giây, không
+    giới hạn số lần), hỏi token mới trước mỗi lần (`/api/auth/me` gia hạn trượt, hoặc đọc lại từ tab app). Server báo cuộc
+    họp đã kết thúc (4003) / máy khác tiếp quản (4009) thì dừng và giải thích; tab họp đóng thì nhắc "Tiếp tục nghe #id".
+  - Cuộc họp thuộc nhóm BD: bảng **Gợi ý BD** nổi trên tab họp (`bd-panel.js`, shadow DOM): câu hỏi khách trợ lý tự nhận
+    ra, câu trả lời có nguồn K/M/U, ghi chú, Chép, Tra thêm trên mạng, ô gõ hỏi; kéo thả, thu gọn, ẩn / hiện từ popup.
+    Dữ liệu đi offscreen -> background -> content script (content script không tự mở WebSocket vì CSP của trang họp).
+    Chia sẻ cả màn hình thì khách thấy bảng.
+- **Server**: `GET /api/meetings?live=1` chỉ trả cuộc họp chưa kết thúc. Người trong Google Meet có thêm chế độ **Nhiều
+  người (máy phòng họp)** (`split`, `set_meet_mode`): một tài khoản mà nhiều người thay nhau nói thì luồng đó tách người
+  theo giọng như mic, không gắn tên tài khoản Meet, lưu theo cuộc họp (`meet.modes`); đổi chế độ thì đóng luồng Soniox cũ,
+  có tiếng lại mở luồng mới đúng cấu hình. `MEET_DIARIZE=1` vẫn bật cho mọi luồng.
+- Test: `tests/test_calendar_meet.py::test_room_account_split_mode_separates_voices_like_mic`,
+  `tests/test_api.py::test_live_filter_lists_only_open_meetings`.
 
 ## Bản 3.23.4: bot Meet không còn tự nhắn tin chào vào chat
 
@@ -290,8 +310,9 @@ Thiết kế: `docs/plans/2026-10-09-calendar-meet-subscriptions-design.md`. Đ�
 - Tiếng người online phát ra loa trong phòng có thể lọt vào mic:
   - Khi người online đang nói, câu của mic được giữ 2 giây rồi so với câu Meet cùng lúc. Trùng thì bỏ.
   - Phòng họp nên dùng loa có khử tiếng vọng hoặc tai nghe.
-- Máy phòng họp có nhiều người cùng vào Meet: mặc định cả máy là một người nói (tên máy trong Meet). Đặt `MEET_DIARIZE=1`
-  để tách người trong luồng đó.
+- Máy phòng họp có nhiều người cùng vào Meet: mặc định cả máy là một người nói (tên máy trong Meet). Trong menu **Người
+  trong Google Meet...** chọn **Nhiều người (máy phòng họp)** cho tài khoản đó để tách từng người theo giọng (lưu theo
+  cuộc họp); `MEET_DIARIZE=1` bật cho mọi luồng Meet.
 
 ### Gói AI riêng của từng người (bản web)
 - Cài đặt, mục **Gói AI của tôi**: kết nối gói Claude.ai hoặc ChatGPT của chính mình.

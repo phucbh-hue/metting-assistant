@@ -82,7 +82,8 @@ DEDUP_WINDOW_S = float(os.getenv("DEDUP_WINDOW_S", "3.0"))     # lệch thời g
 # không bỏ nhầm câu THẬT của người nói sau ("ừ, chốt thứ sáu" ngay sau khi người khác vừa nói).
 DEDUP_TIME_OVERLAP = float(os.getenv("DEDUP_TIME_OVERLAP", "0.4"))
 # Mỗi luồng Meet là MỘT người (tắt tách người nói: Soniox đôi khi chia một giọng thành 2 nhãn). Máy phòng họp có nhiều
-# người cùng vào Meet thì đặt MEET_DIARIZE=1 để tách người trong luồng đó như mic.
+# người cùng vào Meet thì chọn "Nhiều người (máy phòng họp)" cho tài khoản đó trong menu Người trong Google Meet (chế độ
+# "split", lưu theo cuộc họp) để tách người trong luồng đó như mic; MEET_DIARIZE=1 bật cho MỌI luồng Meet.
 MEET_DIARIZE = os.getenv("MEET_DIARIZE", "0") == "1"
 # Cuộc họp riêng (bot Meet dùng chung) lập biên bản sau khi bên nhận âm thanh chốt tên người nói, chờ tối đa ngần này giây
 NAMES_WAIT_S = 120.0
@@ -1433,7 +1434,7 @@ class MeetingSession:
 
     def meet_ignored(self, stream: str) -> bool:
         mode = self._meet_mode(stream)
-        if mode in ("ignore", "listen"):
+        if mode in ("ignore", "listen", "split"):
             return mode == "ignore"
         person = self.meet_people.get(stream) or {}
         return self.audio_owner is not None and same_person(person, self.mic_user)
@@ -1455,10 +1456,11 @@ class MeetingSession:
         await self._emit_meet()
 
     async def set_meet_mode(self, stream: str, mode: str) -> Dict[str, Any]:
-        """auto: bỏ qua khi trùng người đang bật mic; ignore: luôn bỏ qua (máy trong phòng); listen: luôn chép."""
+        """auto: bỏ qua khi trùng người đang bật mic; ignore: luôn bỏ qua (máy trong phòng); listen: luôn chép;
+        split: nhiều người nói sau một tài khoản (máy phòng họp vào Meet) -> tách từng người theo giọng như mic."""
         if stream not in self.meet_people:
             raise KeyError(stream)
-        if mode not in ("auto", "ignore", "listen"):
+        if mode not in ("auto", "ignore", "listen", "split"):
             raise ValueError("Chế độ không hợp lệ")
         if mode == "auto":
             self._meet_modes.pop(stream, None)
@@ -1467,8 +1469,18 @@ class MeetingSession:
         await asyncio.to_thread(db.update_meeting, self.id, {"meet.modes": dict(self._meet_modes)}, True)
         if self.meet_ignored(stream):
             await self._pause_meet(stream)
+        st = self.streams.get(stream)
+        if st is not None and not st.closed and st.diarize != self._meet_diarize(stream):
+            # Đổi cách tách giọng: đóng luồng Soniox (chốt chữ ở nền), có tiếng lại thì feed_meet mở luồng mới đúng cấu hình.
+            self.streams.pop(stream, None)
+            self._stream_raws.pop(stream, None)
+            asyncio.create_task(st.close())
         await self._emit_meet()
         return self.meet_public()
+
+    def _meet_diarize(self, stream: str) -> bool:
+        """Luồng Meet này có tách người nói không: MEET_DIARIZE (mọi luồng) hoặc chế độ "split" của riêng tài khoản đó."""
+        return MEET_DIARIZE or self._meet_mode(stream) == "split"
 
     async def _pause_meet(self, stream: str):
         g = self._gates.get(stream)
@@ -1515,7 +1527,7 @@ class MeetingSession:
             return
         st = self.streams.get(stream)
         if st is None or st.closed:
-            st = MeetingStream(stream, self, diarize=MEET_DIARIZE)
+            st = MeetingStream(stream, self, diarize=self._meet_diarize(stream))
             self.streams[stream] = st
         if not st.is_open and not st.reconnecting:
             if time.monotonic() - person.get("failed_at", 0.0) < 30:
@@ -1548,6 +1560,8 @@ class MeetingSession:
         """Hồ sơ người nói cho câu từ luồng Meet: luồng chỉ một giọng thì là người trong Meet đó (đặt tên theo Meet);
         luồng có nhiều giọng (máy trong phòng vào Meet) thì tách người như mic."""
         stream = str(it["stream"])
+        if self._meet_mode(stream) == "split":
+            return None                 # máy phòng họp: tách người theo giọng như mic, không gắn tên tài khoản Meet
         per_epoch = self._stream_raws.setdefault(stream, {})
         if it["raw"] is not None:
             per_epoch.setdefault(int(it["epoch"]), set()).add(str(it["raw"]))

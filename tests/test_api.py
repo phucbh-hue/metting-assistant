@@ -46,6 +46,14 @@ class ApiTests(unittest.TestCase):
         self.client.portal.call(_go)
 
     # ----------------------------------------------------------- meetings ---
+    def test_live_filter_lists_only_open_meetings(self):
+        """Extension thu tiếng tab hỏi ?live=1 để "Tiếp tục" đúng cuộc họp đang mở, không tải cả kho."""
+        a = self.create(title="Đang họp")
+        b = self.create(title="Đã xong")
+        self.client.post(f"/api/meetings/{b}/end")
+        self.assertEqual([m["id"] for m in self.client.get("/api/meetings?live=1").json()["meetings"]], [a])
+        self.assertEqual({m["id"] for m in self.client.get("/api/meetings").json()["meetings"]}, {a, b})
+
     def test_create_meeting_details_and_list(self):
         mid = self.create(agenda=["Chốt release", "  "], expected_attendees=["Hương"])
         d = self.client.get(f"/api/meetings/{mid}").json()

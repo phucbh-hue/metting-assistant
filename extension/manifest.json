@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "UrBox Meeting Copilot - thu tiếng tab",
-  "version": "0.3.1",
-  "description": "Thu tiếng cuộc họp online (mic + tiếng tab) rồi gửi về Meeting Copilot để chép lời, không cần bot vào phòng.",
+  "version": "0.4.0",
+  "description": "Thu tiếng cuộc họp online (mic + tiếng tab) rồi gửi về Meeting Copilot để chép lời, không cần bot vào phòng. Tự nối lại khi mất mạng; bảng gợi ý BD ngay trên tab họp.",
   "permissions": ["tabCapture", "offscreen", "storage", "scripting", "tabs"],
   "host_permissions": [
     "https://urbox-meeting-api.onrender.com/*",
@@ -31,7 +31,7 @@
         "https://teams.live.com/*",
         "https://*.zoom.us/*"
       ],
-      "js": ["mute-watch.js"],
+      "js": ["mute-watch.js", "bd-panel.js"],
       "run_at": "document_idle"
     }
   ],
