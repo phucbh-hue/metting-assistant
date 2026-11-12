@@ -2,6 +2,7 @@
 // Dữ liệu: offscreen giữ WebSocket /ws/meeting/<id>/bd, background chuyển sự kiện (bd_turn, bd_status) sang đây; hỏi thêm
 // và "Tra thêm trên mạng" gửi ngược về background gọi API. Chỉ hiện khi cuộc họp thuộc nhóm bật chế độ BD.
 // Vẽ trong shadow DOM (CSS của Meet không ảnh hưởng); phím gõ trong bảng không lọt tới trang (phím tắt của Meet).
+// Kéo thanh tiêu đề để di chuyển, kéo góc dưới phải để đổi cỡ bảng, nút "Aa" đổi cỡ chữ; vị trí / cỡ nhớ cho lần sau.
 // CẨN THẬN: chia sẻ CẢ MÀN HÌNH thì khách thấy bảng này; chia sẻ một cửa sổ / tab khác thì không.
 (function () {
   if (window.__maBdPanel) { window.__maBdPanel.hello(); return; }     // manifest + executeScript có thể tiêm hai lần
@@ -11,42 +12,50 @@
     catch (e) { return Promise.resolve(null); }
   };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const st = { mid: 0, title: '', base: '', turns: [], busy: 0, open: false, min: false, unread: 0, fresh: null, pos: null };
-  let host = null, root = null, list = null;
+  const SIZES = [13, 15, 17];                 // cỡ chữ (px): nút "Aa" xoay vòng
+  const st = { mid: 0, title: '', base: '', turns: [], busy: 0, open: false, min: false, unread: 0, fresh: null,
+               pos: null, size: null, fs: SIZES[0] };
+  let host = null, root = null, list = null, panel = null, resizing = false;
 
+  // Mọi cỡ chữ con tính theo em để nút "Aa" (đổi --fs trên .p) phóng cả bảng.
   const CSS = `
     :host{all:initial}
-    .p{position:fixed;right:16px;bottom:88px;width:360px;max-height:70vh;display:flex;flex-direction:column;background:#17181c;
-      color:#e8e8ea;border:1px solid #3a3b42;border-radius:12px;box-shadow:0 12px 40px #0008;font:13px/1.45 system-ui,"Segoe UI",sans-serif;
-      z-index:2147483647;overflow:hidden}
+    .p{position:fixed;right:16px;bottom:88px;width:360px;max-height:70vh;min-width:260px;min-height:120px;max-width:96vw;
+      box-sizing:border-box;display:flex;flex-direction:column;background:#17181c;color:#e8e8ea;border:1px solid #3a3b42;
+      border-radius:12px;box-shadow:0 12px 40px #0008;font:var(--fs,13px)/1.45 system-ui,"Segoe UI",sans-serif;
+      z-index:2147483647;overflow:hidden;resize:both}
+    .p.min{height:auto!important;min-height:0;resize:none}
     .p.min .b,.p.min .f{display:none}
-    .h{display:flex;align-items:center;gap:8px;padding:8px 10px;background:#23242a;cursor:move;user-select:none}
-    .h b{font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .h .s{font-size:11.5px;color:#a0a1a8;white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis}
-    .h button{background:none;border:none;color:#c9cad1;font-size:16px;line-height:1;cursor:pointer;padding:2px 6px;border-radius:6px}
+    .h{display:flex;align-items:center;gap:6px;padding:8px 10px;background:#23242a;cursor:move;user-select:none}
+    .h b{font-size:1em;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .h .s{font-size:.88em;color:#a0a1a8;white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis}
+    .h button{background:none;border:none;color:#c9cad1;font-size:1.23em;line-height:1;cursor:pointer;padding:2px 6px;border-radius:6px;font-family:inherit}
+    .h button.fs{font-size:.85em;font-weight:700;letter-spacing:.02em}
     .h button:hover{background:#ffffff1a}
-    .badge{background:#7c3aed;color:#fff;border-radius:999px;font-size:11px;padding:1px 7px}
+    .badge{background:#7c3aed;color:#fff;border-radius:999px;font-size:.85em;padding:1px 7px}
     .b{overflow:auto;padding:8px 10px;flex:1;min-height:0;display:flex;flex-direction:column;gap:10px}
     .tn{display:flex;flex-direction:column;gap:4px}
     .q{font-weight:600}
-    .m{font-size:11.5px;color:#a0a1a8}
+    .m{font-size:.88em;color:#a0a1a8}
     .a{background:#23242a;border-radius:10px;padding:8px 10px;white-space:pre-wrap;word-break:break-word}
     .a.fresh{outline:2px solid #7c3aed}
     .a.web{border:1px dashed #b7791f;background:#2a2518}
     .a.err{color:#f87171}
     .n{margin:4px 0 0 16px;padding:0}
     .n li{margin:2px 0}
-    .src{margin-top:6px;font-size:11.5px;color:#a0a1a8;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center}
+    .src{margin-top:6px;font-size:.88em;color:#a0a1a8;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center}
     .src a{color:#c4b5fd}
-    .chip{border:1px solid #3a3b42;border-radius:999px;padding:0 7px;font-size:10.5px}
-    .lnk{background:none;border:none;color:#c4b5fd;cursor:pointer;font-size:11.5px;padding:0;text-decoration:underline;font-family:inherit}
+    .chip{border:1px solid #3a3b42;border-radius:999px;padding:0 7px;font-size:.8em}
+    .lnk{background:none;border:none;color:#c4b5fd;cursor:pointer;font-size:.88em;padding:0;text-decoration:underline;font-family:inherit}
     .lnk:disabled{opacity:.5;cursor:default}
-    .f{display:flex;gap:6px;padding:8px 10px;border-top:1px solid #3a3b42;background:#1c1d22}
-    .f input{flex:1;min-width:0;padding:7px 9px;border-radius:8px;border:1px solid #3a3b42;background:#111216;color:#e8e8ea;font:13px system-ui,"Segoe UI",sans-serif}
-    .f button{padding:7px 10px;border-radius:8px;border:none;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;font-family:inherit}
+    .f{display:flex;gap:6px;padding:8px 18px 10px 10px;border-top:1px solid #3a3b42;background:#1c1d22}
+    .f input{flex:1;min-width:0;padding:7px 9px;border-radius:8px;border:1px solid #3a3b42;background:#111216;color:#e8e8ea;font:1em system-ui,"Segoe UI",sans-serif}
+    .f button{padding:7px 10px;border-radius:8px;border:none;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;font:inherit;font-weight:600}
     .f button:disabled{opacity:.5}
-    .empty{color:#a0a1a8;font-size:12.5px;padding:4px 0}
-    .warn{font-size:11px;color:#fbbf24;margin-bottom:4px}`;
+    .empty{color:#a0a1a8;font-size:.96em;padding:4px 0}
+    .warn{font-size:.85em;color:#fbbf24;margin-bottom:4px}`;
+
+  function save(obj) { try { chrome.storage.local.set(obj); } catch (e) {} }
 
   function build() {
     host = document.createElement('div');
@@ -54,23 +63,41 @@
     root = host.attachShadow({ mode: 'closed' });
     root.innerHTML = `<style>${CSS}</style><div class="p" id="p">
       <div class="h" id="h"><b id="t">Gợi ý BD</b><span class="s" id="s"></span><span class="badge" id="u" style="display:none"></span>
-        <button id="min" title="Thu gọn / mở ra">–</button><button id="x" title="Ẩn (hiện lại bằng nút trong popup extension)">×</button></div>
+        <button id="fs" class="fs" title="Đổi cỡ chữ">Aa</button><button id="min" title="Thu gọn / mở ra">–</button>
+        <button id="x" title="Ẩn (hiện lại bằng nút trong popup extension)">×</button></div>
       <div class="b" id="b"></div>
       <div class="f"><input id="q" placeholder="Hỏi trợ lý BD..." maxlength="500"><button id="ask">Hỏi</button></div></div>`;
     // Phím gõ trong bảng không tới trang họp (Meet có phím tắt ctrl+d, ctrl+e... và bắt phím trên document).
     ['keydown', 'keyup', 'keypress'].forEach(ev => host.addEventListener(ev, e => e.stopPropagation()));
     (document.body || document.documentElement).appendChild(host);
+    panel = root.getElementById('p');
     list = root.getElementById('b');
     root.getElementById('x').onclick = () => { hide(); send({ cmd: 'bdpanel:hide' }); };
     root.getElementById('min').onclick = () => {
       st.min = !st.min;
-      root.getElementById('p').classList.toggle('min', st.min);
+      panel.classList.toggle('min', st.min);
       if (!st.min) { st.unread = 0; renderHead(); scroll(); }
+    };
+    root.getElementById('fs').onclick = () => {
+      st.fs = SIZES[(SIZES.indexOf(st.fs) + 1) % SIZES.length];
+      applyPrefs();
+      save({ bdFont: st.fs });
     };
     root.getElementById('ask').onclick = ask;
     root.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') ask(); });
     list.addEventListener('click', onClick);
-    drag(root.getElementById('h'), root.getElementById('p'));
+    // Đổi cỡ bằng tay nắm góc dưới phải (resize của trình duyệt). Lúc nhấn chuột ở góc: chuyển sang neo trái/trên (để góc
+    // đi theo chuột thay vì bảng phình ngược) và bỏ trần 70vh; thả chuột thì nhớ cỡ mới (xem drag()).
+    panel.addEventListener('mousedown', e => {
+      if (st.min) return;
+      const r = panel.getBoundingClientRect();
+      if (e.clientX > r.right - 22 && e.clientY > r.bottom - 22) {
+        place(panel, r.left, r.top);
+        panel.style.maxHeight = '92vh';
+        resizing = true;
+      }
+    });
+    drag(root.getElementById('h'), panel);
   }
 
   function drag(handle, panel) {
@@ -83,11 +110,19 @@
     });
     window.addEventListener('mousemove', e => { if (moving) place(panel, ox + e.clientX - sx, oy + e.clientY - sy); });
     window.addEventListener('mouseup', () => {
-      if (!moving) return;
-      moving = false;
-      const r = panel.getBoundingClientRect();
-      st.pos = { left: r.left, top: r.top };
-      try { chrome.storage.local.set({ bdPos: st.pos }); } catch (e) {}
+      if (moving) {
+        moving = false;
+        const r = panel.getBoundingClientRect();
+        st.pos = { left: r.left, top: r.top };
+        save({ bdPos: st.pos });
+      }
+      if (resizing) {
+        resizing = false;
+        st.size = { w: panel.offsetWidth, h: panel.offsetHeight };
+        const r = panel.getBoundingClientRect();
+        st.pos = { left: r.left, top: r.top };
+        save({ bdSize: st.size, bdPos: st.pos });
+      }
     });
   }
   function place(panel, left, top) {
@@ -95,6 +130,17 @@
     left = Math.max(0, Math.min(window.innerWidth - w, left));
     top = Math.max(0, Math.min(window.innerHeight - h, top));
     panel.style.left = left + 'px'; panel.style.top = top + 'px'; panel.style.right = 'auto'; panel.style.bottom = 'auto';
+  }
+  /** Cỡ chữ, cỡ bảng, vị trí đã nhớ (chrome.storage.local), gọt theo màn hình hiện tại. */
+  function applyPrefs() {
+    if (!panel) return;
+    panel.style.setProperty('--fs', st.fs + 'px');
+    if (st.size) {
+      panel.style.maxHeight = '92vh';
+      panel.style.width = Math.max(260, Math.min(st.size.w, window.innerWidth - 16)) + 'px';
+      panel.style.height = Math.max(120, Math.min(st.size.h, window.innerHeight - 16)) + 'px';
+    }
+    if (st.pos) place(panel, st.pos.left, st.pos.top);
   }
 
   const who = t => t.source === 'auto' ? `Khách hỏi${t.speaker ? ` (${esc(t.speaker)})` : ''} - trợ lý tự nhận ra`
@@ -142,7 +188,7 @@
     const near = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
     list.innerHTML = st.turns.length ? st.turns.map(turnHtml).join('')
       : '<div class="empty">Khi khách hỏi hoặc băn khoăn, trợ lý tự nhận ra và trả lời ở đây từ tài liệu của nhóm, các cuộc họp trước và kho tri thức '
-        + 'WikiBox (K: tài liệu, M: cuộc họp trước, U: WikiBox, W: trang web). Hoặc gõ câu hỏi bên dưới.</div>';
+        + 'WikiBox (K: tài liệu, M: cuộc họp trước, U: WikiBox, W: trang web). Hoặc gõ câu hỏi bên dưới. Kéo góc dưới phải để đổi cỡ bảng, bấm Aa để đổi cỡ chữ.</div>';
     st.fresh = null;
     if (near || st.turns.length <= 1) scroll();
   }
@@ -193,11 +239,11 @@
     if (!host) build();
     st.open = true;
     host.style.display = '';
-    if (st.pos) place(root.getElementById('p'), st.pos.left, st.pos.top);
+    applyPrefs();
     render();
   }
   function hide() { st.open = false; if (host) host.style.display = 'none'; }
-  function destroy() { if (host) host.remove(); host = root = list = null; st.open = false; st.turns = []; }
+  function destroy() { if (host) host.remove(); host = root = list = panel = null; st.open = false; st.turns = []; }
 
   chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     if (!msg || !alive()) return;
@@ -218,7 +264,12 @@
 
   async function hello() {
     if (!alive()) return;
-    try { const { bdPos } = await chrome.storage.local.get('bdPos'); if (bdPos) st.pos = bdPos; } catch (e) {}
+    try {
+      const d = await chrome.storage.local.get(['bdPos', 'bdSize', 'bdFont']);
+      if (d.bdPos) st.pos = d.bdPos;
+      if (d.bdSize && d.bdSize.w && d.bdSize.h) st.size = d.bdSize;
+      if (SIZES.includes(d.bdFont)) st.fs = d.bdFont;
+    } catch (e) {}
     const state = await send({ cmd: 'bdpanel:hello' });     // background: cuộc họp đang nghe có bảng BD không, các lượt đã có
     if (state && state.mid && state.open) show(state); else hide();
   }

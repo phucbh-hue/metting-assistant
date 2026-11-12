@@ -39,8 +39,9 @@ vừa đăng nhập lại ở tab app). Popup báo "đang nối lại (lần n)"
 
 Cuộc họp thuộc **nhóm bật chế độ BD** thì sau khi bắt đầu nghe, một bảng nổi "Gợi ý BD" hiện góc dưới phải của tab họp
 (`bd-panel.js`, shadow DOM): câu hỏi khách vừa hỏi mà trợ lý tự nhận ra, câu trả lời gợi ý có nguồn K/M/U, ghi chú cho đội
-mình, nút **Chép**, **Tra thêm trên mạng**, ô gõ câu hỏi. Kéo thả được, thu gọn (có đếm câu trả lời mới), ẩn / hiện bằng
-nút trong popup. Dữ liệu đi: offscreen giữ `/ws/meeting/{mid}/bd` -> background -> bảng (content script không tự mở
+mình, nút **Chép**, **Tra thêm trên mạng**, ô gõ câu hỏi. Kéo thanh tiêu đề để di chuyển, **kéo góc dưới phải để đổi cỡ
+bảng**, nút **Aa** đổi cỡ chữ (13 / 15 / 17 px); vị trí, cỡ bảng, cỡ chữ nhớ cho lần sau (`chrome.storage.local`). Thu gọn
+(có đếm câu trả lời mới), ẩn / hiện bằng nút trong popup. Dữ liệu đi: offscreen giữ `/ws/meeting/{mid}/bd` -> background -> bảng (content script không tự mở
 WebSocket, tránh CSP của trang họp).
 
 > **Chia sẻ cả màn hình thì khách thấy bảng này.** Chia sẻ một cửa sổ / tab khác thì không. Bảng chỉ dành cho đội BD.
