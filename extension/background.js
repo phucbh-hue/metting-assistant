@@ -155,6 +155,8 @@ async function start({ mid, micOn }) {
   if (!info.ok) return { ok: false, error: info.status === 404 ? `Không tìm thấy cuộc họp #${mid}.` : info.error };
   const m = (info.data && info.data.meeting) || {};
   if (m.status === 'ended') return { ok: false, error: `Cuộc họp #${mid} đã kết thúc nên không nối tiếp được. Tạo cuộc họp mới.` };
+  const prev = await getRunning();
+  if (prev) panelSend(prev.tabId, { cmd: 'bdpanel:stop' });                     // bảng BD của cuộc họp trước (nếu có) gỡ đi
   await ensureOffscreen();
   await chrome.runtime.sendMessage({ cmd: 'offscreen:stop' }).catch(() => {});   // dọn bộ thu còn sót
   await chrome.storage.session.set({ running: null, bdTurns: [] });
