@@ -17,6 +17,20 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 
 ---
 
+## Bản 3.30.0: bot vào được Microsoft Teams và Zoom
+
+- Recall.ai vào Teams / Zoom bằng cùng API tạo bot (`meeting_url`), nên phần sửa là **nhận ra link**: `meeting/meet_links.py`
+  (Meet bỏ tham số, Teams / Zoom **giữ nguyên** `context` / `pwd`; `code()` có tiền tố `zoom:` / `teams:`, mã Meet giữ như cũ
+  nên khóa một-bot-một-buổi của bản ghi cũ không đổi). `gcalendar.meet_url` tìm thêm ở ô Địa điểm và link trong mô tả
+  (lời mời Teams / Zoom nằm ở đó; `FIELDS` thêm `location`); `normalize_meet_url` nhận cả lời mời dán nguyên khối.
+  Giao diện: "Mời bot vào Google Meet / Teams / Zoom". Test: `tests/test_meet_links.py`, `test_events_are_normalized`.
+- Chưa kiểm chứng với Teams / Zoom thật. Lưu ý Recall: Zoom có thể yêu cầu cấu hình Zoom app credentials trong dashboard
+  Recall cho phòng bật "require authentication"; Teams cần người trong phòng bấm Admit như Meet. Mã lỗi Recall riêng của
+  Teams / Zoom chưa có câu tiếng Việt (hiện mã gốc).
+- Lỗi thật 16/11/2026 (buổi phỏng vấn 15:30): bot vào phòng chờ Meet đúng giờ nhưng **không ai bấm Cho vào**, Meet đuổi bot
+  sau 10 phút; app ngừng đọc trạng thái sau `POLL_AFTER_S` (20 phút) nên bản ghi kẹt ở "waiting" tới hết buổi. Cần sửa ở
+  bản sau: đọc trạng thái lần cuối khi quá giờ kết thúc để chốt "failed", và nhắc người hẹn ngay khi bot ở phòng chờ quá 2 phút.
+
 ## Bản 3.29.0: extension không tách cuộc họp khi mất mạng, bảng BD ngay trên tab họp, máy phòng họp trong Meet
 
 - **Extension 0.4.0** (`extension/`, bản dev nên phải reload unpacked trên từng máy, xem `extension/README.md`):

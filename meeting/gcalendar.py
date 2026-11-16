@@ -20,10 +20,10 @@ EVENTS = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
 CACHE_S = 120
 PAST_S = 15 * 60                 # buổi đã bắt đầu tối đa 15 phút trước (bot vẫn vào được buổi đang diễn ra)
 AHEAD_S = 7 * 24 * 3600
-FIELDS = ("items(id,status,summary,description,start,end,hangoutLink,conferenceData(entryPoints(entryPointType,uri)),"
+FIELDS = ("items(id,status,summary,description,location,start,end,hangoutLink,conferenceData(entryPoints(entryPointType,uri)),"
           "attendees(email,displayName,responseStatus,self,organizer,resource),recurringEventId,htmlLink,"
           "organizer(email,displayName,self),eventType),nextPageToken")
-_MEET = re.compile(r"^https://meet\.google\.com/[a-z]{3,4}-[a-z]{4}-[a-z]{3,4}$")
+from meeting import meet_links
 _CACHE: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
 
 
@@ -32,15 +32,21 @@ class CalendarError(Exception):
 
 
 def meet_url(ev: Dict[str, Any]) -> str:
-    """Link Google Meet của sự kiện (chỉ nhận đúng dạng https://meet.google.com/abc-defg-hij)."""
+    """Link phòng họp online của sự kiện mà bot vào được: Google Meet, Microsoft Teams, Zoom (3.30.0). Thứ tự tìm:
+    hangoutLink, điểm vào video trong conferenceData, ô Địa điểm, rồi link trong mô tả (lời mời Teams / Zoom thường
+    nằm ở đó). Không có: ''."""
     cands = [ev.get("hangoutLink") or ""]
     for ep in ((ev.get("conferenceData") or {}).get("entryPoints") or []):
         if ep.get("entryPointType") == "video":
             cands.append(ep.get("uri") or "")
     for u in cands:
-        u = str(u).strip().split("?")[0].rstrip("/").lower()
-        if _MEET.match(u):
-            return u
+        n = meet_links.normalize(str(u))
+        if n:
+            return n
+    for blob in (ev.get("location") or "", ev.get("description") or ""):
+        n = meet_links.find_in_text(str(blob))
+        if n:
+            return n
     return ""
 
 

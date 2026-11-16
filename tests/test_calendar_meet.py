@@ -630,13 +630,17 @@ class GoogleCalendarTests(unittest.TestCase):
                                                 {"entryPointType": "video", "uri": "https://meet.google.com/xyz-abcd-efg?hs=1"}]},
              "attendees": [{"email": "an@urbox.vn", "self": True, "responseStatus": "declined"}]},
             {"id": "c", "summary": "Zoom", "start": {"dateTime": "2026-10-09T16:00:00Z"}, "end": {"dateTime": "2026-10-09T17:00:00Z"},
-             "location": "https://zoom.us/j/1"},
+             "location": "https://us02web.zoom.us/j/81234567890?pwd=abcDEF123"},
+            {"id": "g", "summary": "Teams", "start": {"dateTime": "2026-10-09T16:00:00Z"}, "end": {"dateTime": "2026-10-09T17:00:00Z"},
+             "description": "Join: <a href=\"https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc%40thread.v2/0?context=%7b%22Tid%22%3a%22t1%22%7d\">Teams</a>"},
+            {"id": "h", "summary": "Không link", "start": {"dateTime": "2026-10-09T16:00:00Z"}, "end": {"dateTime": "2026-10-09T17:00:00Z"},
+             "location": "Phòng họp tầng 3"},
             {"id": "d", "summary": "Nghỉ lễ", "start": {"date": "2026-10-10"}, "end": {"date": "2026-10-11"}},
             {"id": "e", "status": "cancelled", "start": {"dateTime": "2026-10-09T16:00:00Z"}},
             {"id": "f", "eventType": "workingLocation", "start": {"date": "2026-10-10"}, "end": {"date": "2026-10-11"}},
         ]})
         evs = {e["id"]: e for e in asyncio.run(gcalendar.upcoming("an@urbox.vn", now=NOW))}
-        self.assertEqual(sorted(evs), ["a", "b", "c", "d"])
+        self.assertEqual(sorted(evs), ["a", "b", "c", "d", "g", "h"])
         a = evs["a"]
         self.assertEqual((a["meet_url"], a["series"], a["declined"], a["is_organizer"]),
                          ("https://meet.google.com/abc-defg-hij", "s1", False, True))
@@ -644,13 +648,17 @@ class GoogleCalendarTests(unittest.TestCase):
         self.assertEqual([p["email"] for p in a["attendees"]], ["an@urbox.vn", "lan@urbox.vn"])   # bỏ phòng họp
         self.assertEqual(a["description"], "Chương trình:\n- Báo cáo\n- Kế hoạch & rủi ro")
         self.assertEqual((evs["b"]["meet_url"], evs["b"]["declined"]), ("https://meet.google.com/xyz-abcd-efg", True))
-        self.assertEqual(evs["c"]["meet_url"], "")
+        # 3.30.0: Teams / Zoom trong Địa điểm hoặc mô tả cũng là link bot vào được, giữ nguyên tham số (pwd, context)
+        self.assertEqual(evs["c"]["meet_url"], "https://us02web.zoom.us/j/81234567890?pwd=abcDEF123")
+        self.assertEqual(evs["g"]["meet_url"],
+                         "https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc%40thread.v2/0?context=%7b%22Tid%22%3a%22t1%22%7d")
+        self.assertEqual(evs["h"]["meet_url"], "")
         self.assertTrue(evs["d"]["all_day"])
         q = dict(self.seen.url.params)
         self.assertEqual((q["singleEvents"], q["orderBy"]), ("true", "startTime"))
         self.assertEqual(q["timeMin"], datetime.fromtimestamp(NOW - 900, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
         self.reply = httpx.Response(500)
-        self.assertEqual(len(asyncio.run(gcalendar.upcoming("an@urbox.vn"))), 4)   # nhớ 2 phút: không gọi lại
+        self.assertEqual(len(asyncio.run(gcalendar.upcoming("an@urbox.vn"))), 6)   # nhớ 2 phút: không gọi lại
 
     def test_missing_permission_or_api_off_and_token_refresh(self):
         self.reply = httpx.Response(403, json={"error": {"message": "Request had insufficient authentication scopes.",

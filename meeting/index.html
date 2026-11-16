@@ -1345,7 +1345,7 @@ function evTime(ev) {
 }
 function evStatus(ev, cal) {
   if (ev.declined) return ['Đã từ chối', ''];
-  if (!ev.meet_url) return ['Không có link Meet', ''];
+  if (!ev.meet_url) return ['Không có link Meet / Teams / Zoom', ''];
   if (ev.skipped) return ['Đã bỏ qua', ''];
   if (ev.bot && BOT_STATUS[ev.bot.status]) {
     if (ev.bot.status === 'in_call' && !ev.bot.recording) return ['Bot đã vào, đang kết nối âm thanh', 'chip-warn'];
@@ -1458,12 +1458,12 @@ function renderMeetJoin() {
   const groupsOpt = (S.groups || []).filter(g => g.role === 'owner' || g.role === 'member');
   const items = d.items || [];
   box.innerHTML = `<section class="mb-6">
-    <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2"><h2 class="font-semibold">Mời bot vào Google Meet</h2>
+    <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2"><h2 class="font-semibold">Mời bot vào Google Meet / Teams / Zoom</h2>
       <span class="text-[12.5px] text-muted">Cuộc họp không có trên lịch? Dán link, bot xin vào ngay và chép lời.</span></div>
     ${d.problem ? `<div class="notice notice-warn mb-2"><p>${esc(d.problem.text)}</p></div>` : ''}
     ${d.bot_ready ? '' : '<p class="text-[12.5px] text-muted mb-2">Server chưa cấu hình bot vào Google Meet (RECALLAI_API_KEY, PUBLIC_BASE_URL): báo quản trị viên.</p>'}
     <form id="mb-form" class="mb-join" autocomplete="off">
-      <input class="input" name="url" type="text" inputmode="url" placeholder="https://meet.google.com/abc-defg-hij" aria-label="Link Google Meet" required>
+      <input class="input" name="url" type="text" inputmode="url" placeholder="Link Google Meet, Microsoft Teams hoặc Zoom" aria-label="Link phòng họp" required>
       <input class="input" name="title" type="text" maxlength="200" placeholder="Tên cuộc họp (không bắt buộc)" aria-label="Tên cuộc họp">
       <select class="input" name="group" aria-label="Nhóm cho cuộc họp" style="width:auto"><option value="">Không nhóm</option>${groupsOpt.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select>
       <button class="btn btn-primary" type="submit" ${d.bot_ready ? '' : 'disabled'}>Mời bot vào</button>
@@ -1497,11 +1497,11 @@ function renderMeetJoin() {
 }
 function openRoomMeetJoin() {
   const R = S.room; if (!R) return;
-  openModal(`<h3 class="text-lg font-semibold mb-1">Mời bot vào Google Meet</h3>
+  openModal(`<h3 class="text-lg font-semibold mb-1">Mời bot vào Google Meet / Teams / Zoom</h3>
     <p class="text-muted text-[13px] mb-3">Họp kết hợp: người trong phòng nói qua mic của ứng dụng, người online nói qua Google Meet. Bot vào Meet,
       chép lời từng người online vào chính cuộc họp này. Máy trong phòng cũng vào Meet thì chọn "Bỏ qua" cho máy đó ở mục Người trong Google Meet.</p>
     <form id="room-mb" class="flex flex-col gap-3">
-      <input class="input" name="url" type="text" inputmode="url" placeholder="https://meet.google.com/abc-defg-hij" aria-label="Link Google Meet" required autofocus>
+      <input class="input" name="url" type="text" inputmode="url" placeholder="Link Google Meet, Microsoft Teams hoặc Zoom" aria-label="Link phòng họp" required autofocus>
       <div class="flex justify-end gap-2"><button type="button" class="btn btn-ghost" data-act="modal-close">Hủy</button>
         <button type="submit" class="btn btn-primary">Mời bot vào</button></div>
     </form>`, { onMount(m) {
@@ -6546,7 +6546,7 @@ document.addEventListener('click', async e => {
       if (R.recording && R.recording.runs) items.push({ id: 'rec-delete', text: `Xóa bản ghi âm (${fmt.dur(R.recording.seconds || 0)})`, danger: true });
       if (R.meet && (R.meet.bot || (R.meet.people || []).length)) items.unshift({ id: 'meet-people', text: 'Người trong Google Meet...' });
       const botOn = R.meet && R.meet.bot && ['pending', 'scheduled', 'joining', 'waiting', 'in_call'].includes(R.meet.bot.status);
-      if (AUTH.required && R.meeting && R.meeting.status !== 'ended' && !botOn) items.unshift({ id: 'meet-join', text: 'Mời bot vào Google Meet...' });
+      if (AUTH.required && R.meeting && R.meeting.status !== 'ended' && !botOn) items.unshift({ id: 'meet-join', text: 'Mời bot vào Google Meet / Teams / Zoom...' });
       items.push({ id: 'delete', text: 'Xóa cuộc họp', danger: true });
       const c = await openMenu(el, items);
       if (c === 'meet-people') openMeetPeople();

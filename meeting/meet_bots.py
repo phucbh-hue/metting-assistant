@@ -28,7 +28,7 @@ import secrets
 import time
 from typing import Any, Dict, List, Optional
 
-from meeting import auth, db, gcalendar, google_oauth, groups, recall, user_prefs
+from meeting import auth, db, gcalendar, google_oauth, groups, meet_links, recall, user_prefs
 
 log = logging.getLogger("meeting.meet_bots")
 
@@ -70,22 +70,21 @@ def ws_url(rec: Dict[str, Any]) -> str:
 
 
 def meet_code(url: str) -> str:
-    return (url or "").rstrip("/").rsplit("/", 1)[-1].lower()
+    """Mã ngắn để ghép khóa một-bot-một-buổi: Meet giữ 'abc-defg-hij' như cũ, Teams / Zoom có tiền tố (meet_links.code)."""
+    return meet_links.code(url)
 
 
-_MEET_RE = re.compile(r"^(?:https?://)?meet\.google\.com/([a-z]{3}-[a-z]{4}-[a-z]{3})(?:[/?#].*)?$", re.I)
-_CODE_RE = re.compile(r"^[a-z]{3}-[a-z]{4}-[a-z]{3}$", re.I)
 MANUAL_HOURS = 4                 # bot mời bằng link: coi như buổi họp dài tối đa 4 giờ (sau đó không đọc trạng thái nữa)
 
 
 def normalize_meet_url(text: str) -> str:
-    """Link Google Meet (hoặc chỉ mã abc-defg-hij) -> https://meet.google.com/abc-defg-hij. Sai dạng: ValueError."""
-    t = (text or "").strip()
-    m = _MEET_RE.match(t)
-    code = m.group(1) if m else (t if _CODE_RE.match(t) else "")
-    if not code:
-        raise ValueError("Link Google Meet chưa đúng dạng (ví dụ: https://meet.google.com/abc-defg-hij)")
-    return f"https://meet.google.com/{code.lower()}"
+    """Link Google Meet / Teams / Zoom (hoặc chỉ mã Meet abc-defg-hij, hoặc cả lời mời dán vào) -> link chuẩn.
+    Sai dạng: ValueError. (3.30.0: trước chỉ nhận Google Meet.)"""
+    n = meet_links.normalize(text) or meet_links.find_in_text(text)
+    if not n:
+        raise ValueError("Link chưa đúng dạng. Nhận link Google Meet (https://meet.google.com/abc-defg-hij), "
+                         "Microsoft Teams (https://teams.microsoft.com/l/meetup-join/...) hoặc Zoom (https://zoom.us/j/...).")
+    return n
 
 
 def key_of(meet_url: str, start: float) -> str:
