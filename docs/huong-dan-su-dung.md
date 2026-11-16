@@ -3,9 +3,10 @@ title: Hướng dẫn sử dụng UrBox Meeting Copilot
 description: >
   Hướng dẫn cho người dùng nội bộ UrBox: đăng nhập, tạo và chạy cuộc họp, trợ lý AI, trò chơi có thưởng,
   biên bản và mẫu biên bản, nhóm cuộc họp, lịch Google và bot Google Meet, chế độ BD, kho tri thức WikiBox,
-  hồ sơ giọng nói và toàn bộ phần Cài đặt. Kèm video demo có phụ đề.
-version: 3.23.4
-updated: 25/10/2026
+  hồ sơ giọng nói, extension nghe họp online qua tab trình duyệt, chế độ Phỏng vấn và toàn bộ phần Cài đặt.
+  Kèm video demo có phụ đề.
+version: 3.29.3 (extension 0.4.2)
+updated: 16/11/2026
 owner: phuc.bh@urbox.vn
 ---
 
@@ -42,7 +43,17 @@ owner: phuc.bh@urbox.vn
 - **Bot vào Google Meet** theo lịch, chép lời từng người online. Họp nửa online nửa trực tiếp vẫn chép đủ.
 - **Chế độ BD**:
   - khi khách hỏi, trợ lý gợi ý câu trả lời từ tài liệu của nhóm và các cuộc họp trước;
-  - chủ nhóm hỏi và lấy báo cáo trên toàn bộ cuộc họp của nhóm.
+  - chủ nhóm hỏi và lấy báo cáo trên toàn bộ cuộc họp của nhóm;
+  - bảng gợi ý nổi ngay trên tab họp (Google Meet, Teams, Zoom, Callio) khi nghe qua extension.
+- **Extension Chrome nghe họp online qua tab**: thu tiếng người online từ tab trình duyệt và tiếng mình qua
+  mic,
+  không cần bot vào phòng, không tốn credit Recall (mục 6.5).
+- **Trò chơi có thưởng** do Jarvis làm MC, chơi bằng giọng hoặc điện thoại; có chế độ thi đua theo đội / văn
+  phòng
+  với bộ câu hỏi soạn sẵn (mục 7.6 và 7.7).
+- **Chế độ Phỏng vấn** (`/interview`): kéo JD từ trang tuyển dụng, đặt tiêu chí, chấm CV theo tiêu chí,
+  phỏng vấn
+  trực tiếp hoặc online rồi chấm điểm ứng viên (mục 13.5).
 
 Có hai cách dùng:
 
@@ -214,6 +225,61 @@ Menu cuộc họp (**...** ở thanh trên) có thêm **Phân tích lại ngư�
   - bản web còn lưu một bản vào thư mục của nhóm trên Google Drive;
   - xóa được bất cứ lúc nào bằng **Xóa bản ghi âm** trong menu cuộc họp.
 
+### 6.5. Nghe họp online qua extension (không cần bot)
+
+Extension Chrome "UrBox Meeting Copilot - thu tiếng tab" là nguồn âm thanh thứ tư, bên cạnh mic, tệp và bot
+Meet.
+Bật lên thì nó thu **tiếng người online phát ra từ tab** (Google Meet, Teams web, Zoom web, Callio,
+webinar...)
+và **tiếng mình nói qua mic**, gửi về cuộc họp như mic. Không cần bot vào phòng, không tốn credit Recall, dùng
+được
+cả với nền tảng mà bot không vào được (Teams, Zoom, Callio).
+
+> Chỉ dùng khi người trong cuộc họp đã được xin phép ghi âm từ trước. Extension không hiện thông báo trong
+> phòng.
+
+**Cài một lần trên mỗi máy** (bản nội bộ, chưa lên Chrome Web Store):
+
+1. Lấy thư mục `extension/` của ứng dụng (quản trị viên gửi, hoặc `git pull` repo).
+2. Mở `chrome://extensions` (Chrome hoặc Edge), bật **Developer mode**, bấm **Load unpacked**, chọn thư mục
+   đó.
+   Thẻ extension phải ghi số bản **0.4.2**.
+3. Mở Meeting Copilot trong một tab và đăng nhập. Extension tự lấy quyền đăng nhập từ tab đó, không phải
+   dán token.
+
+**Dùng trong cuộc họp:**
+
+1. Vào tab cuộc họp (Meet, Teams, Zoom, Callio...), bấm biểu tượng extension **ngay trên tab đó** (mở ở tab
+   khác
+   là thu nhầm tab).
+2. Chọn một trong hai nút:
+   - **Tiếp tục nghe #id**: nối lời thoại vào một cuộc họp đang mở (chỉ liệt kê cuộc họp chưa kết thúc,
+     chọn sẵn
+     cuộc họp nghe lần trước). Không bao giờ tạo cuộc họp mới.
+   - **Tạo cuộc họp mới và nghe**: nhập tên (bắt buộc), chọn nhóm nếu cần. Luôn tạo cuộc họp mới.
+   Bỏ chọn "thu mic" nếu chỉ muốn thu tiếng tab. Lần đầu, Chrome mở một tab xin quyền micro (chỉ một lần).
+3. Lời thoại hiện trong phòng họp của Meeting Copilot như bình thường (nguồn "tab" và "mic" chạy song song,
+   câu
+   nói trùng giữa hai nguồn chỉ hiện một lần). Popup hiện cuộc họp đang nghe, tình trạng kết nối, số khối
+   đã gửi.
+4. Xong thì bấm **Dừng nghe** trong popup, hoặc **Kết thúc cuộc họp** trong app để lập biên bản.
+
+**Những điều nên biết:**
+
+- **Đeo tai nghe.** Nghe qua loa ngoài thì tiếng người online lọt vào mic; extension có bộ chống vọng âm
+  nhưng tai
+  nghe vẫn chắc hơn.
+- **Im theo nút tắt mic của app họp**: bấm tắt mic trong Meet / Teams / Zoom / Callio thì extension ngừng
+  gửi tiếng
+  mic của mình. Nền tảng khác thì bấm **"Im theo nút tắt mic của trang này"** trong popup một lần để cấp
+  quyền.
+- **Mất mạng hoặc server khởi động lại**: extension tự nối lại vào đúng cuộc họp (không tạo mới). Đóng hoặc
+  tải lại
+  tab họp thì Chrome thu hồi quyền thu tiếng: mở popup trên tab họp, bấm **Tiếp tục nghe #id**.
+- **Cập nhật**: bản nội bộ không tự cập nhật. Khi có bản mới: lấy thư mục mới, vào `chrome://extensions` bấm
+  **Reload** ở thẻ extension, rồi F5 tab app và tab họp. Popup sẽ báo "chưa nạp bản mới" nếu quên Reload.
+- Cuộc họp thuộc nhóm bật chế độ BD thì có thêm **bảng Gợi ý BD** nổi trên tab họp (mục 11.4).
+
 ## 7. Trợ lý AI
 
 ### 7.1. Cách gọi trợ lý
@@ -339,6 +405,28 @@ bày.
 - **Nút cho người dẫn**: Bắt đầu, Chốt đáp án / Câu tiếp, Đọc bảng điểm, Dừng trò chơi, Chơi lại. Nói được:
   "Jarvis ơi, câu tiếp theo", "xem bảng điểm", "dừng trò chơi".
 - Phần thưởng chỉ hiện và đọc lên. Ban tổ chức trao quà, ứng dụng không phát voucher thật.
+
+### 7.7. Trò chơi thi đua theo đội (văn phòng) với bộ câu hỏi soạn sẵn
+
+Dành cho sự kiện chung của công ty (ví dụ sinh nhật UrBox, hai văn phòng Hà Nội và Hồ Chí Minh thi đua):
+
+- **Mở trò chơi có sẵn**: trong thẻ **Trò chơi** bấm **Bộ trò chơi có sẵn** rồi chọn bộ, hoặc nói / gõ
+  "Jarvis ơi, mở trò chơi sinh nhật". Câu hỏi và đáp án lấy từ bộ soạn sẵn, không để AI tự bịa thông tin nội
+  bộ.
+  "Jarvis ơi, tạo một trò chơi có thưởng..." vẫn là AI tự soạn như mục 7.6.
+- **Chọn đội**: người chơi quét mã QR, chọn văn phòng của mình rồi chơi trên điện thoại. Điểm cá nhân cộng
+  vào đội;
+  màn hình trình bày có **dây kéo co** đổi bên theo thế trận. Khi số người hai bên lệch nhiều, ban tổ chức
+  chọn tính
+  điểm trung bình thay vì tổng (đặt trong bộ câu hỏi).
+- **Jarvis làm MC**: đọc câu hỏi, chêm lời bình theo thế trận (hòa, dẫn trước, lội ngược dòng...), công bố
+  đáp án.
+- **Kết quả**: top 3 mỗi văn phòng nhận quà, sau đó quay số may mắn cho người chưa lọt top. Ban tổ chức trao
+  quà,
+  ứng dụng không phát voucher thật.
+- Muốn có bộ câu hỏi cho sự kiện khác: gửi quản trị viên danh sách câu hỏi, đáp án, tên đội và phần thưởng;
+  quản trị
+  viên thêm một tệp vào `meeting/game_presets/`.
 
 ### 7.5. Giọng nói và hình đại diện
 
@@ -493,7 +581,8 @@ Mỗi buổi trong 7 ngày tới hiện:
 ### 10.3. Khi bot vào họp
 
 - Bot vào Meet với tư cách **khách**: người trong cuộc họp phải bấm **Cho vào** (Meet chỉ chờ 10 phút).
-- Bot **không tự nhắn gì** vào khung chat của Meet. Việc xin phép ghi âm/chép lời lấy từ trước; với khách ngoài
+- Bot **không tự nhắn gì** vào khung chat của Meet. Việc xin phép ghi âm/chép lời lấy từ trước; với khách
+  ngoài
   công ty, nên báo trước khi họp.
 - Cuộc họp đặt chế độ chỉ cho người trong tổ chức vào thì bot bị chặn. Lịch sắp tới báo rõ lý do.
 - Cuộc họp trong ứng dụng được tạo tự động:
@@ -560,6 +649,20 @@ Ví dụ 5 người họp trên Google Meet và đều bật bot (hoặc đều 
 - Cuộc họp riêng không có ghi âm và dữ liệu giọng (âm thanh chỉ ở cuộc họp của người mời bot), nên không có
   "Phân tích lại người nói".
 
+### 10.7. Máy phòng họp: nhiều người dùng chung một tài khoản Meet
+
+Phòng họp trực tiếp có một laptop vào Google Meet, nhiều người thay nhau nói vào laptop đó: bot sẽ ghi tất cả
+thành
+một người (tên tài khoản Meet). Cách xử lý:
+
+- Ở Lịch sắp tới hoặc trong phòng họp, phần người tham gia Meet, chọn chế độ **Nhiều người (máy phòng họp)**
+  cho
+  tài khoản đó. Từ lúc đó luồng tiếng của tài khoản này được tách người theo giọng như mic, không gắn tên
+  tài khoản
+  Meet; đã có mẫu giọng thì tự nhận ra tên.
+- Chế độ lưu theo cuộc họp. Đổi lại **Một người** khi chỉ còn một người dùng máy đó.
+- Nhiều laptop trong cùng phòng cùng vào Meet thì câu nói trùng giữa các máy chỉ hiện một lần.
+
 ## 11. Chế độ BD
 
 Chế độ BD dành cho nhóm kinh doanh họp với khách.
@@ -620,6 +723,28 @@ Khung chat **Trợ lý BD**:
   - Mỗi ý ghi nguồn [M1], [K1]. Bấm nguồn để mở cuộc họp đó.
   - Trong lúc chạy, trang hiện "Đang đọc 3/8 cuộc họp...".
 - Lịch sử giữ 50 tin gần nhất. Bấm **Xóa lịch sử** để xóa.
+
+### 11.4. Bảng gợi ý BD ngay trên tab họp (extension)
+
+Nghe cuộc họp qua extension (mục 6.5) và cuộc họp thuộc **nhóm bật chế độ BD** thì một bảng nổi **Gợi ý BD**
+hiện ở
+góc dưới phải của tab họp, để đội BD không phải chuyển sang tab Copilot:
+
+- Hiện câu hỏi khách vừa hỏi mà trợ lý tự nhận ra, câu trả lời gợi ý có nguồn **K** (tài liệu nhóm), **M**
+  (cuộc họp
+  trước), **U** (WikiBox), ghi chú cho đội mình, độ chắc; nút **Chép**, **Tra thêm trên mạng** (nguồn
+  **W**), ô gõ câu
+  hỏi. Không có nguồn U thì bảng ghi rõ lý do (người tạo cuộc họp chưa kết nối WikiBox, kết nối hết hạn, hay
+  chỉ là
+  không có tài liệu khớp).
+- Kéo thanh tiêu đề để di chuyển, kéo góc dưới phải để đổi cỡ, nút **Aa** đổi cỡ chữ; vị trí và cỡ nhớ cho
+  lần sau.
+  Thu gọn được (có đếm câu trả lời mới); ẩn / hiện bằng nút trong popup extension.
+- Chạy sẵn trên Google Meet, Teams, Zoom, Callio. Trang khác thì bấm **"Im theo nút tắt mic của trang này"**
+  trong
+  popup một lần để cấp quyền, rồi mở lại bảng.
+
+> **Chia sẻ cả màn hình thì khách thấy bảng này.** Chia sẻ một cửa sổ hoặc tab khác thì không.
 
 ## 12. Hồ sơ giọng nói
 
@@ -682,19 +807,22 @@ thì nhờ quản trị viên.
 
 ### 13.4. Kho tri thức WikiBox
 
-WikiBox (`wiki.urbox.dev`) là kho tri thức của công ty. Kết nối rồi thì trợ lý và Bảng BD tra tài liệu thật
+WikiBox (`wiki.urbox.vn`, tên miền mới từ 13/11/2026; ai kết nối trước ngày đó phải **kết nối lại**) là kho
+tri
+thức của công ty. Kết nối rồi thì trợ lý và Bảng BD tra tài liệu thật
 (sản phẩm, quy trình, chính sách) thay cho dữ liệu mẫu, trong các cuộc họp do mình tạo.
 
 - **Kết nối WikiBox** (nên dùng): bấm nút, đăng nhập WikiBox bằng tài khoản Google công ty (**Đăng nhập bằng
   Google**), chọn không gian làm việc, bấm **Cho phép**. Quyền chỉ đọc: tìm tài liệu, đọc nội dung, hỏi Thủ
   thư; không thêm, sửa, xóa gì trên WikiBox. Xem hoặc thu hồi quyền đã cấp ở WikiBox > Cài đặt > Ứng dụng đã
   kết nối. WikiBox báo hết hạn đăng nhập thì bấm **Kết nối WikiBox** lại.
-- Hoặc **Dùng API key** (khi không đăng nhập được trên trình duyệt): mở `wiki.urbox.dev/platform/wikibox-mcp`,
+- Hoặc **Dùng API key** (khi không đăng nhập được trên trình duyệt): mở `wiki.urbox.vn/platform/wikibox-mcp`,
   mục **API key của bạn** > **Tạo key mới** (key chỉ hiện một lần), dán vào ô rồi bấm **Lưu**. Key cần quyền
   Truy xuất (retrieve).
 - Cả hai cách đều chạy dưới quyền của chính mình: chỉ đọc được tài liệu mình được xem trên WikiBox. Bảng BD
   của một cuộc họp dùng kết nối của người tạo cuộc họp.
-- **Kiểm tra**: gõ thử một câu tìm kiếm để xem kết quả. **Ngắt kết nối**: trợ lý quay về dữ liệu mẫu.
+- **Kiểm tra**: gõ thử một câu tìm kiếm để xem kết quả; không ra tài liệu thì ô này ghi công cụ đã dùng và kết
+  quả thô để báo quản trị viên. **Ngắt kết nối**: trợ lý quay về dữ liệu mẫu.
 - Dùng được với mọi nguồn AI (API Claude, Gemini, gói Claude.ai / ChatGPT): máy chủ của ứng dụng gọi WikiBox
   và chỉ gửi kết quả tìm được cho AI, không gửi khóa.
 
@@ -725,6 +853,55 @@ WikiBox (`wiki.urbox.dev`) là kho tri thức của công ty. Kết nối rồi 
     nối lại.
 
 ![Mục quản trị](huong-dan/img/22-cai-dat-quan-tri.jpg)
+
+### 13.5. Chế độ Phỏng vấn (tuyển dụng)
+
+Mở từ Cài đặt, mục **Chế độ Phỏng vấn**, hoặc vào thẳng `/interview` (cùng đăng nhập với Meeting Copilot).
+Dùng cho
+HR và người phỏng vấn: tải JD, đặt tiêu chí, chấm CV theo tiêu chí, phỏng vấn rồi chấm điểm ứng viên. Nút
+**← Meeting** quay về app họp.
+
+**Vai trò** (trang **Phân quyền**, chỉ quản trị viên):
+- **Quản trị viên**: thấy mọi vị trí, cấp hoặc gỡ **owner** cho người khác (ô "Cấp owner theo email").
+- **Owner**: tạo vị trí, sửa JD và tiêu chí, thêm ứng viên, chấm CV, **Chia sẻ** vị trí của mình cho đồng
+  nghiệp.
+- **Người phỏng vấn** (mọi tài khoản còn lại): chỉ xem vị trí được chia sẻ, chạy buổi phỏng vấn, xem gợi ý câu
+  hỏi và kết quả chấm. Không tạo vị trí, không sửa tiêu chí.
+
+**Tạo vị trí tuyển** (owner):
+1. **Thư viện JD**: ô tìm theo tên vị trí, danh sách lấy tự động từ trang tuyển dụng `talent.urbox.vn` (bấm
+   **Đồng bộ** nếu thiếu vị trí mới đăng). Bấm **Nhập** là có vị trí kèm JD; để nguyên ô "tự tạo tiêu chí"
+   thì AI
+   đề xuất luôn bộ tiêu chí từ JD. Hoặc **＋ Vị trí mới** / **⬆ Thêm từ file JD** (PDF, ảnh, docx, txt).
+2. **Tiêu chí**: **✨ AI đề xuất từ JD** hoặc **⬆ Nhập tiêu chí HR** (AI giữ nguyên tiêu chí HR, không thêm
+   bớt);
+   chỉnh tên, mô tả, trọng số, dấu hiệu nhận biết, bắt buộc / nên có, rồi **Lưu tiêu chí**. Khung chấm duy
+   nhất là
+   bộ tiêu chí này; JD chỉ là bối cảnh. Sửa tiêu chí xong thì **Chấm lại** các CV đã chấm.
+3. **Chia sẻ**: chọn người xem. Người được chia sẻ chỉ xem và chạy phỏng vấn, không sửa.
+
+**Ứng viên và chấm CV**: **＋ Thêm ứng viên**, **⬆ Tải CV (PDF/ảnh/docx)**; AI chấm từng tiêu chí thang 0-5 kèm
+bằng
+chứng trích từ CV, điểm khớp tính theo trọng số, điểm mạnh, khoảng trống, dấu hiệu cần hỏi kỹ và gợi ý câu
+hỏi.
+**Chấm CV còn thiếu** chấm hàng loạt; trang vị trí có bảng so sánh xếp hạng ứng viên. Thông tin liên hệ trong
+CV được
+che trước khi gửi AI.
+
+**Buổi phỏng vấn** (trang ứng viên), ba cách:
+- **▶ Phỏng vấn trực tiếp**: thu bằng mic của máy, chọn người phỏng vấn (host và đồng nghiệp đã có mẫu
+  giọng, ô
+  "Tìm theo tên"); lời thoại tách người theo giọng, người còn lại là ứng viên.
+- **▶ Phỏng vấn online**: bấm **Copy mã kết nối**, dán vào extension phỏng vấn (thư mục
+  `extension-interview/`,
+  cài như mục 6.5) trên tab Meet / Teams / Zoom: tiếng tab là ứng viên, tiếng mic là người phỏng vấn.
+- **Chấm từ cuộc họp đã thu**: hội đồng đông người trong phòng thì ghi buổi đó như một cuộc họp bình thường ở
+  Meeting Copilot (tách người theo giọng), rồi chọn cuộc họp và chọn người nói là ứng viên; đang ghi thì bấm
+  **Đồng bộ lại lời thoại** để cập nhật.
+
+Trong buổi: **💡 Gợi ý câu hỏi** theo tiêu chí còn thiếu bằng chứng. Kết thúc: **■ Kết thúc & chấm** cho bảng
+điểm
+từng tiêu chí, nhận xét, đề xuất (phỏng vấn tiếp / cân nhắc / từ chối). Bản chạy trên máy không có chế độ này.
 
 ## 14. Quyền riêng tư và dữ liệu
 
@@ -773,6 +950,14 @@ WikiBox (`wiki.urbox.dev`) là kho tri thức của công ty. Kết nối rồi 
 | Nhiều cuộc họp đông chạy cùng lúc, có buổi mở mic mà không ra transcript | Dịch vụ nhận dạng (Soniox) giới hạn số cuộc đồng thời cho cả công ty; mỗi người trong Meet tính một kết nối. Ứng dụng tự nhả chỗ khi ai đó nghỉ nói, nhưng nếu vẫn thiếu thì báo quản trị viên **nâng hạn mức Soniox** (transcribe_concurrent) |
 | "WikiBox từ chối API key này" | Tạo key mới trên WikiBox (có quyền Truy xuất), hoặc dùng nút Kết nối WikiBox |
 | Trò chơi không nhận câu trả lời bằng giọng | Nói ngắn, rõ "Đáp án B" khi đồng hồ đang chạy (sau khi trợ lý đọc xong câu hỏi); hoặc chơi bằng mã QR |
+| Extension: "Không thu được tiếng tab này (Cannot capture a tab with an active stream)" | Tab đang bị một luồng khác thu (extension ghi âm, tăng âm lượng, ghi màn hình): tắt luồng đó. Máy còn bản 0.4.0: vào `chrome://extensions` bấm Reload (hoặc đóng tab họp, mở lại link) rồi bấm "Tiếp tục nghe #id" |
+| Extension: "Không chèn được bảng vào tab họp (Cannot access contents of url...)" | Tab đang nghe không phải Meet / Teams / Zoom / Callio. Bấm "Im theo nút tắt mic của trang này" để cấp quyền cho trang đó, hoặc xem bảng BD trong app |
+| Extension: "Mở popup ngay trên tab cuộc họp rồi bấm lại" | Popup đang mở ở tab khác, hoặc tab họp vừa tải lại: chuyển sang đúng tab họp rồi bấm "Tiếp tục nghe #id" |
+| Extension báo "chưa nạp bản mới" hoặc không thấy nút Dừng nghe dù đang nghe | Vào `chrome://extensions` bấm Reload ở thẻ extension, F5 tab app và tab họp |
+| Cuộc họp tạo từ extension nhưng trống, không có câu nào | Extension tạo cuộc họp trước rồi mới thu; bước thu lỗi (mic bị từ chối, tab bị luồng khác thu). Sửa lỗi theo thông báo trong popup rồi bấm "Tiếp tục nghe #id" vào đúng cuộc họp đó |
+| Bảng BD ghi "WikiBox trả lỗi 404 khi đọc /.well-known..." hoặc "kết nối hết hạn" | WikiBox đổi sang `wiki.urbox.vn`: người tạo cuộc họp vào Cài đặt > Kho tri thức WikiBox bấm Kết nối WikiBox lại |
+| Bot ghi tất cả người trong phòng thành một tên tài khoản Meet | Chọn chế độ "Nhiều người (máy phòng họp)" cho tài khoản đó (mục 10.7) |
+| Phỏng vấn: bấm Lưu / Thêm ứng viên bị từ chối (403) | Chỉ owner của vị trí và quản trị viên được cấu hình; nhờ owner làm hoặc nhờ quản trị viên cấp owner |
 | "Chỉ quản trị viên được đổi cài đặt chung" | Nhờ quản trị viên đổi |
 | Không thấy cuộc họp người khác gửi link | Người đó cần thêm bạn vào nhóm của cuộc họp |
 | Cùng họp Google Meet mà không có cuộc họp của mình | Bật công tắc bot (buổi họp có trên lịch của bạn), hoặc dán link Meet ở trang chủ. Là thành viên nhóm chứa cuộc họp thì mở cuộc họp đó trong trang nhóm (dùng chung) |
@@ -802,3 +987,13 @@ WikiBox (`wiki.urbox.dev`) là kho tri thức của công ty. Kết nối rồi 
 - **Trò chơi**: tối đa 300 người chơi mỗi lượt. Câu trả lời bằng giọng chỉ tính trong lúc đếm ngược, câu đầu
   tiên của mỗi người. Phòng ồn hoặc nhiều người nói cùng lúc thì nên chơi bằng điện thoại.
 - **WikiBox**: chỉ đọc; kết quả tìm theo quyền của người tạo cuộc họp.
+- **Extension**: chỉ Chrome và Edge; mỗi tab một luồng thu, mỗi trình duyệt nghe một cuộc họp tại một thời
+  điểm;
+  phải bấm trên đúng tab họp; bản nội bộ phải Reload tay khi có bản mới. Lúc mất mạng, tiếng không được gửi
+  bù.
+- **Hạn mức nhận dạng (Soniox)**: cả công ty 10 luồng cùng lúc. Mic tính 1, extension tính 2 (tab + mic),
+  bot Meet
+  tính 1 cho mỗi người đang nói, máy phòng họp tính 1. Quá hạn thì ứng dụng tự nối lại sau 8-30 giây.
+- **Phỏng vấn**: CV tối đa 10 MB mỗi tệp; chấm CV hàng loạt tối đa 3 hồ sơ cùng lúc; thư viện JD tự làm mới
+  sau
+  6 giờ (bấm Đồng bộ để lấy ngay). Chỉ có ở bản web.
