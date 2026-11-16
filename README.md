@@ -19,6 +19,12 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 
 ## Bản 3.30.0: bot vào được Microsoft Teams và Zoom
 
+- **Triển khai server nhà mình qua GitLab** (`git.urbox.vn/external-engineer/meeting-copilot`, 16/11/2026): `.gitlab-ci.yml`
+  ba bước test -> build image (Container Registry của dự án, tag = commit) -> deploy (bấm tay) qua SSH: kéo image, thay
+  container `meeting-copilot` (cổng 8080, ổ `meeting-data` gắn /app/data, `--env-file $DEPLOY_DIR/prod.env`), chờ
+  `/healthz`. Biến CI cần đặt: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY` (File), `DEPLOY_DIR`. Mẫu biến môi trường
+  server: `deploy/prod.env.example`. Cần GitLab Runner có Docker (privileged cho bước build). Tắt Auto DevOps.
+
 - Recall.ai vào Teams / Zoom bằng cùng API tạo bot (`meeting_url`), nên phần sửa là **nhận ra link**: `meeting/meet_links.py`
   (Meet bỏ tham số, Teams / Zoom **giữ nguyên** `context` / `pwd`; `code()` có tiền tố `zoom:` / `teams:`, mã Meet giữ như cũ
   nên khóa một-bot-một-buổi của bản ghi cũ không đổi). `gcalendar.meet_url` tìm thêm ở ô Địa điểm và link trong mô tả
