@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html{color-scheme:light dark}</style>
+
+<title>Tiêu chí đánh giá Bảng BD</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Bố cục: thanh mục lục cố định bên trái trên màn rộng, nội dung một cột 72ch; tím UrBox làm điểm nhấn */
+:root{--bg:#f7f6fb;--panel:#ffffff;--fg:#1d1a2b;--muted:#625d78;--line:#e3e0ee;--accent:#6d28d9;--accent-soft:#efe9fb;
+  --code:#f1eef8;--ok:#1a7f37;--warn:#b7791f;--danger:#c0392b;--font:"Be Vietnam Pro",system-ui,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Consolas,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#15131d;--panel:#1d1a28;--fg:#ece9f4;--muted:#a59fbd;
+  --line:#2f2a40;--accent:#a78bfa;--accent-soft:#2a2240;--code:#241f33;--ok:#5bd38a;--warn:#e2b34c;--danger:#ff7b6b;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#15131d;--panel:#1d1a28;--fg:#ece9f4;--muted:#a59fbd;--line:#2f2a40;--accent:#a78bfa;
+  --accent-soft:#2a2240;--code:#241f33;--ok:#5bd38a;--warn:#e2b34c;--danger:#ff7b6b;color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:15px/1.6 var(--font);margin:0}
+a{color:var(--accent)}
+.wrap{display:flex;gap:40px;max-width:1180px;margin:0 auto;padding-block:24px 64px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+nav.toc{flex:0 0 250px;position:sticky;top:env(safe-area-inset-top,0px);align-self:flex-start;max-height:calc(100vh - 24px);
+  overflow:auto;padding-right:8px;font-size:13px}
+nav.toc .brand{font-weight:700;font-size:15px;margin:6px 0 12px;color:var(--fg)}
+nav.toc a{display:block;color:var(--muted);text-decoration:none;padding:5px 10px;border-left:2px solid var(--line);line-height:1.35}
+nav.toc a:hover,nav.toc a.cur{color:var(--accent);border-color:var(--accent)}
+main{flex:1 1 auto;min-width:0;max-width:76ch}
+header.hero{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:28px}
+header.hero h1{font-size:30px;line-height:1.2;margin:0 0 8px;text-wrap:balance}
+header.hero .meta{display:flex;flex-wrap:wrap;gap:8px 18px;color:var(--muted);font-size:13px}
+header.hero .meta b{color:var(--fg);font-weight:600}
+h2{font-size:22px;margin:48px 0 12px;padding-top:8px;border-top:1px solid var(--line);text-wrap:balance;scroll-margin-top:12px}
+h3{font-size:17px;margin:28px 0 8px;scroll-margin-top:12px}
+h4{font-size:15px;margin:18px 0 6px}
+p,ul,ol{margin:0 0 12px}
+ul,ol{padding-left:22px}
+li{margin:3px 0}
+li>ul,li>ol{margin-top:4px}
+code{font:12.5px var(--mono);background:var(--code);padding:1px 5px;border-radius:5px}
+pre{background:var(--code);padding:12px;border-radius:8px;overflow-x:auto;font:12.5px/1.5 var(--mono)}
+pre code{background:none;padding:0}
+blockquote{margin:14px 0;padding:10px 14px;border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 8px 8px 0}
+blockquote p{margin:0}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:12px 0}
+.tbl{overflow-x:auto;margin:12px 0}
+th,td{border:1px solid var(--line);padding:7px 9px;vertical-align:top;text-align:left}
+th{background:var(--accent-soft);font-weight:600}
+figure{margin:18px 0}
+figure.shot img{display:block;max-width:100%;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+figcaption{font-size:12.5px;color:var(--muted);margin-top:6px;line-height:1.45}
+.note{font-size:13px;color:var(--muted)}
+/* ---- minh họa chrome://extensions ---- */
+.mock{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+.chrome{font:13px var(--font);border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--bg)}
+.chrome-bar{display:flex;align-items:center;gap:6px;padding:7px 10px;background:var(--code);border-bottom:1px solid var(--line)}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--line)}
+.url{margin-left:10px;flex:1;background:var(--panel);border-radius:14px;padding:3px 12px;font:12px var(--mono);color:var(--muted)}
+.chrome-head{display:flex;align-items:center;gap:10px;padding:12px 16px}
+.chrome-head .ttl{font-size:18px;font-weight:600}
+.grow{flex:1}
+.lbl{color:var(--muted)}
+.toggle{display:inline-block;width:34px;height:18px;border-radius:9px;background:var(--line);position:relative;flex:none}
+.toggle i{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff}
+.toggle.on{background:var(--accent)}.toggle.on i{left:18px}
+.chrome-actions{display:flex;gap:8px;padding:0 16px 12px}
+.btn-o{border:1px solid var(--accent);color:var(--accent);border-radius:16px;padding:4px 12px;font-weight:500}
+.ext-card{display:flex;gap:12px;align-items:flex-start;margin:0 16px 16px;padding:14px;background:var(--panel);
+  border:1px solid var(--line);border-radius:8px}
+.ext-icon{width:40px;height:40px;border-radius:8px;background:var(--accent);color:#fff;font-weight:700;display:grid;place-items:center;flex:none}
+.ext-body{flex:1;min-width:0}
+.ext-name{font-weight:600}
+.ver{color:var(--muted);font-weight:400;margin-left:6px}
+.ext-desc{color:var(--muted);font-size:12.5px;margin:3px 0 8px}
+.ext-links{display:flex;gap:14px;color:var(--accent);font-size:12.5px}
+.ext-right{display:flex;align-items:center;gap:12px;flex:none}
+.reload{font-size:20px;color:var(--accent);line-height:1}
+/* ---- popup extension ---- */
+.mock.two{display:flex;flex-wrap:wrap;gap:14px}
+.mock.two figcaption{flex-basis:100%}
+.popup{flex:1 1 300px;max-width:340px;min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  padding:14px;font:12.5px/1.45 var(--font);box-shadow:0 6px 24px #0002}
+.p-h1{font-size:14px;font-weight:700;margin-bottom:8px}
+.p-h2{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+.p-card{border:1px solid var(--line);border-radius:10px;padding:10px;margin:10px 0}
+.p-card.primary{border-color:var(--accent);background:var(--accent-soft)}
+.p-muted{color:var(--muted);font-size:12px;margin:6px 0}
+.p-ok{color:var(--ok);font-size:12px;margin:6px 0}
+.p-conn{font-size:12px;margin:6px 0}
+.p-select,.p-input{border:1px solid var(--line);border-radius:7px;padding:6px 8px;margin:6px 0;background:var(--bg);color:var(--muted)}
+.p-input.sm{font-size:12px;padding:5px 8px}
+.p-link{text-align:right;font-size:12px;color:var(--accent);text-decoration:underline;margin-top:-2px}
+.p-btn{display:block;text-align:center;border-radius:7px;padding:7px 8px;margin:6px 0;background:var(--accent);color:#fff;font-weight:600;border:1px solid var(--accent)}
+.p-btn.ghost{background:transparent;color:var(--accent)}
+.p-btn.danger{background:var(--danger);border-color:var(--danger);color:#fff}
+.p-btn.sm{display:inline-block;padding:4px 10px;font-size:12px;margin:0}
+.p-split{display:flex;gap:8px}.p-split>*{flex:1}
+.p-check{font-size:12.5px;margin-top:8px}
+/* ---- bảng BD trên tab họp ---- */
+.meet{position:relative;background:#202124;border-radius:10px;min-height:330px;padding:14px;display:grid;
+  grid-template-columns:1fr 1fr;gap:10px;align-content:start}
+.meet-tile{background:#3c4043;color:#e8eaed;border-radius:8px;height:120px;display:grid;place-items:end start;padding:8px;font-size:12px}
+.bd{position:absolute;right:14px;bottom:14px;width:min(360px,calc(100% - 28px));background:var(--panel);color:var(--fg);
+  border:1px solid var(--line);border-radius:10px;padding:10px;font:12.5px/1.45 var(--font);box-shadow:0 10px 30px #0006}
+.bd-h{display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:8px;cursor:move}
+.bd-ic{color:var(--muted);font-size:12px;border:1px solid var(--line);border-radius:5px;padding:0 5px}
+.tag{background:var(--accent-soft);color:var(--accent);border-radius:5px;padding:0 6px;font-size:11px;font-weight:600}
+.bd-q{margin:4px 0}.bd-a{margin:6px 0}
+.bd-n{color:var(--muted);font-size:12px;margin:4px 0}
+.bd-src{font-size:11.5px;color:var(--muted);margin:4px 0}
+.src{display:inline-block;background:var(--accent);color:#fff;border-radius:4px;padding:0 4px;font-size:10.5px;font-weight:600;vertical-align:1px}
+.bd-btns{display:flex;gap:8px;align-items:center;margin:8px 0 6px}
+.conf{font-size:11.5px;color:var(--muted);margin-left:auto}
+@media (max-width:900px){.wrap{flex-direction:column;gap:12px}nav.toc{position:static;max-height:none;flex:none;
+  display:flex;flex-wrap:wrap;gap:4px;padding:0;border-bottom:1px solid var(--line);padding-bottom:12px}
+  nav.toc .brand{flex-basis:100%}nav.toc a{border:1px solid var(--line);border-radius:14px;padding:3px 10px}}
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+</style>
+</head>
+<body>
+<div class="wrap"><nav class="toc"><div class="brand">Bảng BD</div><a href="#1-muc-ich">1. Mục đích</a><a href="#2-thang-iem-chung">2. Thang điểm chung</a><a href="#3-bay-tieu-chi">3. Bảy tiêu chí</a><a href="#4-trong-so-va-iem-tong">4. Trọng số và điểm tổng</a><a href="#5-phan-loai-loi-chon-mot-hoac-nhieu-cho-goi-y-duoi-4-iem">5. Phân loại lỗi (chọn một hoặc nhiều cho gợi ý dưới 4 điểm)</a><a href="#6-mau-phieu-cham">6. Mẫu phiếu chấm</a><a href="#7-cach-cham-cho-o-ton-cong">7. Cách chấm cho đỡ tốn công</a><a href="#8-engineering-lam-gi-voi-ket-qua">8. Engineering làm gì với kết quả</a></nav><main><header class="hero"><h1>Tiêu chí đánh giá gợi ý của Bảng BD</h1><div class="meta"><span>Bản <b>1.0</b></span><span>Ngày <b>16/11/2026</b></span><span>Phụ trách: <b>phuc.bh</b> (Engineering)</span><span>Dành cho đội BD chấm gợi ý sau mỗi cuộc họp với khách</span></div></header><h2 id="1-muc-ich">1. Mục đích</h2>
+<p>Bảng BD (trong phòng họp của Meeting Copilot và bảng nổi trên tab họp) gợi ý câu trả lời khi khách hỏi. Tài liệu này
+cho đội BD chấm từng gợi ý theo cùng một thước đo, để Engineering biết gợi ý sai ở đâu (nguồn, hiểu câu hỏi, cách
+viết, tốc độ) và sửa đúng chỗ.</p>
+<p>Mỗi gợi ý gồm 5 phần, chấm theo đúng 5 phần đó:</p>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Phần</th>
+<th>Trên bảng hiện là</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Câu hỏi</td>
+<td>Dòng "Khách hỏi" (trợ lý tự nhận ra) hoặc câu đội BD gõ / đánh dấu</td>
+</tr>
+<tr>
+<td>Câu trả lời</td>
+<td>Đoạn gợi ý để nói với khách, có mã nguồn K / M / U / W ngay sau ý dùng</td>
+</tr>
+<tr>
+<td>Ghi chú cho đội mình</td>
+<td>Những điều không nói với khách: khác biệt giữa nguồn, nên hỏi lại gì, lưu ý</td>
+</tr>
+<tr>
+<td>Nguồn</td>
+<td>K = tài liệu nhóm, M = cuộc họp trước, U = WikiBox, W = tra mạng</td>
+</tr>
+<tr>
+<td>Độ chắc</td>
+<td>cao / vừa / thấp do trợ lý tự đánh giá</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="2-thang-iem-chung">2. Thang điểm chung</h2>
+<p>Mỗi tiêu chí chấm 1-5. Không chấm nửa điểm. Khi lưỡng lự giữa hai mức, chọn mức thấp.</p>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Điểm</th>
+<th>Nghĩa</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>5</td>
+<td>Dùng ngay được, không sửa</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Dùng được, sửa nhỏ (một vài chữ)</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Dùng được một phần, phải tự bổ sung ý chính</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Hầu như không dùng được, phải viết lại</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Sai hoặc có hại nếu nói với khách</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="3-bay-tieu-chi">3. Bảy tiêu chí</h2>
+<h3 id="c1-ung-cau-hoi-hieu-khach-muon-gi">C1. Đúng câu hỏi (hiểu khách muốn gì)</h3>
+<p>Câu trả lời có trả lời đúng điều khách đang hỏi không, kể cả khi khách nói vòng vo hoặc hỏi gộp hai ý.</p>
+<ul>
+<li>5: trúng ý, đủ các vế khách hỏi.</li>
+<li>3: trả lời một vế, bỏ sót vế còn lại; hoặc trả lời đúng chủ đề nhưng khác góc khách hỏi (khách hỏi phí, trả lời quy trình).</li>
+<li>1: trả lời chuyện khác, hoặc trợ lý nhận nhầm câu không phải câu hỏi thành câu hỏi.</li>
+</ul>
+<h3 id="c2-ung-su-that-theo-nguon-khong-bia">C2. Đúng sự thật theo nguồn (không bịa)</h3>
+<p>Mọi con số, thời hạn, điều kiện, tên sản phẩm trong câu trả lời phải có trong nguồn được dẫn. Đây là tiêu chí quan trọng
+nhất: một gợi ý 1 điểm ở C2 là gợi ý có hại dù các tiêu chí khác cao.</p>
+<ul>
+<li>5: mọi ý đều đúng với nguồn, không thêm gì ngoài nguồn.</li>
+<li>3: ý chính đúng, có một chi tiết suy diễn thêm hoặc làm tròn (ví dụ "khoảng 7 ngày" khi nguồn ghi 5 ngày làm việc).</li>
+<li>1: nêu số liệu, chính sách, cam kết không có trong nguồn; hoặc trái với nguồn.</li>
+</ul>
+<p>Khi không có nguồn phù hợp, câu trả lời đúng là nói rõ chưa có tài liệu và xin kiểm tra lại (như trợ lý vẫn làm). Trường
+hợp đó chấm C2 = 5 và ghi lỗi loại "thiếu nguồn" (mục 5), không trừ điểm trợ lý vì đã không bịa.</p>
+<h3 id="c3-nguon-ro-va-ung-cho">C3. Nguồn rõ và đúng chỗ</h3>
+<p>Mã nguồn đặt ngay sau ý dùng; bấm vào nguồn thì thấy đúng đoạn tài liệu nói về ý đó. Nguồn mới nhất được ưu tiên
+(tài liệu thắng cuộc họp trước; cuộc họp gần thắng cuộc họp xa).</p>
+<ul>
+<li>5: mỗi ý có nguồn, mở nguồn là thấy ngay đoạn tương ứng.</li>
+<li>3: có nguồn nhưng chung chung (dẫn cả tài liệu, không trúng đoạn), hoặc một ý không có nguồn.</li>
+<li>1: nguồn không liên quan tới ý, hoặc dùng nguồn cũ trong khi có nguồn mới hơn nói khác.</li>
+</ul>
+<h3 id="c4-noi-uoc-ngay-voi-khach-o-dai-va-van-phong">C4. Nói được ngay với khách (độ dài và văn phong)</h3>
+<p>Người BD phải đọc được trong 5-10 giây và nói lại tự nhiên trong lúc khách đang chờ.</p>
+<ul>
+<li>5: 2-4 câu, đi thẳng vào câu trả lời, xưng hô đúng chuẩn UrBox (bên em / anh chị), không thuật ngữ nội bộ.</li>
+<li>3: đúng nhưng dài (trên 6 câu) hoặc văn viết, phải rút gọn mới nói được; hoặc có một từ nội bộ khách không hiểu.</li>
+<li>1: lan man, lặp ý, hoặc giọng không phù hợp để nói với khách (ra lệnh, hứa thay công ty, chê đối thủ).</li>
+</ul>
+<h3 id="c5-ghi-chu-cho-oi-minh-huu-ich">C5. Ghi chú cho đội mình hữu ích</h3>
+<p>Phần ghi chú có giúp người BD xử lý tình huống tốt hơn không: chỉ ra chỗ nguồn khác nhau, điều cần hỏi lại khách, rủi
+ro, cơ hội bán thêm.</p>
+<ul>
+<li>5: ghi chú đúng điều người BD đang cần biết mà câu trả lời không nói.</li>
+<li>3: ghi chú đúng nhưng hiển nhiên, hoặc lặp lại câu trả lời.</li>
+<li>1: ghi chú sai, gây hiểu nhầm, hoặc khuyên điều trái chính sách.</li>
+</ul>
+<p>Không có ghi chú trong khi tình huống rõ ràng, không có gì để lưu ý: chấm 4.</p>
+<h3 id="c6-o-chac-khop-thuc-te">C6. Độ chắc khớp thực tế</h3>
+<p>Trợ lý tự ghi "độ chắc: cao / vừa / thấp". Chấm xem mức đó có đúng không.</p>
+<ul>
+<li>5: ghi "cao" và câu trả lời đúng; hoặc ghi "thấp" và quả thật nguồn mỏng.</li>
+<li>3: ghi "vừa" cho mọi trường hợp, không giúp phân biệt.</li>
+<li>1: ghi "cao" nhưng câu trả lời sai (nguy hiểm nhất), hoặc ghi "thấp" cho câu trả lời đúng có nguồn đầy đủ.</li>
+</ul>
+<h3 id="c7-kip-luc">C7. Kịp lúc</h3>
+<p>Tính từ lúc khách hỏi xong đến lúc gợi ý hiện trên bảng.</p>
+<ul>
+<li>5: dưới 10 giây.</li>
+<li>4: 10-20 giây.</li>
+<li>3: 20-40 giây, vẫn kịp dùng.</li>
+<li>2: trên 40 giây, khách đã chuyển chủ đề.</li>
+<li>1: không hiện, hoặc hiện sau khi cuộc họp đã qua phần đó.</li>
+</ul>
+<p>Nếu bấm "Tra thêm trên mạng" thì tính riêng thời gian của phần tra mạng (mục tiêu dưới 30 giây).</p>
+<h2 id="4-trong-so-va-iem-tong">4. Trọng số và điểm tổng</h2>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Tiêu chí</th>
+<th>Trọng số</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>C2 Đúng sự thật theo nguồn</td>
+<td>30%</td>
+</tr>
+<tr>
+<td>C1 Đúng câu hỏi</td>
+<td>20%</td>
+</tr>
+<tr>
+<td>C4 Nói được ngay</td>
+<td>15%</td>
+</tr>
+<tr>
+<td>C3 Nguồn rõ</td>
+<td>15%</td>
+</tr>
+<tr>
+<td>C7 Kịp lúc</td>
+<td>10%</td>
+</tr>
+<tr>
+<td>C5 Ghi chú hữu ích</td>
+<td>5%</td>
+</tr>
+<tr>
+<td>C6 Độ chắc khớp</td>
+<td>5%</td>
+</tr>
+</tbody>
+</table></div>
+<p>Điểm tổng = tổng (điểm × trọng số), thang 5. Mục tiêu giai đoạn này: trung bình từ 4,0 trở lên, và <strong>không có gợi ý nào
+1 điểm ở C2</strong>. Bất kỳ gợi ý nào C2 = 1 phải gửi ngay cho Engineering kèm cuộc họp và câu hỏi, không chờ tổng hợp.</p>
+<h2 id="5-phan-loai-loi-chon-mot-hoac-nhieu-cho-goi-y-duoi-4-iem">5. Phân loại lỗi (chọn một hoặc nhiều cho gợi ý dưới 4 điểm)</h2>
+<p>Phần này quan trọng hơn điểm số, vì mỗi loại lỗi sửa ở một chỗ khác nhau.</p>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Mã</th>
+<th>Lỗi</th>
+<th>Dấu hiệu</th>
+<th>Thường sửa ở đâu</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>L1</td>
+<td>Không nhận ra câu hỏi</td>
+<td>Khách hỏi mà bảng không hiện gì</td>
+<td>Bộ nhận câu hỏi từ lời nói</td>
+</tr>
+<tr>
+<td>L2</td>
+<td>Nhận nhầm</td>
+<td>Bảng hiện "khách hỏi" nhưng khách không hỏi</td>
+<td>Bộ nhận câu hỏi</td>
+</tr>
+<tr>
+<td>L3</td>
+<td>Chép lời sai</td>
+<td>Câu hỏi trên bảng khác câu khách nói</td>
+<td>Nhận dạng giọng nói, từ điển thuật ngữ</td>
+</tr>
+<tr>
+<td>L4</td>
+<td>Thiếu nguồn</td>
+<td>Bảng ghi "chưa có tài liệu" trong khi tài liệu có thật</td>
+<td>Tài liệu chưa đưa vào nhóm / WikiBox, hoặc tìm kiếm không ra</td>
+</tr>
+<tr>
+<td>L5</td>
+<td>Nguồn sai</td>
+<td>Dẫn tài liệu không liên quan hoặc đã cũ</td>
+<td>Xếp hạng tìm kiếm, ưu tiên nguồn mới</td>
+</tr>
+<tr>
+<td>L6</td>
+<td>Bịa</td>
+<td>Có chi tiết không có trong nguồn</td>
+<td>Lời dặn trợ lý, kiểm tra sau khi trả lời</td>
+</tr>
+<tr>
+<td>L7</td>
+<td>Dài / văn viết</td>
+<td>Phải rút gọn mới nói được</td>
+<td>Lời dặn trợ lý, giới hạn độ dài</td>
+</tr>
+<tr>
+<td>L8</td>
+<td>Sai văn phong</td>
+<td>Xưng hô, giọng điệu không hợp khách</td>
+<td>Lời dặn trợ lý, mẫu câu chuẩn UrBox</td>
+</tr>
+<tr>
+<td>L9</td>
+<td>Chậm</td>
+<td>Trên 20 giây</td>
+<td>Số câu hỏi xử lý song song, nguồn AI</td>
+</tr>
+<tr>
+<td>L10</td>
+<td>Ghi chú vô ích</td>
+<td>Ghi chú lặp hoặc sai</td>
+<td>Lời dặn phần ghi chú</td>
+</tr>
+<tr>
+<td>L11</td>
+<td>Độ chắc sai</td>
+<td>"Cao" mà sai, "thấp" mà đúng</td>
+<td>Cách tính độ chắc</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="6-mau-phieu-cham">6. Mẫu phiếu chấm</h2>
+<p>Mỗi dòng là một gợi ý. Chép mã cuộc họp (#id trên đầu phòng họp) và câu hỏi để Engineering tra lại được. <strong>Không chép
+tên, số điện thoại, email của khách</strong> vào phiếu; thay bằng "khách A".</p>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Cuộc họp</th>
+<th>Câu hỏi (rút gọn)</th>
+<th>C1</th>
+<th>C2</th>
+<th>C3</th>
+<th>C4</th>
+<th>C5</th>
+<th>C6</th>
+<th>C7</th>
+<th>Lỗi</th>
+<th>Câu trả lời đáng ra phải là / nhận xét</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>#584</td>
+<td>Voucher điện tử có đổi trả được không</td>
+<td>5</td>
+<td>5</td>
+<td>4</td>
+<td>4</td>
+<td>3</td>
+<td>5</td>
+<td>4</td>
+<td>L10</td>
+<td>Ghi chú lặp lại câu trả lời</td>
+</tr>
+<tr>
+<td>#584</td>
+<td>Phí tích hợp API là bao nhiêu</td>
+<td>5</td>
+<td>1</td>
+<td>2</td>
+<td>4</td>
+<td>2</td>
+<td>1</td>
+<td>5</td>
+<td>L6, L11</td>
+<td>Bảng giá không có trong nguồn, trợ lý vẫn nêu số và ghi độ chắc cao</td>
+</tr>
+<tr>
+<td>#591</td>
+<td>(khách hỏi về hạn mức tín dụng, bảng không hiện)</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td>1</td>
+<td>L1</td>
+<td>Đội BD phải gõ tay</td>
+</tr>
+</tbody>
+</table></div>
+<p>Cột "Câu trả lời đáng ra phải là" là phần giá trị nhất: Engineering dùng chính câu này để chỉnh lời dặn và bổ sung
+tài liệu.</p>
+<h2 id="7-cach-cham-cho-o-ton-cong">7. Cách chấm cho đỡ tốn công</h2>
+<ul>
+<li>Không cần chấm mọi gợi ý. Mỗi cuộc họp với khách chọn <strong>5-8 gợi ý</strong>: mọi gợi ý mà đội BD thấy sai hoặc không dùng,
+  cộng 2-3 gợi ý đã dùng tốt (để biết cái gì đang đúng).</li>
+<li>Chấm ngay sau cuộc họp, khi còn nhớ khách hỏi gì. Bảng BD trong phòng họp giữ lại toàn bộ gợi ý và nguồn, mở lại
+  được sau khi họp.</li>
+<li>Mỗi tuần gửi phiếu về Engineering một lần (Chat nhóm hoặc Drive). Riêng gợi ý C2 = 1 gửi ngay.</li>
+<li>Người chấm ghi thêm bối cảnh cuộc họp nếu có: khách thuộc ngành gì, họp lần mấy, nhóm nào trong Copilot. Nhóm có
+  tài liệu đầy đủ chấm khác nhóm chưa có tài liệu.</li>
+</ul>
+<h2 id="8-engineering-lam-gi-voi-ket-qua">8. Engineering làm gì với kết quả</h2>
+<p>Hàng tuần tổng hợp: điểm trung bình từng tiêu chí, tỷ lệ gợi ý dưới 4 điểm, số lỗi theo mã L1-L11, thời gian phản hồi
+trung bình. Ưu tiên sửa theo thứ tự: mọi L6 (bịa) và L11 (độ chắc sai), rồi mã lỗi có số lần nhiều nhất. Mỗi lần sửa
+ghi vào README bản tương ứng và báo lại đội BD để chấm lại cùng loại câu hỏi ở tuần sau.</p></main></div><script>
+(function(){var links=[].slice.call(document.querySelectorAll("nav.toc a")),hs=links.map(function(a){return document.getElementById(a.getAttribute("href").slice(1))});
+function upd(){var y=window.scrollY+80,cur=0;hs.forEach(function(h,i){if(h&&h.offsetTop<=y)cur=i});links.forEach(function(a,i){a.classList.toggle("cur",i===cur)})}
+window.addEventListener("scroll",upd,{passive:true});upd();})();
+</script>
+</body>
+</html>
