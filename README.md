@@ -17,6 +17,11 @@ Anh, phát ngay theo thời gian thực (hoặc giọng Piper chạy trên máy,
 
 ---
 
+## Bản 3.30.1: bot Recall đổi tên thành "Chi UrBox"
+
+- Tên bot hiện trong Google Meet / Teams / Zoom đổi từ "Trợ lý họp UrBox" thành **"Chi UrBox"** (17/11/2026). Vẫn đổi được
+  bằng biến `RECALL_BOT_NAME`; nếu server đã đặt biến này thì tên trên server thắng.
+
 ## Bản 3.30.0: bot vào được Microsoft Teams và Zoom
 
 - **Triển khai server nhà mình qua GitLab** (`git.urbox.vn/external-engineer/meeting-copilot`, 16/11/2026): `.gitlab-ci.yml`

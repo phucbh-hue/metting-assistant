@@ -59,7 +59,7 @@ def enabled() -> bool:
 
 
 def bot_name() -> str:
-    return (os.getenv("RECALL_BOT_NAME") or "Trợ lý họp UrBox").strip()[:100]
+    return (os.getenv("RECALL_BOT_NAME") or "Chi UrBox").strip()[:100]
 
 
 async def _call(region: str, method: str, path: str, body: Optional[Dict[str, Any]] = None) -> httpx.Response:

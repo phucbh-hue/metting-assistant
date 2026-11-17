@@ -5590,7 +5590,7 @@ async function renderDriveSettings(box) {
       const cal = await GET('/api/calendar');
       calBox.innerHTML = `<label class="flex items-start gap-2 cursor-pointer"><input type="checkbox" data-gd="autojoin" style="margin-top:3px" ${cal.autojoin ? 'checked' : ''} ${cal.bot_ready ? '' : 'disabled'}>
         <span><span class="font-medium">Tự cho bot vào các cuộc họp có link Google Meet trên lịch của tôi</span>
-        <span class="block text-[12px] text-muted">Bot "Trợ lý họp UrBox" xin vào lúc bắt đầu, người trong cuộc họp bấm Cho vào. Mỗi người trong Meet được chép lời riêng, lập biên bản như họp trực tiếp. Bỏ qua từng buổi ở trang chủ, mục Lịch sắp tới. Tắt thì từ giờ bot không tự vào nữa.</span>
+        <span class="block text-[12px] text-muted">Bot "Chi UrBox" xin vào lúc bắt đầu, người trong cuộc họp bấm Cho vào. Mỗi người trong Meet được chép lời riêng, lập biên bản như họp trực tiếp. Bỏ qua từng buổi ở trang chủ, mục Lịch sắp tới. Tắt thì từ giờ bot không tự vào nữa.</span>
         ${cal.bot_ready ? '' : '<span class="block text-[12px]" style="color:#FFC145">Server chưa cấu hình bot (RECALLAI_API_KEY): báo quản trị viên.</span>'}
         <span class="block text-[12px] text-muted">Bot báo trong khung chat của Meet là cuộc họp được chép lời. Với khách ngoài công ty, nên báo trước khi họp.</span></span></label>`;
     } catch (e) { calBox.innerHTML = `<p class="text-[12px] text-muted">${esc(e.message)}</p>`; }

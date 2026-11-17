@@ -563,7 +563,7 @@ Phần này chỉ có ở bản web.
    - Lịch chỉ được đọc, không sửa.
 3. Tick **Tự cho bot vào các cuộc họp có link Google Meet trên lịch của tôi**. Ở trang chủ, công tắc này mang
    tên "Bot tự vào cuộc họp Google Meet".
-4. Từ đó bot "Trợ lý họp UrBox" tự vào mọi buổi họp có link Meet trên lịch của bạn. Tắt công tắc thì các buổi
+4. Từ đó bot "Chi UrBox" tự vào mọi buổi họp có link Meet trên lịch của bạn. Tắt công tắc thì các buổi
    sau bot không vào nữa.
 
 ### 10.2. Lịch sắp tới
